@@ -20,6 +20,17 @@ import {
   getEmployeeDailyWageKes,
   getSeasonalGradeLabel,
 } from './employeePay.js'
+import {
+  CONTRACT_TYPE_OPTIONS,
+  SEASONAL_GRADE_OPTIONS,
+  createEmptyEmployeeDetails,
+  employeeRecordsNeedSeedMerge,
+  formatEmployeeFieldValue,
+  mergeEmployeesWithSeed,
+  parseEmployeeProfileFromForm,
+} from './employeeFields.js'
+
+const RECENT_CLOCK_EVENTS_LIMIT = 10
 import { useBackendSync } from './hooks/useBackendSync.js'
 import {
   fetchAppState,
@@ -2469,6 +2480,7 @@ function EmployeesPage({
     currentUser?.role === 'admin' || currentUser?.role === 'harvesting-manager'
   const [showRecentEvents, setShowRecentEvents] = useState(false)
   const clockedInCount = clockedInIds.length
+  const recentClockEvents = attendanceEvents.slice(0, RECENT_CLOCK_EVENTS_LIMIT)
   const roleDefinitions = useMemo(
     () => employeeRoleOptions.map((option) => ({ id: option.value, name: option.label })),
     [],
@@ -2537,7 +2549,7 @@ function EmployeesPage({
       </div>
 
       <CollapsibleSection
-        title={`Recent clock events (${attendanceEvents.length})`}
+        title={`Recent clock events (last ${RECENT_CLOCK_EVENTS_LIMIT})`}
         isOpen={showRecentEvents}
         onToggle={() => setShowRecentEvents((prev) => !prev)}
       >
@@ -2553,7 +2565,7 @@ function EmployeesPage({
               </tr>
             </thead>
             <tbody>
-              {attendanceEvents.map((event) => {
+              {recentClockEvents.map((event) => {
                 const employee = employees.find((item) => item.id === event.employeeId)
                 return (
                   <tr key={event.id}>
@@ -2567,7 +2579,7 @@ function EmployeesPage({
                   </tr>
                 )
               })}
-              {attendanceEvents.length === 0 && (
+              {recentClockEvents.length === 0 && (
                 <tr>
                   <td colSpan="5">No clock events recorded on the server yet.</td>
                 </tr>
@@ -3125,22 +3137,45 @@ function EmployeeRecordPage({
           )}
         </article>
         <article className="card">
-          <h3>Employment details</h3>
-          <p><strong>Position:</strong> {employee.position || 'Not set'}</p>
-          <p><strong>Department:</strong> {employee.department || 'Not set'}</p>
-          <p><strong>Phone:</strong> {employee.phone || 'Not set'}</p>
-          <p><strong>Email:</strong> {employee.email || 'Not set'}</p>
-          <p><strong>ID number:</strong> {employee.idNumber || 'Not set'}</p>
-          <p><strong>NSSF number:</strong> {employee.nssfNumber || 'Not set'}</p>
-          <p><strong>KRA PIN:</strong> {employee.pinNumber || 'Not set'}</p>
-          <p><strong>Bank:</strong> {employee.bankName || 'Not set'}</p>
-          <p><strong>Account number:</strong> {employee.bankAccountNumber || 'Not set'}</p>
+          <h3>Personal details</h3>
+          <p><strong>Date of birth:</strong> {employee.dateOfBirth ? formatDisplayDate(employee.dateOfBirth) : 'Not set'}</p>
+          <p><strong>Date of joining:</strong> {employee.dateOfJoining ? formatDisplayDate(employee.dateOfJoining) : 'Not set'}</p>
+          <p><strong>Gender:</strong> {formatEmployeeFieldValue(employee.gender)}</p>
+          <p><strong>Nationality:</strong> {formatEmployeeFieldValue(employee.nationality)}</p>
+          <p><strong>Phone:</strong> {formatEmployeeFieldValue(employee.phone)}</p>
+          <p><strong>Email:</strong> {formatEmployeeFieldValue(employee.email)}</p>
+        </article>
+        <article className="card">
+          <h3>Employment & contract</h3>
+          <p><strong>Position:</strong> {formatEmployeeFieldValue(employee.position)}</p>
+          <p><strong>Department:</strong> {formatEmployeeFieldValue(employee.department)}</p>
+          <p><strong>Reporting manager:</strong> {formatEmployeeFieldValue(employee.reportingManager)}</p>
           <p>
             <strong>Contract period:</strong>{' '}
             {employee.contractStartDate && employee.contractEndDate
               ? `${formatDisplayDate(employee.contractStartDate)} – ${formatDisplayDate(employee.contractEndDate)}`
               : 'Not set'}
           </p>
+        </article>
+        <article className="card">
+          <h3>Identification & banking</h3>
+          <p><strong>ID number:</strong> {formatEmployeeFieldValue(employee.idNumber)}</p>
+          <p><strong>NSSF number:</strong> {formatEmployeeFieldValue(employee.nssfNumber)}</p>
+          <p><strong>KRA PIN:</strong> {formatEmployeeFieldValue(employee.pinNumber)}</p>
+          <p><strong>Bank:</strong> {formatEmployeeFieldValue(employee.bankName)}</p>
+          <p><strong>Bank branch:</strong> {formatEmployeeFieldValue(employee.bankBranch)}</p>
+          <p><strong>Account number:</strong> {formatEmployeeFieldValue(employee.bankAccountNumber)}</p>
+        </article>
+        <article className="card">
+          <h3>Qualifications</h3>
+          <p><strong>Highest qualification:</strong> {formatEmployeeFieldValue(employee.highestQualification)}</p>
+          <p><strong>Relevant qualification:</strong> {formatEmployeeFieldValue(employee.relevantQualification)}</p>
+        </article>
+        <article className="card">
+          <h3>Emergency contact</h3>
+          <p><strong>Name:</strong> {formatEmployeeFieldValue(employee.emergencyContactName)}</p>
+          <p><strong>Relation:</strong> {formatEmployeeFieldValue(employee.emergencyContactRelation)}</p>
+          <p><strong>Phone:</strong> {formatEmployeeFieldValue(employee.emergencyContactNumber)}</p>
         </article>
         <article className="card">
           <h3>Activity totals</h3>
@@ -3197,6 +3232,220 @@ function EmployeeRecordPage({
   )
 }
 
+function EmployeeProfileEditor({ employee, canEdit, onSubmit }) {
+  function handleSubmit(event) {
+    event.preventDefault()
+    if (!canEdit) {
+      return
+    }
+    onSubmit(parseEmployeeProfileFromForm(new FormData(event.currentTarget)))
+  }
+
+  return (
+    <form className="form-grid" onSubmit={handleSubmit}>
+      <h4>Personal</h4>
+      <label>
+        Full name
+        <input name="profileName" defaultValue={employee.name ?? ''} disabled={!canEdit} />
+      </label>
+      <label>
+        Date of birth
+        <input
+          name="profileDateOfBirth"
+          type="date"
+          defaultValue={employee.dateOfBirth ?? ''}
+          disabled={!canEdit}
+        />
+      </label>
+      <label>
+        Date of joining
+        <input
+          name="profileDateOfJoining"
+          type="date"
+          defaultValue={employee.dateOfJoining ?? ''}
+          disabled={!canEdit}
+        />
+      </label>
+      <label>
+        Gender
+        <input name="profileGender" defaultValue={employee.gender ?? ''} disabled={!canEdit} />
+      </label>
+      <label>
+        Nationality
+        <input name="profileNationality" defaultValue={employee.nationality ?? ''} disabled={!canEdit} />
+      </label>
+      <label>
+        Phone number
+        <input name="profilePhone" defaultValue={employee.phone ?? ''} disabled={!canEdit} />
+      </label>
+      <label>
+        Email address
+        <input
+          name="profileEmail"
+          type="email"
+          defaultValue={employee.email ?? ''}
+          disabled={!canEdit}
+        />
+      </label>
+
+      <h4>Employment & contract</h4>
+      <p className="placeholder">
+        Work No / scanner User ID: <code>{employee.id}</code>
+      </p>
+      <label>
+        Position
+        <input name="profilePosition" defaultValue={employee.position ?? ''} disabled={!canEdit} />
+      </label>
+      <label>
+        Department
+        <input name="profileDepartment" defaultValue={employee.department ?? ''} disabled={!canEdit} />
+      </label>
+      <label>
+        Reporting manager
+        <input
+          name="profileReportingManager"
+          defaultValue={employee.reportingManager ?? ''}
+          disabled={!canEdit}
+        />
+      </label>
+      <label>
+        Contract type
+        <select name="contractType" defaultValue={employee.contractType ?? 'regular'} disabled={!canEdit}>
+          {CONTRACT_TYPE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Seasonal grade
+        <select name="seasonalGrade" defaultValue={employee.seasonalGrade ?? ''} disabled={!canEdit}>
+          {SEASONAL_GRADE_OPTIONS.map((option) => (
+            <option key={option.value || 'none'} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Daily wage (KES)
+        <input
+          name="dailyWageKes"
+          type="number"
+          min="0"
+          defaultValue={employee.dailyWageKes ?? ''}
+          disabled={!canEdit}
+        />
+      </label>
+      <label>
+        Monthly salary (KES)
+        <input
+          name="monthlySalaryKes"
+          type="number"
+          min="0"
+          defaultValue={employee.monthlySalaryKes ?? ''}
+          disabled={!canEdit}
+        />
+      </label>
+      <label>
+        Contract start date
+        <input
+          name="profileContractStartDate"
+          type="date"
+          defaultValue={employee.contractStartDate ?? ''}
+          disabled={!canEdit}
+        />
+      </label>
+      <label>
+        Contract end date
+        <input
+          name="profileContractEndDate"
+          type="date"
+          defaultValue={employee.contractEndDate ?? ''}
+          disabled={!canEdit}
+        />
+      </label>
+
+      <h4>Identification & banking</h4>
+      <label>
+        ID number
+        <input name="profileIdNumber" defaultValue={employee.idNumber ?? ''} disabled={!canEdit} />
+      </label>
+      <label>
+        NSSF number
+        <input name="profileNssfNumber" defaultValue={employee.nssfNumber ?? ''} disabled={!canEdit} />
+      </label>
+      <label>
+        KRA PIN
+        <input name="profilePinNumber" defaultValue={employee.pinNumber ?? ''} disabled={!canEdit} />
+      </label>
+      <label>
+        Bank name
+        <input name="profileBankName" defaultValue={employee.bankName ?? ''} disabled={!canEdit} />
+      </label>
+      <label>
+        Bank branch
+        <input name="profileBankBranch" defaultValue={employee.bankBranch ?? ''} disabled={!canEdit} />
+      </label>
+      <label>
+        Bank account number
+        <input
+          name="profileBankAccountNumber"
+          defaultValue={employee.bankAccountNumber ?? ''}
+          disabled={!canEdit}
+        />
+      </label>
+
+      <h4>Qualifications</h4>
+      <label>
+        Highest qualification
+        <input
+          name="profileHighestQualification"
+          defaultValue={employee.highestQualification ?? ''}
+          disabled={!canEdit}
+        />
+      </label>
+      <label>
+        Relevant qualification
+        <input
+          name="profileRelevantQualification"
+          defaultValue={employee.relevantQualification ?? ''}
+          disabled={!canEdit}
+        />
+      </label>
+
+      <h4>Emergency contact</h4>
+      <label>
+        Contact name
+        <input
+          name="profileEmergencyContactName"
+          defaultValue={employee.emergencyContactName ?? ''}
+          disabled={!canEdit}
+        />
+      </label>
+      <label>
+        Relation
+        <input
+          name="profileEmergencyContactRelation"
+          defaultValue={employee.emergencyContactRelation ?? ''}
+          disabled={!canEdit}
+        />
+      </label>
+      <label>
+        Contact phone
+        <input
+          name="profileEmergencyContactNumber"
+          defaultValue={employee.emergencyContactNumber ?? ''}
+          disabled={!canEdit}
+        />
+      </label>
+
+      {canEdit ? <button type="submit">Save employee details</button> : null}
+    </form>
+  )
+}
+
 function EmployeeEditPage({
   employees,
   currentUser,
@@ -3250,22 +3499,6 @@ function EmployeeEditPage({
         </div>
       </section>
     )
-  }
-
-  function handleProfileSubmit(event) {
-    event.preventDefault()
-    if (!canEditEmployeeProfile) {
-      return
-    }
-    const formData = new FormData(event.currentTarget)
-    onUpdateEmployeeProfile(employee.id, {
-      phone: String(formData.get('profilePhone') ?? ''),
-      idNumber: String(formData.get('profileIdNumber') ?? ''),
-      nssfNumber: String(formData.get('profileNssfNumber') ?? ''),
-      pinNumber: String(formData.get('profilePinNumber') ?? ''),
-      bankName: String(formData.get('profileBankName') ?? ''),
-      bankAccountNumber: String(formData.get('profileBankAccountNumber') ?? ''),
-    })
   }
 
   function togglePagePermission(pageId) {
@@ -3372,60 +3605,16 @@ function EmployeeEditPage({
           </form>
         </article>
         <article className="card">
-          <h3>Employment details</h3>
+          <h3>Employee database details</h3>
           {!canEditEmployeeProfile && (
             <p className="placeholder">Only Admin or Harvesting Manager can edit these fields.</p>
           )}
-          <form
-            key={`${employee.id}-${employee.phone ?? ''}-${employee.idNumber ?? ''}-${employee.nssfNumber ?? ''}-${employee.pinNumber ?? ''}-${employee.bankName ?? ''}-${employee.bankAccountNumber ?? ''}`}
-            className="form-grid"
-            onSubmit={handleProfileSubmit}
-          >
-            <label>
-              Phone number
-              <input name="profilePhone" defaultValue={employee.phone ?? ''} disabled={!canEditEmployeeProfile} />
-            </label>
-            <label>
-              ID number
-              <input
-                name="profileIdNumber"
-                defaultValue={employee.idNumber ?? ''}
-                disabled={!canEditEmployeeProfile}
-              />
-            </label>
-            <label>
-              NSSF number
-              <input
-                name="profileNssfNumber"
-                defaultValue={employee.nssfNumber ?? ''}
-                disabled={!canEditEmployeeProfile}
-              />
-            </label>
-            <label>
-              KRA PIN
-              <input
-                name="profilePinNumber"
-                defaultValue={employee.pinNumber ?? ''}
-                disabled={!canEditEmployeeProfile}
-              />
-            </label>
-            <p className="placeholder">
-              Scanner User ID is the employee Work No: <code>{employee.id}</code>
-            </p>
-            <label>
-              Bank name
-              <input name="profileBankName" defaultValue={employee.bankName ?? ''} disabled={!canEditEmployeeProfile} />
-            </label>
-            <label>
-              Bank account number
-              <input
-                name="profileBankAccountNumber"
-                defaultValue={employee.bankAccountNumber ?? ''}
-                disabled={!canEditEmployeeProfile}
-              />
-            </label>
-            {canEditEmployeeProfile && <button type="submit">Save profile details</button>}
-          </form>
+          <EmployeeProfileEditor
+            key={employee.id}
+            employee={employee}
+            canEdit={canEditEmployeeProfile}
+            onSubmit={(profile) => onUpdateEmployeeProfile(employee.id, profile)}
+          />
         </article>
       </div>
     </section>
@@ -7788,12 +7977,10 @@ function hydrateAppState(data, setters) {
     return
   }
   if (Array.isArray(data.employees)) {
-    const needsEmployeeMigration = data.employees.some((employee) =>
-      String(employee.id).startsWith('EMP-'),
-    )
-    setters.setEmployees(
-      needsEmployeeMigration ? [...mananasiStaffEmployees] : data.employees,
-    )
+    const employees = employeeRecordsNeedSeedMerge(data.employees)
+      ? mergeEmployeesWithSeed(data.employees, mananasiStaffEmployees)
+      : data.employees
+    setters.setEmployees(employees)
   }
   if (Array.isArray(data.customers)) setters.setCustomers(data.customers)
   if (typeof data.activeBatchNumber === 'string') setters.setActiveBatchNumber(data.activeBatchNumber)
@@ -8105,7 +8292,7 @@ function App() {
     if (!ready) {
       return
     }
-    fetchAttendanceEvents(50)
+    fetchAttendanceEvents(RECENT_CLOCK_EVENTS_LIMIT)
       .then((events) => setAttendanceEvents(events))
       .catch(() => setAttendanceEvents([]))
   }, [ready, clockedInIds])
@@ -8226,10 +8413,12 @@ function App() {
       nssfNumber: String(nssfNumber ?? '').trim(),
       pinNumber: String(pinNumber ?? '').trim(),
       bankName: String(bankName ?? '').trim(),
+      bankBranch: '',
       bankAccountNumber: String(bankAccountNumber ?? '').trim(),
       contractStartDate: '',
       contractEndDate: '',
       reportingManager: '',
+      ...createEmptyEmployeeDetails(),
     }
     setEmployees((prev) => [...prev, employee])
   }
@@ -8242,19 +8431,7 @@ function App() {
 
   function handleUpdateEmployeeProfile(employeeId, profile) {
     setEmployees((prev) =>
-      prev.map((employee) =>
-        employee.id === employeeId
-          ? {
-              ...employee,
-              phone: String(profile.phone ?? '').trim(),
-              idNumber: String(profile.idNumber ?? '').trim(),
-              nssfNumber: String(profile.nssfNumber ?? '').trim(),
-              pinNumber: String(profile.pinNumber ?? '').trim(),
-              bankName: String(profile.bankName ?? '').trim(),
-              bankAccountNumber: String(profile.bankAccountNumber ?? '').trim(),
-            }
-          : employee,
-      ),
+      prev.map((employee) => (employee.id === employeeId ? { ...employee, ...profile } : employee)),
     )
   }
 
@@ -8306,7 +8483,10 @@ function App() {
   async function handleRefreshAttendance() {
     setAttendanceRefreshing(true)
     try {
-      const [events, state] = await Promise.all([fetchAttendanceEvents(50), fetchAppState()])
+      const [events, state] = await Promise.all([
+        fetchAttendanceEvents(RECENT_CLOCK_EVENTS_LIMIT),
+        fetchAppState(),
+      ])
       setAttendanceEvents(events)
       if (Array.isArray(state?.clockedInIds)) {
         setClockedInIds(state.clockedInIds)
