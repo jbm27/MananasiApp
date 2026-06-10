@@ -23,7 +23,7 @@ import {
 import {
   CONTRACT_TYPE_OPTIONS,
   SEASONAL_GRADE_OPTIONS,
-  createEmptyEmployeeDetails,
+  createBlankEmployeeTemplate,
   employeeRecordsNeedSeedMerge,
   formatEmployeeFieldValue,
   mergeEmployeesWithSeed,
@@ -2330,31 +2330,23 @@ function AddEmployeePage({
   onClearEmployeePageAccessOverride,
 }) {
   const navigate = useNavigate()
-  const [name, setName] = useState('')
   const [role, setRole] = useState('harvester')
-  const [phone, setPhone] = useState('')
-  const [idNumber, setIdNumber] = useState('')
-  const [nssfNumber, setNssfNumber] = useState('')
-  const [pinNumber, setPinNumber] = useState('')
-  const [bankName, setBankName] = useState('')
-  const [bankAccountNumber, setBankAccountNumber] = useState('')
   const canManageEmployees =
     currentUser?.role === 'admin' || currentUser?.role === 'harvesting-manager'
+  const nextWorkNo = useMemo(() => String(nextEmployeeWorkNumber(employees)), [employees])
+  const blankEmployee = useMemo(
+    () => createBlankEmployeeTemplate(nextWorkNo, role),
+    [nextWorkNo, role],
+  )
 
-  function handleSubmit(event) {
-    event.preventDefault()
-    if (!name.trim() || !canManageEmployees) {
+  function handleProfileSubmit(profile) {
+    if (!profile.name?.trim() || !canManageEmployees) {
       return
     }
     onAddEmployee({
-      name: name.trim(),
+      ...profile,
       role,
-      phone,
-      idNumber,
-      nssfNumber,
-      pinNumber,
-      bankName,
-      bankAccountNumber,
+      position: profile.position || getEmployeeRoleLabel(role),
     })
     navigate('/employees')
   }
@@ -2371,88 +2363,39 @@ function AddEmployeePage({
         </div>
       )}
 
-      <form className="form-grid" onSubmit={handleSubmit}>
-        <label>
-          Employee Name
-          <input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="e.g. Peter Kamau"
-            disabled={!canManageEmployees}
+      <div className="card-grid">
+        <article className="card">
+          <h3>App role</h3>
+          <p className="placeholder">
+            A new Work No <code>{nextWorkNo}</code> will be assigned automatically. This is also
+            the scanner User ID.
+          </p>
+          <label className="form-grid">
+            Role in Mananasi app
+            <select
+              value={role}
+              onChange={(event) => setRole(event.target.value)}
+              disabled={!canManageEmployees}
+            >
+              {employeeRoleOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </article>
+        <article className="card">
+          <h3>Employee database details</h3>
+          <EmployeeProfileEditor
+            key={`${nextWorkNo}-${role}`}
+            employee={blankEmployee}
+            canEdit={canManageEmployees}
+            onSubmit={handleProfileSubmit}
+            submitLabel="Save employee"
           />
-        </label>
-        <label>
-          Role
-          <select
-            value={role}
-            onChange={(event) => setRole(event.target.value)}
-            disabled={!canManageEmployees}
-          >
-            {employeeRoleOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Phone number
-          <input
-            value={phone}
-            onChange={(event) => setPhone(event.target.value)}
-            placeholder="Optional"
-            disabled={!canManageEmployees}
-          />
-        </label>
-        <label>
-          ID number
-          <input
-            value={idNumber}
-            onChange={(event) => setIdNumber(event.target.value)}
-            placeholder="Optional"
-            disabled={!canManageEmployees}
-          />
-        </label>
-        <label>
-          NSSF number
-          <input
-            value={nssfNumber}
-            onChange={(event) => setNssfNumber(event.target.value)}
-            placeholder="Optional"
-            disabled={!canManageEmployees}
-          />
-        </label>
-        <label>
-          KRA PIN
-          <input
-            value={pinNumber}
-            onChange={(event) => setPinNumber(event.target.value)}
-            placeholder="Optional"
-            disabled={!canManageEmployees}
-          />
-        </label>
-        <label>
-          Bank name
-          <input
-            value={bankName}
-            onChange={(event) => setBankName(event.target.value)}
-            placeholder="Optional"
-            disabled={!canManageEmployees}
-          />
-        </label>
-        <label>
-          Bank account number
-          <input
-            value={bankAccountNumber}
-            onChange={(event) => setBankAccountNumber(event.target.value)}
-            placeholder="Optional"
-            disabled={!canManageEmployees}
-          />
-        </label>
-        <button type="submit" disabled={!canManageEmployees}>
-          Save Employee
-        </button>
-      </form>
+        </article>
+      </div>
 
       <PageAccessAdminSection
         employees={employees}
@@ -3232,7 +3175,7 @@ function EmployeeRecordPage({
   )
 }
 
-function EmployeeProfileEditor({ employee, canEdit, onSubmit }) {
+function EmployeeProfileEditor({ employee, canEdit, onSubmit, submitLabel = 'Save employee details' }) {
   function handleSubmit(event) {
     event.preventDefault()
     if (!canEdit) {
@@ -3441,7 +3384,7 @@ function EmployeeProfileEditor({ employee, canEdit, onSubmit }) {
         />
       </label>
 
-      {canEdit ? <button type="submit">Save employee details</button> : null}
+      {canEdit ? <button type="submit">{submitLabel}</button> : null}
     </form>
   )
 }
@@ -8386,39 +8329,16 @@ function App() {
       .sort((a, b) => b.totalKg - a.totalKg)
   }, [dryingRecords, brushingStockMovements, brushingDailyRecords, balingRecords])
   function handleAddEmployee(input) {
-    const {
-      name,
-      role,
-      phone = '',
-      idNumber = '',
-      nssfNumber = '',
-      pinNumber = '',
-      bankName = '',
-      bankAccountNumber = '',
-    } = input
+    const { role = 'harvester', ...profile } = input
     const nextWorkNo = String(nextEmployeeWorkNumber(employees))
+    if (!String(profile.name ?? '').trim()) {
+      return
+    }
     const employee = {
       id: nextWorkNo,
-      name,
       role,
-      contractType: 'seasonal',
-      seasonalGrade: null,
-      dailyWageKes: null,
-      monthlySalaryKes: null,
-      position: getEmployeeRoleLabel(role),
-      department: '',
-      phone: String(phone ?? '').trim(),
-      email: '',
-      idNumber: String(idNumber ?? '').trim(),
-      nssfNumber: String(nssfNumber ?? '').trim(),
-      pinNumber: String(pinNumber ?? '').trim(),
-      bankName: String(bankName ?? '').trim(),
-      bankBranch: '',
-      bankAccountNumber: String(bankAccountNumber ?? '').trim(),
-      contractStartDate: '',
-      contractEndDate: '',
-      reportingManager: '',
-      ...createEmptyEmployeeDetails(),
+      ...profile,
+      position: profile.position || getEmployeeRoleLabel(role),
     }
     setEmployees((prev) => [...prev, employee])
   }

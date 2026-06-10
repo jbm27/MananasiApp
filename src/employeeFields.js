@@ -26,6 +26,31 @@ export function createEmptyEmployeeDetails() {
   }
 }
 
+export function createBlankEmployeeTemplate(id, role = 'harvester') {
+  return {
+    id,
+    name: '',
+    role,
+    contractType: 'seasonal',
+    seasonalGrade: null,
+    dailyWageKes: null,
+    monthlySalaryKes: null,
+    position: '',
+    department: '',
+    phone: '',
+    email: '',
+    idNumber: '',
+    nssfNumber: '',
+    pinNumber: '',
+    bankName: '',
+    bankAccountNumber: '',
+    contractStartDate: '',
+    contractEndDate: '',
+    reportingManager: '',
+    ...createEmptyEmployeeDetails(),
+  }
+}
+
 export function employeeRecordsNeedSeedMerge(employees) {
   if (!Array.isArray(employees) || employees.length === 0) {
     return true
