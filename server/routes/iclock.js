@@ -12,21 +12,18 @@ function buildOptionsResponse(serialNumber) {
   const stamp = '1970-01-01T00:00:00'
   return [
     `GET OPTION FROM: ${serialNumber}`,
-    'ATTLOGStamp=0',
-    'OPERLOGStamp=0',
-    'ATTPHOTOStamp=0',
-    'BIODATAStamp=0',
     'ErrorDelay=60',
     'Delay=30',
     'TransTimes=00:00;14:05',
     'TransInterval=1',
-    'TransFlag=TransData AttLog\tOpLog\tAttPhoto\tEnrollUser\tChgUser\tEnrollFP\tChgFP',
+    'TransFlag=111111111111',
     'Realtime=1',
     'Encrypt=0',
     'TimeZone=3',
     'Timeout=60',
     'SyncTime=3600',
     'ServerVer=3.0.1',
+    'PushProtVer=2.4.1',
     `ATTLOGStamp=${stamp}`,
     `OPERLOGStamp=${stamp}`,
     `ATTPHOTOStamp=${stamp}`,
@@ -63,8 +60,20 @@ function parseAttlogLine(line) {
   }
 }
 
+function handleRegistry(req, res) {
+  const serialNumber = req.query.SN ?? 'UNKNOWN'
+  console.log(`[ZKTECO] registry ${req.method} SN=${serialNumber}`)
+  res.type('text/plain').send(`RegistryCode=OK\nSN=${serialNumber}`)
+}
+
+router.get('/registry', handleRegistry)
+router.post('/registry', handleRegistry)
+
 router.get('/cdata', (req, res) => {
   const serialNumber = req.query.SN ?? 'UNKNOWN'
+  console.log(
+    `[ZKTECO] GET /cdata SN=${serialNumber} options=${req.query.options ?? ''} table=${req.query.table ?? ''}`,
+  )
   if (req.query.options === 'all') {
     res.type('text/plain').send(buildOptionsResponse(serialNumber))
     return
@@ -75,13 +84,16 @@ router.get('/cdata', (req, res) => {
 router.post('/cdata', async (req, res) => {
   const serialNumber = req.query.SN ?? 'UNKNOWN'
   const table = req.query.table
+  const body = typeof req.body === 'string' ? req.body : ''
+
+  console.log(
+    `[ZKTECO] POST /cdata SN=${serialNumber} table=${table ?? ''} bytes=${body.length} body=${body.slice(0, 200)}`,
+  )
 
   if (table !== 'ATTLOG') {
     res.type('text/plain').send('OK')
     return
   }
-
-  const body = typeof req.body === 'string' ? req.body : ''
   const lines = body.split(/\r?\n/).filter(Boolean)
 
   try {
@@ -136,7 +148,8 @@ router.post('/cdata', async (req, res) => {
   }
 })
 
-router.get('/getrequest', (_req, res) => {
+router.get('/getrequest', (req, res) => {
+  console.log(`[ZKTECO] GET /getrequest SN=${req.query.SN ?? 'UNKNOWN'}`)
   res.type('text/plain').send('OK')
 })
 

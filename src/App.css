@@ -493,6 +493,18 @@ th {
   color: #475569;
 }
 
+.attendance-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.attendance-toolbar h3 {
+  margin: 0;
+}
+
 .page-access-admin {
   margin: 1.25rem 0;
   padding: 1rem 0;

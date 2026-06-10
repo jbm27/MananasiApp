@@ -15,7 +15,7 @@ import './App.css'
 import logoStandard from '../LogoStandard.png'
 import { mananasiStaffEmployees } from './mananasiStaffEmployees.js'
 import { useBackendSync } from './hooks/useBackendSync.js'
-import { fetchAttendanceEvents, postAttendanceEvent } from './api/client.js'
+import { fetchAppState, fetchAttendanceEvents } from './api/client.js'
 
 function nextEmployeeSequenceNumber(employees) {
   return employees.reduce((max, employee) => {
@@ -405,17 +405,6 @@ const defaultCompensationRules = {
   incentiveRateKesPerKg: 1,
   supervisorDailyWageKes: 723,
 }
-
-const attendanceHardwareNotes = [
-  {
-    name: integrationDevice.name,
-    fit: integrationDevice.fit,
-  },
-  {
-    name: 'Device Sync Mode (Dummy)',
-    fit: 'Simulates fingerprint attendance while hardware API is not yet connected.',
-  },
-]
 
 function seededKg(employeeIndex, dayOffset) {
   const raw = ((employeeIndex + 3) * 37 + dayOffset * 19) % 351
@@ -3338,15 +3327,18 @@ function BiometricPinMappingRow({ employee, canManage, onUpdateBiometricPin }) {
   )
 }
 
+const attendanceApiBase = String(import.meta.env.VITE_API_URL ?? '')
+  .trim()
+  .replace(/\/+$/, '')
+
 function AttendancePage({
   employees,
   currentUser,
   clockedInIds,
   attendanceEvents,
-  onToggleClockStatus,
   onUpdateBiometricPin,
-  selectedAttendanceEmployeeId,
-  onSelectAttendanceEmployee,
+  onRefreshAttendance,
+  attendanceRefreshing,
 }) {
   const canManageBiometricPins = currentUser?.role === 'admin' || currentUser?.role === 'harvesting-manager'
   const sortedEmployees = useMemo(
@@ -3413,47 +3405,59 @@ function AttendancePage({
         </table>
       </div>
 
-      <h3>Device & Test Modes</h3>
-      <ul className="hardware-list">
-        {attendanceHardwareNotes.map((option) => (
-          <li key={option.name}>
-            <strong>{option.name}</strong>
-            <span>{option.fit}</span>
+      <h3>Link scanner to Railway</h3>
+      <p>
+        The scanner must push attendance to your Railway API. Mapping in the table above only tells
+        Mananasi who each scanner User ID is — the device still needs network settings pointing at
+        Railway.
+      </p>
+      {attendanceApiBase ? (
+        <ul className="hardware-list">
+          <li>
+            <strong>Server address</strong>
+            <span>
+              <code>{attendanceApiBase.replace(/^https?:\/\//, '')}</code> (hostname only on device)
+            </span>
           </li>
-        ))}
-      </ul>
+          <li>
+            <strong>Port</strong>
+            <span>443 with HTTPS enabled</span>
+          </li>
+          <li>
+            <strong>Push path</strong>
+            <span>
+              <code>/iclock/cdata</code>
+            </span>
+          </li>
+          <li>
+            <strong>Health check</strong>
+            <span>
+              <a href={`${attendanceApiBase}/api/health`} target="_blank" rel="noreferrer">
+                {attendanceApiBase}/api/health
+              </a>
+            </span>
+          </li>
+        </ul>
+      ) : (
+        <p className="placeholder">
+          API URL not configured in this build. Set <code>VITE_API_URL</code> on Vercel to your
+          Railway address.
+        </p>
+      )}
+      <p className="placeholder">
+        On the ZKTeco Cloud Server Setting screen: Server Mode <strong>ADMS</strong>, turn{' '}
+        <strong>Enable Domain Name</strong> on (otherwise Server Address only accepts 0.0.0.0), enter
+        the Railway hostname, set Server Port to <strong>443</strong> (not 8081), keep{' '}
+        <strong>HTTPS</strong> on. After a scan, check Railway logs for{' '}
+        <code>GET /iclock/cdata</code> or <code>POST /iclock/cdata?table=ATTLOG</code>.
+      </p>
 
-      <div className="placeholder">
-        Dummy attendance plan:
-        <ol>
-          <li>Choose employee</li>
-          <li>Click clock in/out (simulated fingerprint event)</li>
-          <li>Harvesting module unlocks kg entry for clocked-in workers only</li>
-        </ol>
-      </div>
-
-      <div className="form-grid">
-        <label>
-          Simulated Device Event Employee
-          <select
-            value={selectedAttendanceEmployeeId}
-            onChange={(event) => onSelectAttendanceEmployee(event.target.value)}
-          >
-            {employees.map((employee) => (
-              <option key={employee.id} value={employee.id}>
-                {employee.name} ({employee.id})
-              </option>
-            ))}
-          </select>
-        </label>
-        <button type="button" onClick={onToggleClockStatus}>
-          {clockedInIds.includes(selectedAttendanceEmployeeId)
-            ? 'Clock Out'
-            : 'Clock In'}
+      <div className="attendance-toolbar">
+        <h3>Today Status</h3>
+        <button type="button" onClick={onRefreshAttendance} disabled={attendanceRefreshing}>
+          {attendanceRefreshing ? 'Refreshing…' : 'Refresh from server'}
         </button>
       </div>
-
-      <h3>Today Status</h3>
       <ul className="status-list">
         {employees.map((employee) => (
           <li key={employee.id}>
@@ -7974,10 +7978,8 @@ function App() {
   const [dataEntryPermissionOverrides, setDataEntryPermissionOverrides] = useState(
     readDataEntryPermissionOverrides,
   )
-  const [selectedAttendanceEmployeeId, setSelectedAttendanceEmployeeId] = useState(
-    defaultSelectedHarvesterId,
-  )
   const [selectedHarvesterId, setSelectedHarvesterId] = useState(defaultSelectedHarvesterId)
+  const [attendanceRefreshing, setAttendanceRefreshing] = useState(false)
   const [kgInput, setKgInput] = useState('')
   const [haulageTrips, setHaulageTrips] = useState(() =>
     buildSeedHaulageTrips(
@@ -8434,21 +8436,17 @@ function App() {
     ])
   }
 
-  function handleToggleClockStatus() {
-    const isClockedIn = clockedInIds.includes(selectedAttendanceEmployeeId)
-    const eventType = isClockedIn ? 'clock_out' : 'clock_in'
-    setClockedInIds((prev) =>
-      isClockedIn
-        ? prev.filter((id) => id !== selectedAttendanceEmployeeId)
-        : [...prev, selectedAttendanceEmployeeId],
-    )
-    postAttendanceEvent({
-      employeeId: selectedAttendanceEmployeeId,
-      eventType,
-      occurredAt: new Date().toISOString(),
-      deviceId: 'simulated-ui',
-      sourceEventId: `ui-${selectedAttendanceEmployeeId}-${Date.now()}`,
-    }).catch(() => {})
+  async function handleRefreshAttendance() {
+    setAttendanceRefreshing(true)
+    try {
+      const [events, state] = await Promise.all([fetchAttendanceEvents(50), fetchAppState()])
+      setAttendanceEvents(events)
+      if (Array.isArray(state?.clockedInIds)) {
+        setClockedInIds(state.clockedInIds)
+      }
+    } finally {
+      setAttendanceRefreshing(false)
+    }
   }
 
   function calculateWage(kg) {
@@ -9004,10 +9002,9 @@ function App() {
                 currentUser={currentUser}
                 clockedInIds={clockedInIds}
                 attendanceEvents={attendanceEvents}
-                onToggleClockStatus={handleToggleClockStatus}
                 onUpdateBiometricPin={handleUpdateBiometricPin}
-                selectedAttendanceEmployeeId={selectedAttendanceEmployeeId}
-                onSelectAttendanceEmployee={setSelectedAttendanceEmployeeId}
+                onRefreshAttendance={handleRefreshAttendance}
+                attendanceRefreshing={attendanceRefreshing}
               />
             }
           />

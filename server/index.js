@@ -25,6 +25,18 @@ app.use(
     },
   }),
 )
+
+app.use((req, _res, next) => {
+  if (
+    req.path.startsWith('/iclock') ||
+    req.path.startsWith('/cdata') ||
+    req.path.includes('cdata')
+  ) {
+    console.log(`[scanner-http] ${req.method} ${req.originalUrl}`)
+  }
+  next()
+})
+
 app.use('/iclock', express.text({ type: '*/*', limit: '2mb' }), iclockRoutes)
 app.use(express.json({ limit: '15mb' }))
 
