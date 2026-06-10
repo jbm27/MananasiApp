@@ -66,6 +66,59 @@ export async function checkApiHealth() {
   return response.ok
 }
 
+async function parseErrorResponse(response, fallbackMessage) {
+  const body = await parseJsonResponse(response)
+  throw new Error(body?.error ?? fallbackMessage)
+}
+
+export async function leadershipLogin(username, password) {
+  const response = await fetch(`${API_BASE}/api/auth/leadership/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+  if (!response.ok) {
+    await parseErrorResponse(response, `Login failed (${response.status})`)
+  }
+  return parseJsonResponse(response)
+}
+
+export async function fetchLeadershipAccounts(adminEmployeeId, adminPassword) {
+  const response = await fetch(`${API_BASE}/api/auth/leadership/accounts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ adminEmployeeId, adminPassword }),
+  })
+  if (!response.ok) {
+    await parseErrorResponse(response, `Failed to load leadership accounts (${response.status})`)
+  }
+  return parseJsonResponse(response)
+}
+
+export async function setLeadershipPassword({
+  adminEmployeeId,
+  adminPassword,
+  targetEmployeeId,
+  newPassword,
+  confirmPassword,
+}) {
+  const response = await fetch(`${API_BASE}/api/auth/leadership/set-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      adminEmployeeId,
+      adminPassword,
+      targetEmployeeId,
+      newPassword,
+      confirmPassword,
+    }),
+  })
+  if (!response.ok) {
+    await parseErrorResponse(response, `Failed to save password (${response.status})`)
+  }
+  return parseJsonResponse(response)
+}
+
 export async function fetchApiHealthStatus() {
   if (!API_BASE) {
     return { configured: false, healthy: false }

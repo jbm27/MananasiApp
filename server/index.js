@@ -5,6 +5,7 @@ import { initDb } from './db.js'
 import stateRoutes from './routes/state.js'
 import attendanceRoutes from './routes/attendance.js'
 import iclockRoutes from './routes/iclock.js'
+import leadershipAuthRoutes from './routes/leadershipAuth.js'
 
 const app = express()
 const port = Number(process.env.PORT ?? 3001)
@@ -46,6 +47,7 @@ app.get('/api/health', (_req, res) => {
 
 app.use('/api/state', stateRoutes)
 app.use('/api/attendance', attendanceRoutes)
+app.use('/api/auth/leadership', leadershipAuthRoutes)
 
 async function start() {
   await initDb()

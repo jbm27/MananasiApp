@@ -1,16 +1,26 @@
 import { Router } from 'express'
 import { getAppState, saveAppState } from '../stateStore.js'
+import { migrateLeadershipPasswordsFromMainState } from '../services/leadershipAuthStore.js'
 
 const router = Router()
 
+function stripSensitiveStateFields(data) {
+  if (!data || typeof data !== 'object') {
+    return {}
+  }
+  const { leaderPasswordHashes: _removed, ...safe } = data
+  return safe
+}
+
 router.get('/', async (_req, res) => {
   try {
+    await migrateLeadershipPasswordsFromMainState()
     const state = await getAppState()
     if (!state) {
       return res.status(404).json({ error: 'No saved app state yet' })
     }
     res.json({
-      ...state.data,
+      ...stripSensitiveStateFields(state.data),
       _meta: { updatedAt: state.updatedAt },
     })
   } catch (error) {
@@ -25,8 +35,13 @@ router.put('/', async (req, res) => {
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return res.status(400).json({ error: 'Expected JSON object body' })
     }
-    const { _meta, ...data } = body
-    const updatedAt = await saveAppState(data)
+    await migrateLeadershipPasswordsFromMainState()
+    const current = await getAppState()
+    const { _meta, leaderPasswordHashes: _ignored, ...incoming } = body
+    const updatedAt = await saveAppState({
+      ...stripSensitiveStateFields(current?.data),
+      ...stripSensitiveStateFields(incoming),
+    })
     res.json({ ok: true, updatedAt })
   } catch (error) {
     console.error('PUT /api/state failed:', error)

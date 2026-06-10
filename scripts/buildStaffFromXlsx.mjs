@@ -5,79 +5,150 @@ import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.join(__dirname, '..')
-const xlsxPath = path.join(root, 'EmployeeDataBase.xlsx')
+const xlsxPath = path.join(root, 'Employee Database App - Contract Dates Filled.xlsx')
 const outPath = path.join(root, 'src', 'mananasiStaffEmployees.js')
 
-const wb = XLSX.readFile(xlsxPath)
-const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]])
+function parseNumber(value) {
+  const n = Number(String(value ?? '').replace(/,/g, '').trim())
+  return Number.isFinite(n) && n > 0 ? n : null
+}
 
-function mapRole(r) {
-  const k = String(r ?? '')
+function parseIsoDate(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) {
+    return ''
+  }
+  const slash = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (slash) {
+    const [, day, month, year] = slash
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+  }
+  return raw
+}
+
+function normalizeContractType(value) {
+  const key = String(value ?? '')
     .trim()
     .toLowerCase()
-  const m = {
-    admin: 'admin',
+  if (key.startsWith('regular')) {
+    return 'regular'
+  }
+  if (key.startsWith('season')) {
+    return 'seasonal'
+  }
+  if (key.startsWith('suppl')) {
+    return 'supplementary'
+  }
+  return 'regular'
+}
+
+function normalizeSeasonalGrade(value) {
+  const key = String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '')
+  if (key === 'grade1' || key === 'grade-1') {
+    return 'grade-1'
+  }
+  if (key === 'grade2' || key === 'grade-2') {
+    return 'grade-2'
+  }
+  if (key === 'grade3' || key === 'grade-3') {
+    return 'grade-3'
+  }
+  return null
+}
+
+function mapPositionToRole(position) {
+  const key = String(position ?? '')
+    .trim()
+    .toLowerCase()
+
+  const exact = {
+    'business unit manager': 'admin',
     'harvesting manager': 'harvesting-manager',
-    'production manager': 'production-manager',
     'harvesting supervisor': 'harvesting-supervisor',
-    harvesting: 'harvester',
-    production: 'decorticator-operator',
+    harvester: 'harvester',
+    'decortication and brushing manager': 'production-manager',
+    'head technician': 'decortication-supervisor',
+    'human resource officer': 'general-staff',
+    accountant: 'general-staff',
+    'rider messenger': 'general-staff',
+    'stores attendant': 'general-staff',
+    'quality control and operations assistant': 'decortication-supervisor',
     'lorry driver': 'truck-driver',
     'bus driver': 'truck-driver',
-    'head technician': 'decortication-supervisor',
-    'quality control': 'decortication-supervisor',
-    hr: 'general-staff',
-    'hr and admin': 'general-staff',
-    accountant: 'general-staff',
-    messenger: 'general-staff',
-    'stores manager': 'general-staff',
-    technician: 'decorticator-operator',
+    'decorticator attendant': 'decorticator-operator',
+    'decorticator operator': 'decorticator-operator',
+    'fibre lines attendant': 'decorticator-operator',
+    brusher: 'brusher',
+    loader: 'loader',
+    'silage attendant': 'silage-operator',
+    'machine technician': 'decorticator-operator',
+    'electrical technician': 'general-staff',
     electrician: 'general-staff',
     plumber: 'general-staff',
+    cleaner: 'general-staff',
+    sorting: 'decorticator-operator',
+    'grounds man': 'general-staff',
   }
-  return m[k] ?? 'general-staff'
+
+  return exact[key] ?? 'general-staff'
 }
 
-function esc(s) {
-  return JSON.stringify(String(s ?? '').trim()).slice(1, -1)
-}
+const wb = XLSX.readFile(xlsxPath)
+const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' })
 
-const employees = rows.map((row, i) => {
-  const id = `EMP-${String(i + 1).padStart(3, '0')}`
-  const name = String(row['EMPLOYEE NAME'] ?? '').trim()
-  const role = mapRole(row['Role'])
-  const phone = String(row['PHONE NUMBER'] ?? '').trim()
-  const idNumber = String(row['ID NUMBER'] ?? '').trim()
-  const nssfNumber = String(row['NSSF NUMBER'] ?? '').trim()
-  const pinNumber = String(row['KRA PIN NUMBER'] ?? '').trim()
-  const bankName = String(row['BANK NAME'] ?? '').trim()
-  const bankAccountNumber = String(row['BANK ACCOUNT NUMBER'] ?? '').trim()
-  return { id, name, role, phone, idNumber, nssfNumber, pinNumber, bankName, bankAccountNumber }
-})
+const employees = rows
+  .map((row) => {
+    const workNo = String(row['WORK NO.'] ?? '').trim()
+    const name = String(row['EMPLOYEE NAME'] ?? '').trim()
+    if (!workNo || !name) {
+      return null
+    }
 
-const lines = [
-  '/** Mananasi staff imported from EmployeeDataBase.xlsx — run `node scripts/buildStaffFromXlsx.mjs` after updating the spreadsheet. */',
-  'export const mananasiStaffEmployees = [',
-]
+    const contractType = normalizeContractType(row['Contract type'])
+    const dailyWageKes = parseNumber(row['Daily wage'])
+    const monthlySalaryKes = parseNumber(row.SALARY)
 
-for (const e of employees) {
-  lines.push('  {')
-  lines.push(`    id: '${esc(e.id)}',`)
-  lines.push(`    name: '${esc(e.name)}',`)
-  lines.push(`    role: '${e.role}',`)
-  lines.push(`    phone: '${esc(e.phone)}',`)
-  lines.push(`    idNumber: '${esc(e.idNumber)}',`)
-  lines.push(`    nssfNumber: '${esc(e.nssfNumber)}',`)
-  lines.push(`    pinNumber: '${esc(e.pinNumber)}',`)
-  lines.push(`    bankName: '${esc(e.bankName)}',`)
-  lines.push(`    bankAccountNumber: '${esc(e.bankAccountNumber)}',`)
-  lines.push('  },')
-}
+    return {
+      id: workNo,
+      name,
+      role: mapPositionToRole(row.POSITION),
+      contractType,
+      seasonalGrade: contractType === 'seasonal' ? normalizeSeasonalGrade(row['Job Grade']) : null,
+      dailyWageKes: contractType === 'regular' ? null : dailyWageKes,
+      monthlySalaryKes: contractType === 'regular' ? monthlySalaryKes : null,
+      position: String(row.POSITION ?? '').trim(),
+      department: String(row.DEPARTMENT ?? '').trim(),
+      phone: String(row['PHONE NUMBER'] ?? '').trim(),
+      email: String(row['EMAIL ADDRESS'] ?? '').trim(),
+      idNumber: String(row['ID NUMBER'] ?? '').trim(),
+      nssfNumber: String(row['NSSF NUMBER'] ?? '').trim(),
+      pinNumber: String(row['KRA PIN'] ?? '').trim(),
+      bankName: String(row['BANK NAME'] ?? '').trim(),
+      bankAccountNumber: String(row['BANK ACCOUNT NUMBER'] ?? '').trim(),
+      contractStartDate: parseIsoDate(row['CONTRACT START DATE']),
+      contractEndDate: parseIsoDate(row['CONTRACT END DATE']),
+      reportingManager: String(row['REPORTING MANAGER'] ?? '').trim(),
+    }
+  })
+  .filter(Boolean)
+  .sort((a, b) => Number(a.id) - Number(b.id))
 
-lines.push(']')
-lines.push('')
+const fileBody = `/** Mananasi staff imported from Employee Database App - Contract Dates Filled.xlsx — run \`node scripts/buildStaffFromXlsx.mjs\` after updating the spreadsheet. */
+export const mananasiStaffEmployees = ${JSON.stringify(employees, null, 2)}
+`
 
-fs.writeFileSync(outPath, lines.join('\n'), 'utf8')
-const admin = employees.find((e) => e.role === 'admin')
+fs.writeFileSync(outPath, fileBody, 'utf8')
+
+const admin = employees.find((employee) => employee.role === 'admin')
 console.log(`Wrote ${employees.length} employees to ${path.relative(root, outPath)}`)
 console.log(`Admin: ${admin?.name} (${admin?.id})`)
+console.log(
+  'Contracts:',
+  employees.reduce((counts, employee) => {
+    counts[employee.contractType] = (counts[employee.contractType] ?? 0) + 1
+    return counts
+  }, {}),
+)

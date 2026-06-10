@@ -1,13 +1,5 @@
 import { getAppState } from '../stateStore.js'
 
-function padEmployeeNumber(value) {
-  const digits = String(value).replace(/\D/g, '')
-  if (!digits) {
-    return ''
-  }
-  return digits.padStart(3, '0')
-}
-
 export async function resolveEmployeeIdFromDevicePin(pin) {
   const raw = String(pin ?? '').trim()
   if (!raw) {
@@ -17,31 +9,23 @@ export async function resolveEmployeeIdFromDevicePin(pin) {
   const state = await getAppState()
   const employees = Array.isArray(state?.data?.employees) ? state.data.employees : []
 
-  const byBiometricPin = employees.find(
-    (employee) => String(employee.biometricPin ?? '').trim() === raw,
-  )
-  if (byBiometricPin) {
-    return byBiometricPin.id
-  }
-
-  const direct = employees.find((employee) => employee.id === raw)
+  const direct = employees.find((employee) => String(employee.id).trim() === raw)
   if (direct) {
     return direct.id
   }
 
-  const upper = raw.toUpperCase()
-  if (upper.startsWith('EMP-')) {
-    const match = employees.find((employee) => employee.id.toUpperCase() === upper)
-    if (match) {
-      return match.id
-    }
+  const legacyBiometric = employees.find(
+    (employee) => String(employee.biometricPin ?? '').trim() === raw,
+  )
+  if (legacyBiometric) {
+    return legacyBiometric.id
   }
 
-  const padded = padEmployeeNumber(raw)
-  if (padded) {
-    const byCode = employees.find((employee) => employee.id === `EMP-${padded}`)
-    if (byCode) {
-      return byCode.id
+  const upper = raw.toUpperCase()
+  if (upper.startsWith('EMP-')) {
+    const legacy = employees.find((employee) => employee.id.toUpperCase() === upper)
+    if (legacy) {
+      return legacy.id
     }
   }
 

@@ -14,14 +14,29 @@ import { jsPDF } from 'jspdf'
 import './App.css'
 import logoStandard from '../LogoStandard.png'
 import { mananasiStaffEmployees } from './mananasiStaffEmployees.js'
+import {
+  calculateHarvestWage,
+  getContractTypeLabel,
+  getEmployeeDailyWageKes,
+  getSeasonalGradeLabel,
+} from './employeePay.js'
 import { useBackendSync } from './hooks/useBackendSync.js'
-import { fetchApiHealthStatus, fetchAppState, fetchAttendanceEvents } from './api/client.js'
+import {
+  fetchApiHealthStatus,
+  fetchAppState,
+  fetchAttendanceEvents,
+  fetchLeadershipAccounts,
+  leadershipLogin,
+  setLeadershipPassword,
+} from './api/client.js'
 
-function nextEmployeeSequenceNumber(employees) {
-  return employees.reduce((max, employee) => {
-    const match = /^EMP-(\d+)$/.exec(employee.id)
-    return match ? Math.max(max, Number(match[1])) : max
-  }, 0)
+function nextEmployeeWorkNumber(employees) {
+  return (
+    employees.reduce((max, employee) => {
+      const digits = Number(String(employee.id).replace(/\D/g, ''))
+      return Number.isFinite(digits) ? Math.max(max, digits) : max
+    }, 1000) + 1
+  )
 }
 
 function buildDemoClockedInIds(employeeList) {
@@ -155,7 +170,7 @@ const DATA_ENTRY_PERMISSION_IDS = [
 const DATA_ENTRY_PERMISSION_LABELS = {
   'harvesting-entry': 'Harvesting totals entry',
   'harvesting-batch': 'Harvesting batch allocation',
-  'harvesting-compensation': 'Harvesting compensation rules',
+  'harvesting-compensation': 'Harvesting incentive rule',
   'haulage-trip': 'Haulage trip creation',
   'haulage-mileage': 'Haulage mileage, fuel, and maintenance',
   'decortication-entry': 'Decortication shift and production entry',
@@ -167,11 +182,11 @@ const DATA_ENTRY_PERMISSION_LABELS = {
 
 /** Policy defaults from organisation roles; James (admin) always receives full access in code. */
 const DEFAULT_PAGE_ACCESS_BY_EMPLOYEE_ID = {
-  'EMP-001': ['dashboard', 'employees', 'attendance'],
-  'EMP-003': ['dashboard', 'employees', 'invoicing', 'customers', 'stock', 'attendance'],
-  'EMP-004': ['dashboard', 'stock'],
-  'EMP-005': [...PAGE_ACCESS_IDS],
-  'EMP-006': [
+  '1002': ['dashboard', 'employees', 'attendance'],
+  '1010': ['dashboard', 'employees', 'invoicing', 'customers', 'stock', 'attendance'],
+  '1018': ['dashboard', 'stock'],
+  '1019': [...PAGE_ACCESS_IDS],
+  '1004': [
     'dashboard',
     'stock',
     'decortication',
@@ -180,7 +195,7 @@ const DEFAULT_PAGE_ACCESS_BY_EMPLOYEE_ID = {
     'baling',
     'drying',
   ],
-  'EMP-007': [
+  '1005': [
     'dashboard',
     'stock',
     'decortication',
@@ -189,8 +204,8 @@ const DEFAULT_PAGE_ACCESS_BY_EMPLOYEE_ID = {
     'baling',
     'drying',
   ],
-  'EMP-010': ['dashboard', 'harvesting', 'haulage', 'worker-transport'],
-  'EMP-014': ['dashboard', 'harvesting'],
+  '1009': ['dashboard', 'harvesting', 'haulage', 'worker-transport'],
+  '1017': ['dashboard', 'harvesting'],
 }
 
 function readPagePermissionOverrides() {
@@ -400,10 +415,8 @@ const initialCustomers = [
 ]
 
 const defaultCompensationRules = {
-  baseWageKes: 723,
   incentiveThresholdKg: 250,
   incentiveRateKesPerKg: 1,
-  supervisorDailyWageKes: 723,
 }
 
 function seededKg(employeeIndex, dayOffset) {
@@ -596,20 +609,19 @@ function buildSeedRecords(harvesters, supervisors, compensationRules, activeBatc
       const kg = seededKg(employeeIndex, dayOffset)
       const clockInTime = `7:${String(10 + ((employeeIndex + dayOffset) % 10)).padStart(2, '0')}`
       const clockOutTime = `4:${String(40 + ((employeeIndex + dayOffset) % 20)).padStart(2, '0')}`
-      const incentiveKg = Math.max(0, kg - compensationRules.incentiveThresholdKg)
-      const incentiveKes = incentiveKg * compensationRules.incentiveRateKesPerKg
+      const wage = calculateHarvestWage(kg, harvester, compensationRules)
       records.push({
         id: `${harvester.id}-${harvestedOn}`,
         harvesterId: harvester.id,
         harvesterName: harvester.name,
         kg,
         harvestedOn,
-        baseWageKes: compensationRules.baseWageKes,
-        incentiveKes,
-        wageKes: compensationRules.baseWageKes + incentiveKes,
+        baseWageKes: wage.baseWageKes,
+        incentiveKes: wage.incentiveKes,
+        wageKes: wage.wageKes,
         recordedById: recordedBy.id,
         recordedByName: recordedBy.name,
-        supervisorDailyWageKes: compensationRules.supervisorDailyWageKes,
+        supervisorDailyWageKes: getEmployeeDailyWageKes(recordedBy),
         batchNumber: normalizeBatchNumber(activeBatchNumber),
         clockInTime,
         clockOutTime,
@@ -1920,26 +1932,17 @@ function CollapsibleSection({
 
 /** Shown under Leadership & Administration regardless of app role (from staff roster). */
 const leadershipTeamEmployeeIds = new Set([
-  'EMP-001',
-  'EMP-003',
-  'EMP-004',
-  'EMP-007',
-  'EMP-014',
-]) // Naomi Mbugua (HR), Doreen Muriithi (accountant), Cosmus Monyi (stores), David Manya (head technician), Francis Okomba (harvesting supervisor)
+  '1002',
+  '1010',
+  '1018',
+  '1005',
+  '1017',
+]) // Naomi, Doreen, Cosmus, David, Francis
 
 const AUTH_SESSION_KEY = 'mananasiAuthLeadershipUserId'
-const LEADER_PASSWORD_HASHES_KEY = 'mananasiLeaderPasswordHashes'
 
-function readLeaderPasswordHashes() {
-  if (typeof localStorage === 'undefined') {
-    return {}
-  }
-  try {
-    const raw = localStorage.getItem(LEADER_PASSWORD_HASHES_KEY)
-    return raw ? JSON.parse(raw) : {}
-  } catch {
-    return {}
-  }
+function isAppAdmin(user) {
+  return user?.role === 'admin'
 }
 
 function readAuthLeadershipId() {
@@ -1978,51 +1981,26 @@ function buildLoginUsername(displayName) {
     .replace(/[^a-z0-9.]+/g, '')
 }
 
-async function sha256Hex(message) {
-  const data = new TextEncoder().encode(message)
-  const hash = await crypto.subtle.digest('SHA-256', data)
-  return Array.from(new Uint8Array(hash))
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')
-}
-
-function LoginPage({ employees, leaderPasswordHashes, onLoginSuccess }) {
+function LoginPage({ onLoginSuccess }) {
   const navigate = useNavigate()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   async function handleSubmit(event) {
     event.preventDefault()
     setError('')
-    const normalized = buildLoginUsername(username)
-    if (!normalized) {
-      setError('Enter your username.')
-      return
+    setSubmitting(true)
+    try {
+      const employee = await leadershipLogin(username, password)
+      onLoginSuccess(employee.id)
+      navigate('/', { replace: true })
+    } catch (loginError) {
+      setError(loginError.message)
+    } finally {
+      setSubmitting(false)
     }
-    const leadership = employees.filter(isLeadershipTeamMember)
-    const member = leadership.find((emp) => buildLoginUsername(emp.name) === normalized)
-    if (!member) {
-      setError(
-        "That username was not found. Use your full name in lowercase with spaces as dots (for example naomi.wanjiku.mbugua). The Employees page lists each person's username.",
-      )
-      return
-    }
-    const storedHash = leaderPasswordHashes[member.id]
-    if (storedHash) {
-      const attempt = await sha256Hex(password)
-      if (attempt !== storedHash) {
-        setError('Incorrect password.')
-        return
-      }
-    } else if (password.trim() !== '') {
-      setError(
-        'No password has been saved for this account yet. Sign in once with a blank password, then ask an administrator to set a password on the Employees page.',
-      )
-      return
-    }
-    onLoginSuccess(member.id)
-    navigate('/', { replace: true })
   }
 
   return (
@@ -2031,9 +2009,9 @@ function LoginPage({ employees, leaderPasswordHashes, onLoginSuccess }) {
         <h1>Mananasi Fibre App</h1>
         <h2>Leadership sign in</h2>
         <p>
-          Usernames match each person's display name: lowercase, spaces become dots (see the
-          Employees page). If no password has been set yet, leave the password field blank once,
-          then an administrator can set one from Employees.
+          Usernames match each person&apos;s display name: lowercase, spaces become dots (for example{' '}
+          <code>naomi.wanjiku.mbugua</code>). If no password has been set yet, leave the password
+          field blank once, then ask the administrator to set one.
         </p>
         <form className="form-grid" onSubmit={handleSubmit}>
           <label>
@@ -2055,7 +2033,9 @@ function LoginPage({ employees, leaderPasswordHashes, onLoginSuccess }) {
               placeholder="Leave blank until a password is set"
             />
           </label>
-          <button type="submit">Sign in</button>
+          <button type="submit" disabled={submitting}>
+            {submitting ? 'Signing in…' : 'Sign in'}
+          </button>
         </form>
         {error ? <div className="placeholder">{error}</div> : null}
       </section>
@@ -2063,106 +2043,159 @@ function LoginPage({ employees, leaderPasswordHashes, onLoginSuccess }) {
   )
 }
 
-function LeadershipLoginSection({
-  employees,
-  leaderPasswordHashes,
-  canManage,
-  onSetLeadershipPassword,
-}) {
-  const leadershipForLogin = useMemo(
-    () =>
-      [...employees].filter(isLeadershipTeamMember).sort((a, b) => a.name.localeCompare(b.name)),
-    [employees],
-  )
-
-  return (
-    <section className="leadership-login-section">
-      <h3>Leadership sign-in accounts</h3>
-      <p>
-        These people use the leadership sign-in screen. Usernames are derived from their full name
-        (lowercase, spaces as dots). Passwords are stored on the server (hashed); set or change them
-        here.
-      </p>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Username</th>
-              <th>Password status</th>
-              {canManage ? <th>Set password</th> : null}
-            </tr>
-          </thead>
-          <tbody>
-            {leadershipForLogin.map((employee) => (
-              <LeadershipLoginTableRow
-                key={employee.id}
-                employee={employee}
-                hasPassword={Boolean(leaderPasswordHashes[employee.id])}
-                canManage={canManage}
-                onSetLeadershipPassword={onSetLeadershipPassword}
-              />
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  )
-}
-
-function LeadershipLoginTableRow({ employee, hasPassword, canManage, onSetLeadershipPassword }) {
+function LeadershipAccountRow({ account, adminEmployeeId, adminPassword, onPasswordSaved }) {
   const [nextPassword, setNextPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [message, setMessage] = useState('')
+  const [saving, setSaving] = useState(false)
 
   async function handleSave() {
     setMessage('')
-    const result = await onSetLeadershipPassword(employee.id, nextPassword, confirmPassword)
-    if (result.ok) {
+    setSaving(true)
+    try {
+      await setLeadershipPassword({
+        adminEmployeeId,
+        adminPassword,
+        targetEmployeeId: account.employeeId,
+        newPassword: nextPassword,
+        confirmPassword,
+      })
       setNextPassword('')
       setConfirmPassword('')
       setMessage('Password saved.')
-    } else {
-      setMessage(result.error ?? 'Could not save.')
+      onPasswordSaved()
+    } catch (error) {
+      setMessage(error.message)
+    } finally {
+      setSaving(false)
     }
   }
 
   return (
     <tr>
-      <td>{employee.name}</td>
+      <td>{account.name}</td>
       <td>
-        <code>{buildLoginUsername(employee.name)}</code>
+        <code>{account.username}</code>
       </td>
       <td>
-        {hasPassword
+        {account.hasPassword
           ? 'Password saved'
-          : 'Not set yet — you can sign in once with a blank password until a password is saved'}
+          : 'Not set yet — they can sign in once with a blank password'}
       </td>
-      {canManage ? (
-        <td>
-          <div className="leadership-password-tools">
-            <input
-              type="password"
-              value={nextPassword}
-              onChange={(event) => setNextPassword(event.target.value)}
-              placeholder="New password"
-              autoComplete="new-password"
-            />
-            <input
-              type="password"
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              placeholder="Confirm"
-              autoComplete="new-password"
-            />
-            <button type="button" onClick={handleSave}>
-              Save password
-            </button>
-            {message ? <span className="inline-hint">{message}</span> : null}
-          </div>
-        </td>
-      ) : null}
+      <td>
+        <div className="leadership-password-tools">
+          <input
+            type="password"
+            value={nextPassword}
+            onChange={(event) => setNextPassword(event.target.value)}
+            placeholder="New password"
+            autoComplete="new-password"
+          />
+          <input
+            type="password"
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+            placeholder="Confirm"
+            autoComplete="new-password"
+          />
+          <button type="button" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving…' : 'Save password'}
+          </button>
+          {message ? <span className="inline-hint">{message}</span> : null}
+        </div>
+      </td>
     </tr>
+  )
+}
+
+function LeadershipAccountsPage({ currentUser }) {
+  const [adminPassword, setAdminPassword] = useState('')
+  const [unlocked, setUnlocked] = useState(false)
+  const [accounts, setAccounts] = useState([])
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  async function loadAccounts(password) {
+    const result = await fetchLeadershipAccounts(currentUser.id, password)
+    setAccounts(result.accounts)
+    setUnlocked(true)
+    setError('')
+  }
+
+  async function handleUnlock(event) {
+    event.preventDefault()
+    setError('')
+    setLoading(true)
+    try {
+      await loadAccounts(adminPassword)
+    } catch (unlockError) {
+      setUnlocked(false)
+      setAccounts([])
+      setError(unlockError.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (!isAppAdmin(currentUser)) {
+    return <Navigate to="/" replace />
+  }
+
+  return (
+    <section className="panel">
+      <h2>Leadership sign-in accounts</h2>
+      <p>
+        <Link to="/employees">Back to employees</Link>
+      </p>
+      <p>
+        Only the administrator can view or change leadership passwords. Hashes are stored privately on
+        the server and are not included in the general app data sync.
+      </p>
+
+      {!unlocked ? (
+        <form className="form-grid" onSubmit={handleUnlock}>
+          <label>
+            Confirm your administrator password
+            <input
+              type="password"
+              value={adminPassword}
+              onChange={(event) => setAdminPassword(event.target.value)}
+              autoComplete="current-password"
+              placeholder="Required to unlock this page"
+            />
+          </label>
+          <button type="submit" disabled={loading}>
+            {loading ? 'Verifying…' : 'Unlock account management'}
+          </button>
+        </form>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Username</th>
+                <th>Password status</th>
+                <th>Set password</th>
+              </tr>
+            </thead>
+            <tbody>
+              {accounts.map((account) => (
+                <LeadershipAccountRow
+                  key={account.employeeId}
+                  account={account}
+                  adminEmployeeId={currentUser.id}
+                  adminPassword={adminPassword}
+                  onPasswordSaved={() => loadAccounts(adminPassword)}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {error ? <div className="placeholder">{error}</div> : null}
+    </section>
   )
 }
 
@@ -2287,8 +2320,6 @@ function AddEmployeePage({
   employees,
   currentUser,
   onAddEmployee,
-  leaderPasswordHashes,
-  onSetLeadershipPassword,
   pagePermissionOverrides,
   onSaveEmployeePageAccess,
   onClearEmployeePageAccessOverride,
@@ -2418,13 +2449,6 @@ function AddEmployeePage({
         </button>
       </form>
 
-      <LeadershipLoginSection
-        employees={employees}
-        leaderPasswordHashes={leaderPasswordHashes}
-        canManage={canManageEmployees}
-        onSetLeadershipPassword={onSetLeadershipPassword}
-      />
-
       <PageAccessAdminSection
         employees={employees}
         currentUser={currentUser}
@@ -2436,14 +2460,7 @@ function AddEmployeePage({
   )
 }
 
-function EmployeesPage({
-  employees,
-  currentUser,
-  harvestingDateFrom,
-  harvestingDateTo,
-  leaderPasswordHashes,
-  onSetLeadershipPassword,
-}) {
+function EmployeesPage({ employees, currentUser, harvestingDateFrom, harvestingDateTo }) {
   const navigate = useNavigate()
   const canManageEmployees =
     currentUser?.role === 'admin' || currentUser?.role === 'harvesting-manager'
@@ -2494,14 +2511,15 @@ function EmployeesPage({
         <button type="button" disabled={!canManageEmployees} onClick={() => navigate('/employees/new')}>
           Add Employee
         </button>
+        {isAppAdmin(currentUser) ? (
+          <>
+            {' '}
+            <Link to="/admin/sign-in-accounts" className="action-link">
+              Manage leadership sign-in accounts
+            </Link>
+          </>
+        ) : null}
       </p>
-
-      <LeadershipLoginSection
-        employees={employees}
-        leaderPasswordHashes={leaderPasswordHashes}
-        canManage={canManageEmployees}
-        onSetLeadershipPassword={onSetLeadershipPassword}
-      />
 
       {orderedRoles.map((roleItem) => {
         const roleEmployees = (employeesByRole[roleItem.id] ?? [])
@@ -2518,16 +2536,25 @@ function EmployeesPage({
               <table>
                 <thead>
                   <tr>
-                    <th>ID</th>
+                    <th>Work No</th>
                     <th>Name</th>
+                    <th>Contract</th>
                     <th>View details</th>
                   </tr>
                 </thead>
                 <tbody>
                   {roleEmployees.map((employee) => (
                     <tr key={employee.id}>
-                      <td>{employee.id}</td>
+                      <td>
+                        <code>{employee.id}</code>
+                      </td>
                       <td>{employee.name}</td>
+                      <td>
+                        {getContractTypeLabel(employee.contractType)}
+                        {employee.contractType === 'seasonal' && employee.seasonalGrade
+                          ? ` (${getSeasonalGradeLabel(employee.seasonalGrade)})`
+                          : ''}
+                      </td>
                       <td>
                         <Link
                           to={`/employees/${employee.id}?from=${harvestingDateFrom}&to=${harvestingDateTo}`}
@@ -2540,7 +2567,7 @@ function EmployeesPage({
                   ))}
                   {roleEmployees.length === 0 && (
                     <tr>
-                      <td colSpan="3">No employees with this role yet.</td>
+                      <td colSpan="4">No employees with this role yet.</td>
                     </tr>
                   )}
                 </tbody>
@@ -2988,11 +3015,32 @@ function EmployeeRecordPage({
         <article className="card">
           <h3>{employee.name}</h3>
           <p>
-            <strong>ID:</strong> {employee.id}
+            <strong>Work No / scanner ID:</strong> <code>{employee.id}</code>
           </p>
           <p>
             <strong>Role:</strong> {getEmployeeRoleLabel(employee.role)}
           </p>
+          <p>
+            <strong>Contract:</strong> {getContractTypeLabel(employee.contractType)}
+            {employee.contractType === 'seasonal' && employee.seasonalGrade
+              ? ` (${getSeasonalGradeLabel(employee.seasonalGrade)})`
+              : ''}
+          </p>
+          {employee.contractType === 'regular' ? (
+            <p>
+              <strong>Monthly salary:</strong>{' '}
+              {employee.monthlySalaryKes
+                ? `KES ${Number(employee.monthlySalaryKes).toLocaleString()}`
+                : 'Not set'}
+            </p>
+          ) : (
+            <p>
+              <strong>Daily rate:</strong>{' '}
+              {employee.dailyWageKes
+                ? `KES ${Number(employee.dailyWageKes).toLocaleString()}`
+                : 'Not set'}
+            </p>
+          )}
           <p>
             <strong>Status:</strong>{' '}
             <span className={`badge ${clockedInIds.includes(employee.id) ? 'badge-on' : 'badge-off'}`}>
@@ -3012,12 +3060,21 @@ function EmployeeRecordPage({
         </article>
         <article className="card">
           <h3>Employment details</h3>
+          <p><strong>Position:</strong> {employee.position || 'Not set'}</p>
+          <p><strong>Department:</strong> {employee.department || 'Not set'}</p>
           <p><strong>Phone:</strong> {employee.phone || 'Not set'}</p>
+          <p><strong>Email:</strong> {employee.email || 'Not set'}</p>
           <p><strong>ID number:</strong> {employee.idNumber || 'Not set'}</p>
           <p><strong>NSSF number:</strong> {employee.nssfNumber || 'Not set'}</p>
           <p><strong>KRA PIN:</strong> {employee.pinNumber || 'Not set'}</p>
           <p><strong>Bank:</strong> {employee.bankName || 'Not set'}</p>
           <p><strong>Account number:</strong> {employee.bankAccountNumber || 'Not set'}</p>
+          <p>
+            <strong>Contract period:</strong>{' '}
+            {employee.contractStartDate && employee.contractEndDate
+              ? `${formatDisplayDate(employee.contractStartDate)} – ${formatDisplayDate(employee.contractEndDate)}`
+              : 'Not set'}
+          </p>
         </article>
         <article className="card">
           <h3>Activity totals</h3>
@@ -3140,7 +3197,6 @@ function EmployeeEditPage({
       idNumber: String(formData.get('profileIdNumber') ?? ''),
       nssfNumber: String(formData.get('profileNssfNumber') ?? ''),
       pinNumber: String(formData.get('profilePinNumber') ?? ''),
-      biometricPin: String(formData.get('profileBiometricPin') ?? ''),
       bankName: String(formData.get('profileBankName') ?? ''),
       bankAccountNumber: String(formData.get('profileBankAccountNumber') ?? ''),
     })
@@ -3255,7 +3311,7 @@ function EmployeeEditPage({
             <p className="placeholder">Only Admin or Harvesting Manager can edit these fields.</p>
           )}
           <form
-            key={`${employee.id}-${employee.phone ?? ''}-${employee.idNumber ?? ''}-${employee.nssfNumber ?? ''}-${employee.pinNumber ?? ''}-${employee.biometricPin ?? ''}-${employee.bankName ?? ''}-${employee.bankAccountNumber ?? ''}`}
+            key={`${employee.id}-${employee.phone ?? ''}-${employee.idNumber ?? ''}-${employee.nssfNumber ?? ''}-${employee.pinNumber ?? ''}-${employee.bankName ?? ''}-${employee.bankAccountNumber ?? ''}`}
             className="form-grid"
             onSubmit={handleProfileSubmit}
           >
@@ -3287,15 +3343,9 @@ function EmployeeEditPage({
                 disabled={!canEditEmployeeProfile}
               />
             </label>
-            <label>
-              Biometric scanner User ID
-              <input
-                name="profileBiometricPin"
-                defaultValue={employee.biometricPin ?? ''}
-                disabled={!canEditEmployeeProfile}
-                placeholder="e.g. 1001"
-              />
-            </label>
+            <p className="placeholder">
+              Scanner User ID is the employee Work No: <code>{employee.id}</code>
+            </p>
             <label>
               Bank name
               <input name="profileBankName" defaultValue={employee.bankName ?? ''} disabled={!canEditEmployeeProfile} />
@@ -3316,62 +3366,18 @@ function EmployeeEditPage({
   )
 }
 
-function BiometricPinMappingRow({ employee, canManage, onUpdateBiometricPin }) {
-  const [nextPin, setNextPin] = useState(String(employee.biometricPin ?? ''))
-  const [message, setMessage] = useState('')
-
-  useEffect(() => {
-    setNextPin(String(employee.biometricPin ?? ''))
-  }, [employee.biometricPin])
-
-  function handleSave(event) {
-    event.preventDefault()
-    const result = onUpdateBiometricPin(employee.id, nextPin)
-    if (result?.ok === false) {
-      setMessage(result.error ?? 'Could not save.')
-      return
-    }
-    setMessage('Saved.')
-  }
-
-  return (
-    <tr>
-      <td>{employee.name}</td>
-      <td>{employee.id}</td>
-      <td>{employee.biometricPin ? <code>{employee.biometricPin}</code> : '—'}</td>
-      {canManage ? (
-        <td>
-          <form className="inline-pin-form" onSubmit={handleSave}>
-            <input
-              value={nextPin}
-              onChange={(event) => setNextPin(event.target.value)}
-              placeholder="e.g. 1001"
-              inputMode="numeric"
-            />
-            <button type="submit">Save</button>
-          </form>
-          {message ? <span className="inline-pin-message">{message}</span> : null}
-        </td>
-      ) : null}
-    </tr>
-  )
-}
-
 const attendanceApiBase = String(import.meta.env.VITE_API_URL ?? '')
   .trim()
   .replace(/\/+$/, '')
 
 function AttendancePage({
   employees,
-  currentUser,
   clockedInIds,
   attendanceEvents,
-  onUpdateBiometricPin,
   onRefreshAttendance,
   attendanceRefreshing,
 }) {
   const [apiHealth, setApiHealth] = useState(null)
-  const canManageBiometricPins = currentUser?.role === 'admin' || currentUser?.role === 'harvesting-manager'
 
   useEffect(() => {
     let cancelled = false
@@ -3394,7 +3400,6 @@ function AttendancePage({
     () => [...employees].sort((a, b) => a.name.localeCompare(b.name)),
     [employees],
   )
-  const mappedCount = employees.filter((employee) => String(employee.biometricPin ?? '').trim()).length
   const registeredScanners = useMemo(() => {
     const serials = new Set()
     attendanceEvents.forEach((event) => {
@@ -3432,16 +3437,16 @@ function AttendancePage({
       ) : null}
       <p>
         Planned production device: <strong>{integrationDevice.name}</strong>. ZKTeco scanners push
-        to <code>/iclock/cdata</code> on your Railway API. Each person&apos;s <strong>scanner User
-        ID</strong> (for example <strong>1001</strong>) is linked to their Mananasi employee record
-        below — it does not have to match <code>EMP-###</code>.
+        to <code>/iclock/cdata</code> on your Railway API. Each employee&apos;s <strong>Work No</strong>{' '}
+        from the employee database is also their <strong>scanner User ID</strong> (for example{' '}
+        <code>5010</code>).
       </p>
       <p>
-        With <strong>multiple scanners</strong>, enroll the <strong>same User ID</strong> on every
+        With <strong>multiple scanners</strong>, enroll the <strong>same Work No</strong> on every
         device. Clock-in status is shared across all scanners; each event records which scanner was
         used.
       </p>
-      <h3>Scanner PIN mapping ({mappedCount} linked)</h3>
+      <h3>Scanner IDs</h3>
       {registeredScanners.length > 0 ? (
         <p>
           Scanners seen on the server:{' '}
@@ -3457,19 +3462,17 @@ function AttendancePage({
           <thead>
             <tr>
               <th>Employee</th>
-              <th>Mananasi ID</th>
-              <th>Scanner User ID</th>
-              {canManageBiometricPins ? <th>Set scanner User ID</th> : null}
+              <th>Work No / scanner User ID</th>
             </tr>
           </thead>
           <tbody>
             {sortedEmployees.map((employee) => (
-              <BiometricPinMappingRow
-                key={employee.id}
-                employee={employee}
-                canManage={canManageBiometricPins}
-                onUpdateBiometricPin={onUpdateBiometricPin}
-              />
+              <tr key={employee.id}>
+                <td>{employee.name}</td>
+                <td>
+                  <code>{employee.id}</code>
+                </td>
+              </tr>
             ))}
           </tbody>
         </table>
@@ -3477,9 +3480,8 @@ function AttendancePage({
 
       <h3>Link scanner to Railway</h3>
       <p>
-        The scanner must push attendance to your Railway API. Mapping in the table above only tells
-        Mananasi who each scanner User ID is — the device still needs network settings pointing at
-        Railway.
+        The scanner must push attendance to your Railway API. The device User ID must match the
+        employee Work No from the table above.
       </p>
       {attendanceApiBase ? (
         <ul className="hardware-list">
@@ -3617,20 +3619,14 @@ function HarvestingPage({
     }
   }, [records])
 
-  const [baseWageInput, setBaseWageInput] = useState(String(compensationRules.baseWageKes))
   const [incentiveRateInput, setIncentiveRateInput] = useState(
     String(compensationRules.incentiveRateKesPerKg),
-  )
-  const [supervisorWageInput, setSupervisorWageInput] = useState(
-    String(compensationRules.supervisorDailyWageKes),
   )
   const [batchStartYearInput, setBatchStartYearInput] = useState('2025')
   const [batchFieldInput, setBatchFieldInput] = useState('006')
 
   useEffect(() => {
-    setBaseWageInput(String(compensationRules.baseWageKes))
     setIncentiveRateInput(String(compensationRules.incentiveRateKesPerKg))
-    setSupervisorWageInput(String(compensationRules.supervisorDailyWageKes))
   }, [compensationRules])
 
   const isAdmin = currentUser?.role === 'admin'
@@ -3695,24 +3691,16 @@ function HarvestingPage({
     if (!canManageCompensation) {
       return
     }
-    const baseWageKes = Number(baseWageInput)
     const incentiveRateKesPerKg = Number(incentiveRateInput)
-    const supervisorDailyWageKes = Number(supervisorWageInput)
-    if (
-      Number.isNaN(baseWageKes) ||
-      Number.isNaN(incentiveRateKesPerKg) ||
-      Number.isNaN(supervisorDailyWageKes)
-    ) {
+    if (Number.isNaN(incentiveRateKesPerKg)) {
       return
     }
-    if (baseWageKes < 0 || incentiveRateKesPerKg < 0 || supervisorDailyWageKes < 0) {
+    if (incentiveRateKesPerKg < 0) {
       return
     }
     onSaveCompensationRules({
-      baseWageKes,
       incentiveRateKesPerKg,
       incentiveThresholdKg: compensationRules.incentiveThresholdKg,
-      supervisorDailyWageKes,
     })
   }
 
@@ -3896,9 +3884,10 @@ function HarvestingPage({
       </div>
 
       <div className="rules-box">
-        <strong>Pay Rule:</strong> Base KES {compensationRules.baseWageKes} + KES{' '}
-        {compensationRules.incentiveRateKesPerKg} per kg above{' '}
-        {compensationRules.incentiveThresholdKg}kg.
+        <strong>Pay Rule:</strong> Each harvester&apos;s daily base rate from their employee record +
+        KES {compensationRules.incentiveRateKesPerKg} per kg above{' '}
+        {compensationRules.incentiveThresholdKg} kg. Supervisors are paid their own daily rate for
+        each day worked.
       </div>
       <div className="rules-box">
         <strong>Active Batch Number:</strong> {activeBatchNumber}
@@ -3949,17 +3938,7 @@ function HarvestingPage({
       >
         <form className="form-grid" onSubmit={handleCompensationSubmit}>
           <label>
-            Base Wage (KES per day)
-            <input
-              type="number"
-              min="0"
-              value={baseWageInput}
-              onChange={(event) => setBaseWageInput(event.target.value)}
-              disabled={!canManageCompensation}
-            />
-          </label>
-          <label>
-            Incentive (KES per kg above 250kg)
+            Incentive (KES per kg above {compensationRules.incentiveThresholdKg} kg)
             <input
               type="number"
               min="0"
@@ -3968,18 +3947,8 @@ function HarvestingPage({
               disabled={!canManageCompensation}
             />
           </label>
-          <label>
-            Supervisor Daily Remuneration (KES per day)
-            <input
-              type="number"
-              min="0"
-              value={supervisorWageInput}
-              onChange={(event) => setSupervisorWageInput(event.target.value)}
-              disabled={!canManageCompensation}
-            />
-          </label>
           <button type="submit" disabled={!canManageCompensation}>
-            Save Compensation Rules
+            Save incentive rule
           </button>
         </form>
       </CollapsibleSection>
@@ -7966,17 +7935,23 @@ function hydrateAppState(data, setters) {
   if (!data) {
     return
   }
-  if (Array.isArray(data.employees)) setters.setEmployees(data.employees)
+  if (Array.isArray(data.employees)) {
+    const needsEmployeeMigration = data.employees.some((employee) =>
+      String(employee.id).startsWith('EMP-'),
+    )
+    setters.setEmployees(
+      needsEmployeeMigration ? [...mananasiStaffEmployees] : data.employees,
+    )
+  }
   if (Array.isArray(data.customers)) setters.setCustomers(data.customers)
   if (typeof data.activeBatchNumber === 'string') setters.setActiveBatchNumber(data.activeBatchNumber)
   if (Array.isArray(data.clockedInIds)) setters.setClockedInIds(data.clockedInIds)
   if (Array.isArray(data.records)) setters.setRecords(data.records)
-  if (data.compensationRules) setters.setCompensationRules(data.compensationRules)
-  if (data.leaderPasswordHashes) {
-    setters.setLeaderPasswordHashes((prev) => ({
-      ...prev,
-      ...data.leaderPasswordHashes,
-    }))
+  if (data.compensationRules) {
+    setters.setCompensationRules({
+      incentiveThresholdKg: data.compensationRules.incentiveThresholdKg ?? 250,
+      incentiveRateKesPerKg: data.compensationRules.incentiveRateKesPerKg ?? 1,
+    })
   }
   if (data.pagePermissionOverrides) setters.setPagePermissionOverrides(data.pagePermissionOverrides)
   if (data.dataEntryPermissionOverrides) {
@@ -8048,7 +8023,6 @@ function App() {
   const [authLeadershipId, setAuthLeadershipId] = useState(() =>
     readValidAuthLeadershipId(mananasiStaffEmployees),
   )
-  const [leaderPasswordHashes, setLeaderPasswordHashes] = useState(readLeaderPasswordHashes)
   const [pagePermissionOverrides, setPagePermissionOverrides] = useState(readPagePermissionOverrides)
   const [dataEntryPermissionOverrides, setDataEntryPermissionOverrides] = useState(
     readDataEntryPermissionOverrides,
@@ -8202,7 +8176,6 @@ function App() {
       setClockedInIds,
       setRecords,
       setCompensationRules,
-      setLeaderPasswordHashes,
       setPagePermissionOverrides,
       setDataEntryPermissionOverrides,
       setHaulageTrips,
@@ -8230,7 +8203,6 @@ function App() {
       clockedInIds,
       records,
       compensationRules,
-      leaderPasswordHashes,
       pagePermissionOverrides,
       dataEntryPermissionOverrides,
       haulageTrips,
@@ -8253,7 +8225,6 @@ function App() {
       clockedInIds,
       records,
       compensationRules,
-      leaderPasswordHashes,
       pagePermissionOverrides,
       dataEntryPermissionOverrides,
       haulageTrips,
@@ -8386,42 +8357,29 @@ function App() {
       bankName = '',
       bankAccountNumber = '',
     } = input
-    const nextSeq = nextEmployeeSequenceNumber(employees) + 1
+    const nextWorkNo = String(nextEmployeeWorkNumber(employees))
     const employee = {
-      id: `EMP-${String(nextSeq).padStart(3, '0')}`,
+      id: nextWorkNo,
       name,
       role,
+      contractType: 'seasonal',
+      seasonalGrade: null,
+      dailyWageKes: null,
+      monthlySalaryKes: null,
+      position: getEmployeeRoleLabel(role),
+      department: '',
       phone: String(phone ?? '').trim(),
+      email: '',
       idNumber: String(idNumber ?? '').trim(),
       nssfNumber: String(nssfNumber ?? '').trim(),
       pinNumber: String(pinNumber ?? '').trim(),
       bankName: String(bankName ?? '').trim(),
       bankAccountNumber: String(bankAccountNumber ?? '').trim(),
-      biometricPin: '',
+      contractStartDate: '',
+      contractEndDate: '',
+      reportingManager: '',
     }
     setEmployees((prev) => [...prev, employee])
-  }
-
-  function handleUpdateBiometricPin(employeeId, biometricPin) {
-    const normalized = String(biometricPin ?? '').trim()
-    if (normalized) {
-      const duplicate = employees.find(
-        (employee) =>
-          employee.id !== employeeId && String(employee.biometricPin ?? '').trim() === normalized,
-      )
-      if (duplicate) {
-        return {
-          ok: false,
-          error: `Scanner User ID ${normalized} is already linked to ${duplicate.name}.`,
-        }
-      }
-    }
-    setEmployees((prev) =>
-      prev.map((employee) =>
-        employee.id === employeeId ? { ...employee, biometricPin: normalized } : employee,
-      ),
-    )
-    return { ok: true }
   }
 
   function handleUpdateEmployeeRole(employeeId, role) {
@@ -8440,30 +8398,12 @@ function App() {
               idNumber: String(profile.idNumber ?? '').trim(),
               nssfNumber: String(profile.nssfNumber ?? '').trim(),
               pinNumber: String(profile.pinNumber ?? '').trim(),
-              biometricPin: String(profile.biometricPin ?? '').trim(),
               bankName: String(profile.bankName ?? '').trim(),
               bankAccountNumber: String(profile.bankAccountNumber ?? '').trim(),
             }
           : employee,
       ),
     )
-  }
-
-  async function handleSetLeadershipPassword(employeeId, newPassword, confirmPassword) {
-    const employee = employees.find((item) => item.id === employeeId)
-    if (!employee || !isLeadershipTeamMember(employee)) {
-      return { ok: false, error: 'That person is not on the leadership team.' }
-    }
-    if (newPassword !== confirmPassword) {
-      return { ok: false, error: 'Passwords do not match.' }
-    }
-    if (String(newPassword).length < 6) {
-      return { ok: false, error: 'Use at least 6 characters.' }
-    }
-    const hash = await sha256Hex(String(newPassword))
-    const next = { ...leaderPasswordHashes, [employeeId]: hash }
-    setLeaderPasswordHashes(next)
-    return { ok: true }
   }
 
   function handleLogout() {
@@ -8524,16 +8464,6 @@ function App() {
     }
   }
 
-  function calculateWage(kg) {
-    const incentiveKg = Math.max(0, kg - compensationRules.incentiveThresholdKg)
-    const incentiveKes = incentiveKg * compensationRules.incentiveRateKesPerKg
-    return {
-      baseWageKes: compensationRules.baseWageKes,
-      incentiveKes,
-      wageKes: compensationRules.baseWageKes + incentiveKes,
-    }
-  }
-
   function handleSubmitHarvestRecord(harvesterId, kg, recordedById) {
     const harvester = employees.find((employee) => employee.id === harvesterId)
     const recorder = employees.find((employee) => employee.id === recordedById)
@@ -8550,7 +8480,8 @@ function App() {
       return
     }
 
-    const wage = calculateWage(kg)
+    const wage = calculateHarvestWage(kg, harvester, compensationRules)
+    const supervisor = employees.find((employee) => employee.id === recordedById)
     const nextRecord = {
       id: `${harvesterId}-${Date.now()}`,
       harvesterId,
@@ -8559,7 +8490,7 @@ function App() {
       harvestedOn: new Date().toISOString().slice(0, 10),
       clockInTime: '7:15',
       clockOutTime: '4:45',
-      supervisorDailyWageKes: compensationRules.supervisorDailyWageKes,
+      supervisorDailyWageKes: supervisor ? getEmployeeDailyWageKes(supervisor) : 0,
       batchNumber: normalizeBatchNumber(activeBatchNumber),
       ...wage,
       recordedById,
@@ -8725,8 +8656,6 @@ function App() {
           path="/login"
           element={
             <LoginPage
-              employees={employees}
-              leaderPasswordHashes={leaderPasswordHashes}
               onLoginSuccess={(id) => {
                 setAuthLeadershipId(id)
                 sessionStorage.setItem(AUTH_SESSION_KEY, id)
@@ -8762,6 +8691,9 @@ function App() {
         <nav>
           {allowedPages.has('dashboard') ? <NavLink to="/">Dashboard</NavLink> : null}
           {allowedPages.has('employees') ? <NavLink to="/employees">Employees</NavLink> : null}
+          {isAppAdmin(currentUser) ? (
+            <NavLink to="/admin/sign-in-accounts">Sign-in accounts</NavLink>
+          ) : null}
           {allowedPages.has('customers') ? <NavLink to="/customers">Customers</NavLink> : null}
           {allowedPages.has('stock') ? <NavLink to="/stock">Stock</NavLink> : null}
           {allowedPages.has('harvesting') ? (
@@ -8796,10 +8728,12 @@ function App() {
                 currentUser={currentUser}
                 harvestingDateFrom={harvestingDateFrom}
                 harvestingDateTo={harvestingDateTo}
-                leaderPasswordHashes={leaderPasswordHashes}
-                onSetLeadershipPassword={handleSetLeadershipPassword}
               />
             }
+          />
+          <Route
+            path="/admin/sign-in-accounts"
+            element={<LeadershipAccountsPage currentUser={currentUser} />}
           />
           <Route
             path="/employees/new"
@@ -8808,8 +8742,6 @@ function App() {
                 employees={employees}
                 currentUser={currentUser}
                 onAddEmployee={handleAddEmployee}
-                leaderPasswordHashes={leaderPasswordHashes}
-                onSetLeadershipPassword={handleSetLeadershipPassword}
                 pagePermissionOverrides={pagePermissionOverrides}
                 onSaveEmployeePageAccess={handleSaveEmployeePageAccess}
                 onClearEmployeePageAccessOverride={handleClearEmployeePageAccessOverride}
@@ -9076,10 +9008,8 @@ function App() {
             element={
               <AttendancePage
                 employees={employees}
-                currentUser={currentUser}
                 clockedInIds={clockedInIds}
                 attendanceEvents={attendanceEvents}
-                onUpdateBiometricPin={handleUpdateBiometricPin}
                 onRefreshAttendance={handleRefreshAttendance}
                 attendanceRefreshing={attendanceRefreshing}
               />
