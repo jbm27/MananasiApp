@@ -17,6 +17,13 @@ export async function resolveEmployeeIdFromDevicePin(pin) {
   const state = await getAppState()
   const employees = Array.isArray(state?.data?.employees) ? state.data.employees : []
 
+  const byBiometricPin = employees.find(
+    (employee) => String(employee.biometricPin ?? '').trim() === raw,
+  )
+  if (byBiometricPin) {
+    return byBiometricPin.id
+  }
+
   const direct = employees.find((employee) => employee.id === raw)
   if (direct) {
     return direct.id

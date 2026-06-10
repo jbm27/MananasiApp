@@ -3121,6 +3121,7 @@ function EmployeeEditPage({
       idNumber: String(formData.get('profileIdNumber') ?? ''),
       nssfNumber: String(formData.get('profileNssfNumber') ?? ''),
       pinNumber: String(formData.get('profilePinNumber') ?? ''),
+      biometricPin: String(formData.get('profileBiometricPin') ?? ''),
       bankName: String(formData.get('profileBankName') ?? ''),
       bankAccountNumber: String(formData.get('profileBankAccountNumber') ?? ''),
     })
@@ -3235,7 +3236,7 @@ function EmployeeEditPage({
             <p className="placeholder">Only Admin or Harvesting Manager can edit these fields.</p>
           )}
           <form
-            key={`${employee.id}-${employee.phone ?? ''}-${employee.idNumber ?? ''}-${employee.nssfNumber ?? ''}-${employee.pinNumber ?? ''}-${employee.bankName ?? ''}-${employee.bankAccountNumber ?? ''}`}
+            key={`${employee.id}-${employee.phone ?? ''}-${employee.idNumber ?? ''}-${employee.nssfNumber ?? ''}-${employee.pinNumber ?? ''}-${employee.biometricPin ?? ''}-${employee.bankName ?? ''}-${employee.bankAccountNumber ?? ''}`}
             className="form-grid"
             onSubmit={handleProfileSubmit}
           >
@@ -3268,6 +3269,15 @@ function EmployeeEditPage({
               />
             </label>
             <label>
+              Biometric scanner User ID
+              <input
+                name="profileBiometricPin"
+                defaultValue={employee.biometricPin ?? ''}
+                disabled={!canEditEmployeeProfile}
+                placeholder="e.g. 1001"
+              />
+            </label>
+            <label>
               Bank name
               <input name="profileBankName" defaultValue={employee.bankName ?? ''} disabled={!canEditEmployeeProfile} />
             </label>
@@ -3287,22 +3297,122 @@ function EmployeeEditPage({
   )
 }
 
+function BiometricPinMappingRow({ employee, canManage, onUpdateBiometricPin }) {
+  const [nextPin, setNextPin] = useState(String(employee.biometricPin ?? ''))
+  const [message, setMessage] = useState('')
+
+  useEffect(() => {
+    setNextPin(String(employee.biometricPin ?? ''))
+  }, [employee.biometricPin])
+
+  function handleSave(event) {
+    event.preventDefault()
+    const result = onUpdateBiometricPin(employee.id, nextPin)
+    if (result?.ok === false) {
+      setMessage(result.error ?? 'Could not save.')
+      return
+    }
+    setMessage('Saved.')
+  }
+
+  return (
+    <tr>
+      <td>{employee.name}</td>
+      <td>{employee.id}</td>
+      <td>{employee.biometricPin ? <code>{employee.biometricPin}</code> : '—'}</td>
+      {canManage ? (
+        <td>
+          <form className="inline-pin-form" onSubmit={handleSave}>
+            <input
+              value={nextPin}
+              onChange={(event) => setNextPin(event.target.value)}
+              placeholder="e.g. 1001"
+              inputMode="numeric"
+            />
+            <button type="submit">Save</button>
+          </form>
+          {message ? <span className="inline-pin-message">{message}</span> : null}
+        </td>
+      ) : null}
+    </tr>
+  )
+}
+
 function AttendancePage({
   employees,
+  currentUser,
   clockedInIds,
   attendanceEvents,
   onToggleClockStatus,
+  onUpdateBiometricPin,
   selectedAttendanceEmployeeId,
   onSelectAttendanceEmployee,
 }) {
+  const canManageBiometricPins = currentUser?.role === 'admin' || currentUser?.role === 'harvesting-manager'
+  const sortedEmployees = useMemo(
+    () => [...employees].sort((a, b) => a.name.localeCompare(b.name)),
+    [employees],
+  )
+  const mappedCount = employees.filter((employee) => String(employee.biometricPin ?? '').trim()).length
+  const registeredScanners = useMemo(() => {
+    const serials = new Set()
+    attendanceEvents.forEach((event) => {
+      const match = /^zkteco:(.+)$/.exec(String(event.deviceId ?? ''))
+      if (match) {
+        serials.add(match[1])
+      }
+    })
+    return [...serials].sort()
+  }, [attendanceEvents])
+
   return (
     <section className="panel">
       <h2>Attendance & Fingerprint Integration</h2>
       <p>
-        Planned production device: <strong>{integrationDevice.name}</strong>. ZKTeco devices
-        push to <code>/iclock/cdata</code> on your Railway API. Set each device user PIN to match
-        the employee number (for example PIN <strong>5</strong> for <strong>EMP-005</strong>).
+        Planned production device: <strong>{integrationDevice.name}</strong>. ZKTeco scanners push
+        to <code>/iclock/cdata</code> on your Railway API. Each person&apos;s <strong>scanner User
+        ID</strong> (for example <strong>1001</strong>) is linked to their Mananasi employee record
+        below — it does not have to match <code>EMP-###</code>.
       </p>
+      <p>
+        With <strong>multiple scanners</strong>, enroll the <strong>same User ID</strong> on every
+        device. Clock-in status is shared across all scanners; each event records which scanner was
+        used.
+      </p>
+      <h3>Scanner PIN mapping ({mappedCount} linked)</h3>
+      {registeredScanners.length > 0 ? (
+        <p>
+          Scanners seen on the server:{' '}
+          {registeredScanners.map((serial) => (
+            <code key={serial}>{serial}</code>
+          ))}
+        </p>
+      ) : (
+        <p className="placeholder">No scanner serial numbers recorded yet.</p>
+      )}
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Employee</th>
+              <th>Mananasi ID</th>
+              <th>Scanner User ID</th>
+              {canManageBiometricPins ? <th>Set scanner User ID</th> : null}
+            </tr>
+          </thead>
+          <tbody>
+            {sortedEmployees.map((employee) => (
+              <BiometricPinMappingRow
+                key={employee.id}
+                employee={employee}
+                canManage={canManageBiometricPins}
+                onUpdateBiometricPin={onUpdateBiometricPin}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
+
       <h3>Device & Test Modes</h3>
       <ul className="hardware-list">
         {attendanceHardwareNotes.map((option) => (
@@ -8210,8 +8320,31 @@ function App() {
       pinNumber: String(pinNumber ?? '').trim(),
       bankName: String(bankName ?? '').trim(),
       bankAccountNumber: String(bankAccountNumber ?? '').trim(),
+      biometricPin: '',
     }
     setEmployees((prev) => [...prev, employee])
+  }
+
+  function handleUpdateBiometricPin(employeeId, biometricPin) {
+    const normalized = String(biometricPin ?? '').trim()
+    if (normalized) {
+      const duplicate = employees.find(
+        (employee) =>
+          employee.id !== employeeId && String(employee.biometricPin ?? '').trim() === normalized,
+      )
+      if (duplicate) {
+        return {
+          ok: false,
+          error: `Scanner User ID ${normalized} is already linked to ${duplicate.name}.`,
+        }
+      }
+    }
+    setEmployees((prev) =>
+      prev.map((employee) =>
+        employee.id === employeeId ? { ...employee, biometricPin: normalized } : employee,
+      ),
+    )
+    return { ok: true }
   }
 
   function handleUpdateEmployeeRole(employeeId, role) {
@@ -8230,6 +8363,7 @@ function App() {
               idNumber: String(profile.idNumber ?? '').trim(),
               nssfNumber: String(profile.nssfNumber ?? '').trim(),
               pinNumber: String(profile.pinNumber ?? '').trim(),
+              biometricPin: String(profile.biometricPin ?? '').trim(),
               bankName: String(profile.bankName ?? '').trim(),
               bankAccountNumber: String(profile.bankAccountNumber ?? '').trim(),
             }
@@ -8867,9 +9001,11 @@ function App() {
             element={
               <AttendancePage
                 employees={employees}
+                currentUser={currentUser}
                 clockedInIds={clockedInIds}
                 attendanceEvents={attendanceEvents}
                 onToggleClockStatus={handleToggleClockStatus}
+                onUpdateBiometricPin={handleUpdateBiometricPin}
                 selectedAttendanceEmployeeId={selectedAttendanceEmployeeId}
                 onSelectAttendanceEmployee={setSelectedAttendanceEmployeeId}
               />
