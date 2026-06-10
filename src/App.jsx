@@ -22,7 +22,6 @@ import {
 } from './employeePay.js'
 import { useBackendSync } from './hooks/useBackendSync.js'
 import {
-  fetchApiHealthStatus,
   fetchAppState,
   fetchAttendanceEvents,
   fetchLeadershipAccounts,
@@ -125,7 +124,6 @@ const PAGE_ACCESS_IDS = [
   'employees',
   'customers',
   'stock',
-  'attendance',
   'harvesting',
   'haulage',
   'worker-transport',
@@ -142,7 +140,6 @@ const PAGE_ACCESS_LABELS = {
   employees: 'Employees',
   customers: 'Customers',
   stock: 'Stock',
-  attendance: 'Attendance',
   harvesting: 'Harvesting',
   haulage: 'Haulage',
   'worker-transport': 'Worker transport',
@@ -182,8 +179,8 @@ const DATA_ENTRY_PERMISSION_LABELS = {
 
 /** Policy defaults from organisation roles; James (admin) always receives full access in code. */
 const DEFAULT_PAGE_ACCESS_BY_EMPLOYEE_ID = {
-  '1002': ['dashboard', 'employees', 'attendance'],
-  '1010': ['dashboard', 'employees', 'invoicing', 'customers', 'stock', 'attendance'],
+  '1002': ['dashboard', 'employees'],
+  '1010': ['dashboard', 'employees', 'invoicing', 'customers', 'stock'],
   '1018': ['dashboard', 'stock'],
   '1019': [...PAGE_ACCESS_IDS],
   '1004': [
@@ -259,9 +256,6 @@ function pathnameToRequiredPageId(pathname) {
   }
   if (path.startsWith('/stock')) {
     return 'stock'
-  }
-  if (path.startsWith('/attendance')) {
-    return 'attendance'
   }
   if (path.startsWith('/activities/harvesting')) {
     return 'harvesting'
@@ -1095,7 +1089,7 @@ function HomePage({ employees, records, clockedInIds }) {
       <h2>Operations Dashboard</h2>
       <p>
         Welcome to the pineapple fibre business management system. The main workflows are
-        now connected to employees, attendance, and harvesting pay calculation.
+        now connected to employees, clock-in status, and harvesting pay calculation.
       </p>
       <div className="kpi-grid">
         <article className="card">
@@ -2460,10 +2454,21 @@ function AddEmployeePage({
   )
 }
 
-function EmployeesPage({ employees, currentUser, harvestingDateFrom, harvestingDateTo }) {
+function EmployeesPage({
+  employees,
+  currentUser,
+  harvestingDateFrom,
+  harvestingDateTo,
+  clockedInIds,
+  attendanceEvents,
+  onRefreshAttendance,
+  attendanceRefreshing,
+}) {
   const navigate = useNavigate()
   const canManageEmployees =
     currentUser?.role === 'admin' || currentUser?.role === 'harvesting-manager'
+  const [showRecentEvents, setShowRecentEvents] = useState(false)
+  const clockedInCount = clockedInIds.length
   const roleDefinitions = useMemo(
     () => employeeRoleOptions.map((option) => ({ id: option.value, name: option.label })),
     [],
@@ -2521,6 +2526,57 @@ function EmployeesPage({ employees, currentUser, harvestingDateFrom, harvestingD
         ) : null}
       </p>
 
+      <div className="attendance-toolbar">
+        <p>
+          <strong>{clockedInCount}</strong> of {employees.length} employees clocked in today.
+          Scanner User ID on each device matches the employee Work No.
+        </p>
+        <button type="button" onClick={onRefreshAttendance} disabled={attendanceRefreshing}>
+          {attendanceRefreshing ? 'Refreshing…' : 'Refresh clock-in status'}
+        </button>
+      </div>
+
+      <CollapsibleSection
+        title={`Recent clock events (${attendanceEvents.length})`}
+        isOpen={showRecentEvents}
+        onToggle={() => setShowRecentEvents((prev) => !prev)}
+      >
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Employee</th>
+                <th>Work No</th>
+                <th>Event</th>
+                <th>Device</th>
+              </tr>
+            </thead>
+            <tbody>
+              {attendanceEvents.map((event) => {
+                const employee = employees.find((item) => item.id === event.employeeId)
+                return (
+                  <tr key={event.id}>
+                    <td>{new Date(event.occurredAt).toLocaleString()}</td>
+                    <td>{employee?.name ?? 'Unknown'}</td>
+                    <td>
+                      <code>{event.employeeId}</code>
+                    </td>
+                    <td>{event.eventType === 'clock_in' ? 'Clock In' : 'Clock Out'}</td>
+                    <td>{event.deviceId ?? '—'}</td>
+                  </tr>
+                )
+              })}
+              {attendanceEvents.length === 0 && (
+                <tr>
+                  <td colSpan="5">No clock events recorded on the server yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </CollapsibleSection>
+
       {orderedRoles.map((roleItem) => {
         const roleEmployees = (employeesByRole[roleItem.id] ?? [])
           .slice()
@@ -2539,6 +2595,7 @@ function EmployeesPage({ employees, currentUser, harvestingDateFrom, harvestingD
                     <th>Work No</th>
                     <th>Name</th>
                     <th>Contract</th>
+                    <th>Clock-in</th>
                     <th>View details</th>
                   </tr>
                 </thead>
@@ -2556,6 +2613,15 @@ function EmployeesPage({ employees, currentUser, harvestingDateFrom, harvestingD
                           : ''}
                       </td>
                       <td>
+                        <span
+                          className={
+                            clockedInIds.includes(employee.id) ? 'badge badge-on' : 'badge badge-off'
+                          }
+                        >
+                          {clockedInIds.includes(employee.id) ? 'Clocked In' : 'Not Clocked In'}
+                        </span>
+                      </td>
+                      <td>
                         <Link
                           to={`/employees/${employee.id}?from=${harvestingDateFrom}&to=${harvestingDateTo}`}
                           className="action-link"
@@ -2567,7 +2633,7 @@ function EmployeesPage({ employees, currentUser, harvestingDateFrom, harvestingD
                   ))}
                   {roleEmployees.length === 0 && (
                     <tr>
-                      <td colSpan="4">No employees with this role yet.</td>
+                      <td colSpan="5">No employees with this role yet.</td>
                     </tr>
                   )}
                 </tbody>
@@ -3361,220 +3427,6 @@ function EmployeeEditPage({
             {canEditEmployeeProfile && <button type="submit">Save profile details</button>}
           </form>
         </article>
-      </div>
-    </section>
-  )
-}
-
-const attendanceApiBase = String(import.meta.env.VITE_API_URL ?? '')
-  .trim()
-  .replace(/\/+$/, '')
-
-function AttendancePage({
-  employees,
-  clockedInIds,
-  attendanceEvents,
-  onRefreshAttendance,
-  attendanceRefreshing,
-}) {
-  const [apiHealth, setApiHealth] = useState(null)
-
-  useEffect(() => {
-    let cancelled = false
-    fetchApiHealthStatus()
-      .then((status) => {
-        if (!cancelled) {
-          setApiHealth(status)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setApiHealth({ configured: true, healthy: false, reason: 'Could not reach the API.' })
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-  const sortedEmployees = useMemo(
-    () => [...employees].sort((a, b) => a.name.localeCompare(b.name)),
-    [employees],
-  )
-  const registeredScanners = useMemo(() => {
-    const serials = new Set()
-    attendanceEvents.forEach((event) => {
-      const match = /^zkteco:(.+)$/.exec(String(event.deviceId ?? ''))
-      if (match) {
-        serials.add(match[1])
-      }
-    })
-    return [...serials].sort()
-  }, [attendanceEvents])
-
-  return (
-    <section className="panel">
-      <h2>Attendance & Fingerprint Integration</h2>
-      {apiHealth && !apiHealth.healthy ? (
-        <p className="inline-pin-message" role="alert">
-          {apiHealth.configured ? (
-            <>
-              Scanner/API misconfiguration: {apiHealth.reason}{' '}
-              {apiHealth.url ? (
-                <>
-                  Check{' '}
-                  <a href={`${apiHealth.url}/api/health`} target="_blank" rel="noreferrer">
-                    {apiHealth.url}/api/health
-                  </a>{' '}
-                  — it must return <code>{'{"ok":true,"service":"mananasi-api"}'}</code>, not the
-                  Mananasi web page.
-                </>
-              ) : null}
-            </>
-          ) : (
-            <>Set <code>VITE_API_URL</code> on Vercel to your Railway API service URL.</>
-          )}
-        </p>
-      ) : null}
-      <p>
-        Planned production device: <strong>{integrationDevice.name}</strong>. ZKTeco scanners push
-        to <code>/iclock/cdata</code> on your Railway API. Each employee&apos;s <strong>Work No</strong>{' '}
-        from the employee database is also their <strong>scanner User ID</strong> (for example{' '}
-        <code>5010</code>).
-      </p>
-      <p>
-        With <strong>multiple scanners</strong>, enroll the <strong>same Work No</strong> on every
-        device. Clock-in status is shared across all scanners; each event records which scanner was
-        used.
-      </p>
-      <h3>Scanner IDs</h3>
-      {registeredScanners.length > 0 ? (
-        <p>
-          Scanners seen on the server:{' '}
-          {registeredScanners.map((serial) => (
-            <code key={serial}>{serial}</code>
-          ))}
-        </p>
-      ) : (
-        <p className="placeholder">No scanner serial numbers recorded yet.</p>
-      )}
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Employee</th>
-              <th>Work No / scanner User ID</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sortedEmployees.map((employee) => (
-              <tr key={employee.id}>
-                <td>{employee.name}</td>
-                <td>
-                  <code>{employee.id}</code>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <h3>Link scanner to Railway</h3>
-      <p>
-        The scanner must push attendance to your Railway API. The device User ID must match the
-        employee Work No from the table above.
-      </p>
-      {attendanceApiBase ? (
-        <ul className="hardware-list">
-          <li>
-            <strong>Server address</strong>
-            <span>
-              <code>{attendanceApiBase.replace(/^https?:\/\//, '')}</code> (hostname only on device)
-            </span>
-          </li>
-          <li>
-            <strong>Port</strong>
-            <span>443 with HTTPS enabled</span>
-          </li>
-          <li>
-            <strong>Push path</strong>
-            <span>
-              <code>/iclock/cdata</code>
-            </span>
-          </li>
-          <li>
-            <strong>Health check</strong>
-            <span>
-              <a href={`${attendanceApiBase}/api/health`} target="_blank" rel="noreferrer">
-                {attendanceApiBase}/api/health
-              </a>
-            </span>
-          </li>
-        </ul>
-      ) : (
-        <p className="placeholder">
-          API URL not configured in this build. Set <code>VITE_API_URL</code> on Vercel to your
-          Railway address.
-        </p>
-      )}
-      <p className="placeholder">
-        On the ZKTeco Cloud Server Setting screen: Server Mode <strong>ADMS</strong>, turn{' '}
-        <strong>Enable Domain Name</strong> on (otherwise Server Address only accepts 0.0.0.0), enter
-        the Railway hostname, set Server Port to <strong>443</strong> (not 8081), keep{' '}
-        <strong>HTTPS</strong> on. After a scan, check Railway logs for{' '}
-        <code>GET /iclock/cdata</code> or <code>POST /iclock/cdata?table=ATTLOG</code>.
-      </p>
-
-      <div className="attendance-toolbar">
-        <h3>Today Status</h3>
-        <button type="button" onClick={onRefreshAttendance} disabled={attendanceRefreshing}>
-          {attendanceRefreshing ? 'Refreshing…' : 'Refresh from server'}
-        </button>
-      </div>
-      <ul className="status-list">
-        {employees.map((employee) => (
-          <li key={employee.id}>
-            <span>{employee.name}</span>
-            <span
-              className={
-                clockedInIds.includes(employee.id) ? 'badge badge-on' : 'badge badge-off'
-              }
-            >
-              {clockedInIds.includes(employee.id) ? 'Clocked In' : 'Not Clocked In'}
-            </span>
-          </li>
-        ))}
-      </ul>
-
-      <h3>Recent Server Events</h3>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Employee</th>
-              <th>Event</th>
-              <th>Device</th>
-            </tr>
-          </thead>
-          <tbody>
-            {attendanceEvents.map((event) => {
-              const employee = employees.find((item) => item.id === event.employeeId)
-              return (
-                <tr key={event.id}>
-                  <td>{new Date(event.occurredAt).toLocaleString()}</td>
-                  <td>{employee?.name ?? event.employeeId}</td>
-                  <td>{event.eventType === 'clock_in' ? 'Clock In' : 'Clock Out'}</td>
-                  <td>{event.deviceId ?? '—'}</td>
-                </tr>
-              )
-            })}
-            {attendanceEvents.length === 0 && (
-              <tr>
-                <td colSpan="4">No attendance events recorded on the server yet.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
       </div>
     </section>
   )
@@ -8707,7 +8559,6 @@ function App() {
                 {activity.name}
               </NavLink>
             ))}
-          {allowedPages.has('attendance') ? <NavLink to="/attendance">Attendance</NavLink> : null}
         </nav>
       </aside>
       <main className="content">
@@ -8728,9 +8579,14 @@ function App() {
                 currentUser={currentUser}
                 harvestingDateFrom={harvestingDateFrom}
                 harvestingDateTo={harvestingDateTo}
+                clockedInIds={clockedInIds}
+                attendanceEvents={attendanceEvents}
+                onRefreshAttendance={handleRefreshAttendance}
+                attendanceRefreshing={attendanceRefreshing}
               />
             }
           />
+          <Route path="/attendance" element={<Navigate to="/employees" replace />} />
           <Route
             path="/admin/sign-in-accounts"
             element={<LeadershipAccountsPage currentUser={currentUser} />}
@@ -9000,18 +8856,6 @@ function App() {
                 selectedBatchFilter={stockBatchFilter}
                 onSelectedBatchFilterChange={setStockBatchFilter}
                 availableBatches={availableBatchNumbers}
-              />
-            }
-          />
-          <Route
-            path="/attendance"
-            element={
-              <AttendancePage
-                employees={employees}
-                clockedInIds={clockedInIds}
-                attendanceEvents={attendanceEvents}
-                onRefreshAttendance={handleRefreshAttendance}
-                attendanceRefreshing={attendanceRefreshing}
               />
             }
           />
