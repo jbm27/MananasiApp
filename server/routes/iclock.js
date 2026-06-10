@@ -1,0 +1,147 @@
+import { Router } from 'express'
+import { recordAttendanceEvent } from '../services/attendanceService.js'
+import { getAppState } from '../stateStore.js'
+import {
+  resolveEmployeeIdFromDevicePin,
+  resolveEventTypeForPin,
+} from '../services/zktecoPinMap.js'
+
+const router = Router()
+
+function buildOptionsResponse(serialNumber) {
+  const stamp = '1970-01-01T00:00:00'
+  return [
+    `GET OPTION FROM: ${serialNumber}`,
+    'ATTLOGStamp=0',
+    'OPERLOGStamp=0',
+    'ATTPHOTOStamp=0',
+    'BIODATAStamp=0',
+    'ErrorDelay=60',
+    'Delay=30',
+    'TransTimes=00:00;14:05',
+    'TransInterval=1',
+    'TransFlag=TransData AttLog\tOpLog\tAttPhoto\tEnrollUser\tChgUser\tEnrollFP\tChgFP',
+    'Realtime=1',
+    'Encrypt=0',
+    'TimeZone=3',
+    'Timeout=60',
+    'SyncTime=3600',
+    'ServerVer=3.0.1',
+    `ATTLOGStamp=${stamp}`,
+    `OPERLOGStamp=${stamp}`,
+    `ATTPHOTOStamp=${stamp}`,
+    `BIODATAStamp=${stamp}`,
+  ].join('\n')
+}
+
+function parseAttlogLine(line) {
+  const trimmed = String(line ?? '').trim()
+  if (!trimmed) {
+    return null
+  }
+
+  const parts = trimmed.includes('\t') ? trimmed.split('\t') : trimmed.split(/\s+/)
+  if (parts.length < 2) {
+    return null
+  }
+
+  const pin = parts[0]
+  const dateTime = parts[1].includes('T') ? parts[1].replace('T', ' ') : parts[1]
+  const statusCode = parts[2] ?? '0'
+  const verifyMode = parts[3] ?? '0'
+
+  const occurredAt = new Date(dateTime.replace(' ', 'T'))
+  if (Number.isNaN(occurredAt.getTime())) {
+    return null
+  }
+
+  return {
+    pin,
+    occurredAt,
+    statusCode,
+    verifyMode,
+  }
+}
+
+router.get('/cdata', (req, res) => {
+  const serialNumber = req.query.SN ?? 'UNKNOWN'
+  if (req.query.options === 'all') {
+    res.type('text/plain').send(buildOptionsResponse(serialNumber))
+    return
+  }
+  res.type('text/plain').send('OK')
+})
+
+router.post('/cdata', async (req, res) => {
+  const serialNumber = req.query.SN ?? 'UNKNOWN'
+  const table = req.query.table
+
+  if (table !== 'ATTLOG') {
+    res.type('text/plain').send('OK')
+    return
+  }
+
+  const body = typeof req.body === 'string' ? req.body : ''
+  const lines = body.split(/\r?\n/).filter(Boolean)
+
+  try {
+    const state = await getAppState()
+    const activeClockedInIds = Array.isArray(state?.data?.clockedInIds)
+      ? [...state.data.clockedInIds]
+      : []
+
+    for (const line of lines) {
+      const parsed = parseAttlogLine(line)
+      if (!parsed) {
+        console.warn('Skipped unparsable ATTLOG line:', line)
+        continue
+      }
+
+      const employeeId = await resolveEmployeeIdFromDevicePin(parsed.pin)
+      if (!employeeId) {
+        console.warn(`No employee match for device PIN ${parsed.pin}`)
+        continue
+      }
+
+      const eventType = await resolveEventTypeForPin(
+        parsed.pin,
+        parsed.statusCode,
+        activeClockedInIds,
+      )
+
+      await recordAttendanceEvent({
+        employeeId,
+        eventType,
+        occurredAt: parsed.occurredAt.toISOString(),
+        deviceId: `zkteco:${serialNumber}`,
+        sourceEventId: `zk-${serialNumber}-${parsed.pin}-${parsed.occurredAt.toISOString()}-${parsed.statusCode}`,
+      })
+      if (eventType === 'clock_in' && !activeClockedInIds.includes(employeeId)) {
+        activeClockedInIds.push(employeeId)
+      }
+      if (eventType === 'clock_out') {
+        const index = activeClockedInIds.indexOf(employeeId)
+        if (index >= 0) {
+          activeClockedInIds.splice(index, 1)
+        }
+      }
+      console.log(
+        `ATTLOG ${serialNumber}: PIN ${parsed.pin} -> ${employeeId} ${eventType} @ ${parsed.occurredAt.toISOString()}`,
+      )
+    }
+    res.type('text/plain').send('OK')
+  } catch (error) {
+    console.error('POST /iclock/cdata failed:', error)
+    res.type('text/plain').status(500).send('ERROR')
+  }
+})
+
+router.get('/getrequest', (_req, res) => {
+  res.type('text/plain').send('OK')
+})
+
+router.post('/devicecmd', (_req, res) => {
+  res.type('text/plain').send('OK')
+})
+
+export default router

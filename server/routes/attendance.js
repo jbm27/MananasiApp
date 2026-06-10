@@ -1,50 +1,25 @@
 import { Router } from 'express'
 import { getPool } from '../db.js'
-import { applyClockEvent } from '../stateStore.js'
+import { recordAttendanceEvent } from '../services/attendanceService.js'
 
 const router = Router()
-
-function buildEventId(sourceEventId, employeeId, eventType, occurredAt) {
-  return sourceEventId ?? `${employeeId}-${eventType}-${occurredAt}`
-}
 
 router.post('/events', async (req, res) => {
   try {
     const { employeeId, eventType, occurredAt, deviceId, sourceEventId } = req.body ?? {}
-
-    if (!employeeId || !eventType) {
-      return res.status(400).json({ error: 'employeeId and eventType are required' })
-    }
-    if (eventType !== 'clock_in' && eventType !== 'clock_out') {
-      return res.status(400).json({ error: 'eventType must be clock_in or clock_out' })
-    }
-
-    const timestamp = occurredAt ? new Date(occurredAt) : new Date()
-    if (Number.isNaN(timestamp.getTime())) {
-      return res.status(400).json({ error: 'occurredAt must be a valid date/time' })
-    }
-
-    const id = buildEventId(sourceEventId, employeeId, eventType, timestamp.toISOString())
-
-    try {
-      await getPool().query(
-        `INSERT INTO attendance_events (id, employee_id, event_type, occurred_at, device_id, source_event_id)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [id, employeeId, eventType, timestamp.toISOString(), deviceId ?? null, sourceEventId ?? id],
-      )
-    } catch (error) {
-      if (error.code === '23505') {
-        const clockedInIds = (await applyClockEvent({ employeeId, eventType })) ?? []
-        return res.json({ ok: true, duplicate: true, clockedInIds })
-      }
-      throw error
-    }
-
-    const clockedInIds = await applyClockEvent({ employeeId, eventType })
-    res.status(201).json({ ok: true, id, clockedInIds })
+    const result = await recordAttendanceEvent({
+      employeeId,
+      eventType,
+      occurredAt,
+      deviceId,
+      sourceEventId,
+    })
+    res.status(result.duplicate ? 200 : 201).json(result)
   } catch (error) {
+    const message = error.message ?? 'Failed to record attendance event'
+    const status = message.includes('required') || message.includes('must be') ? 400 : 500
     console.error('POST /api/attendance/events failed:', error)
-    res.status(500).json({ error: 'Failed to record attendance event' })
+    res.status(status).json({ error: message })
   }
 })
 

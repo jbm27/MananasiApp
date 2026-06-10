@@ -3299,9 +3299,9 @@ function AttendancePage({
     <section className="panel">
       <h2>Attendance & Fingerprint Integration</h2>
       <p>
-        Planned production device: <strong>{integrationDevice.name}</strong>. Clock-in events
-        are stored on the Railway backend via <code>POST /api/attendance/events</code>. The panel
-        below includes a dummy sync plan to test attendance before device go-live.
+        Planned production device: <strong>{integrationDevice.name}</strong>. ZKTeco devices
+        push to <code>/iclock/cdata</code> on your Railway API. Set each device user PIN to match
+        the employee number (for example PIN <strong>5</strong> for <strong>EMP-005</strong>).
       </p>
       <h3>Device & Test Modes</h3>
       <ul className="hardware-list">
