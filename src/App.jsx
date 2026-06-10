@@ -15,7 +15,7 @@ import './App.css'
 import logoStandard from '../LogoStandard.png'
 import { mananasiStaffEmployees } from './mananasiStaffEmployees.js'
 import { useBackendSync } from './hooks/useBackendSync.js'
-import { fetchAppState, fetchAttendanceEvents } from './api/client.js'
+import { fetchApiHealthStatus, fetchAppState, fetchAttendanceEvents } from './api/client.js'
 
 function nextEmployeeSequenceNumber(employees) {
   return employees.reduce((max, employee) => {
@@ -2063,6 +2063,53 @@ function LoginPage({ employees, leaderPasswordHashes, onLoginSuccess }) {
   )
 }
 
+function LeadershipLoginSection({
+  employees,
+  leaderPasswordHashes,
+  canManage,
+  onSetLeadershipPassword,
+}) {
+  const leadershipForLogin = useMemo(
+    () =>
+      [...employees].filter(isLeadershipTeamMember).sort((a, b) => a.name.localeCompare(b.name)),
+    [employees],
+  )
+
+  return (
+    <section className="leadership-login-section">
+      <h3>Leadership sign-in accounts</h3>
+      <p>
+        These people use the leadership sign-in screen. Usernames are derived from their full name
+        (lowercase, spaces as dots). Passwords are stored on the server (hashed); set or change them
+        here.
+      </p>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Username</th>
+              <th>Password status</th>
+              {canManage ? <th>Set password</th> : null}
+            </tr>
+          </thead>
+          <tbody>
+            {leadershipForLogin.map((employee) => (
+              <LeadershipLoginTableRow
+                key={employee.id}
+                employee={employee}
+                hasPassword={Boolean(leaderPasswordHashes[employee.id])}
+                canManage={canManage}
+                onSetLeadershipPassword={onSetLeadershipPassword}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
 function LeadershipLoginTableRow({ employee, hasPassword, canManage, onSetLeadershipPassword }) {
   const [nextPassword, setNextPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -2258,12 +2305,6 @@ function AddEmployeePage({
   const canManageEmployees =
     currentUser?.role === 'admin' || currentUser?.role === 'harvesting-manager'
 
-  const leadershipForLogin = useMemo(
-    () =>
-      [...employees].filter(isLeadershipTeamMember).sort((a, b) => a.name.localeCompare(b.name)),
-    [employees],
-  )
-
   function handleSubmit(event) {
     event.preventDefault()
     if (!name.trim() || !canManageEmployees) {
@@ -2377,37 +2418,12 @@ function AddEmployeePage({
         </button>
       </form>
 
-      <section className="leadership-login-section">
-        <h3>Leadership sign-in accounts</h3>
-        <p>
-          These people use the leadership sign-in screen. Usernames are derived from their full
-          name (lowercase, spaces as dots). Passwords are stored on the server (hashed); set or
-          change them here.
-        </p>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Username</th>
-                <th>Password status</th>
-                {canManageEmployees ? <th>Set password</th> : null}
-              </tr>
-            </thead>
-            <tbody>
-              {leadershipForLogin.map((employee) => (
-                <LeadershipLoginTableRow
-                  key={employee.id}
-                  employee={employee}
-                  hasPassword={Boolean(leaderPasswordHashes[employee.id])}
-                  canManage={canManageEmployees}
-                  onSetLeadershipPassword={onSetLeadershipPassword}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <LeadershipLoginSection
+        employees={employees}
+        leaderPasswordHashes={leaderPasswordHashes}
+        canManage={canManageEmployees}
+        onSetLeadershipPassword={onSetLeadershipPassword}
+      />
 
       <PageAccessAdminSection
         employees={employees}
@@ -2420,7 +2436,14 @@ function AddEmployeePage({
   )
 }
 
-function EmployeesPage({ employees, currentUser, harvestingDateFrom, harvestingDateTo }) {
+function EmployeesPage({
+  employees,
+  currentUser,
+  harvestingDateFrom,
+  harvestingDateTo,
+  leaderPasswordHashes,
+  onSetLeadershipPassword,
+}) {
   const navigate = useNavigate()
   const canManageEmployees =
     currentUser?.role === 'admin' || currentUser?.role === 'harvesting-manager'
@@ -2472,6 +2495,13 @@ function EmployeesPage({ employees, currentUser, harvestingDateFrom, harvestingD
           Add Employee
         </button>
       </p>
+
+      <LeadershipLoginSection
+        employees={employees}
+        leaderPasswordHashes={leaderPasswordHashes}
+        canManage={canManageEmployees}
+        onSetLeadershipPassword={onSetLeadershipPassword}
+      />
 
       {orderedRoles.map((roleItem) => {
         const roleEmployees = (employeesByRole[roleItem.id] ?? [])
@@ -3340,7 +3370,26 @@ function AttendancePage({
   onRefreshAttendance,
   attendanceRefreshing,
 }) {
+  const [apiHealth, setApiHealth] = useState(null)
   const canManageBiometricPins = currentUser?.role === 'admin' || currentUser?.role === 'harvesting-manager'
+
+  useEffect(() => {
+    let cancelled = false
+    fetchApiHealthStatus()
+      .then((status) => {
+        if (!cancelled) {
+          setApiHealth(status)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setApiHealth({ configured: true, healthy: false, reason: 'Could not reach the API.' })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
   const sortedEmployees = useMemo(
     () => [...employees].sort((a, b) => a.name.localeCompare(b.name)),
     [employees],
@@ -3360,6 +3409,27 @@ function AttendancePage({
   return (
     <section className="panel">
       <h2>Attendance & Fingerprint Integration</h2>
+      {apiHealth && !apiHealth.healthy ? (
+        <p className="inline-pin-message" role="alert">
+          {apiHealth.configured ? (
+            <>
+              Scanner/API misconfiguration: {apiHealth.reason}{' '}
+              {apiHealth.url ? (
+                <>
+                  Check{' '}
+                  <a href={`${apiHealth.url}/api/health`} target="_blank" rel="noreferrer">
+                    {apiHealth.url}/api/health
+                  </a>{' '}
+                  — it must return <code>{'{"ok":true,"service":"mananasi-api"}'}</code>, not the
+                  Mananasi web page.
+                </>
+              ) : null}
+            </>
+          ) : (
+            <>Set <code>VITE_API_URL</code> on Vercel to your Railway API service URL.</>
+          )}
+        </p>
+      ) : null}
       <p>
         Planned production device: <strong>{integrationDevice.name}</strong>. ZKTeco scanners push
         to <code>/iclock/cdata</code> on your Railway API. Each person&apos;s <strong>scanner User
@@ -7902,7 +7972,12 @@ function hydrateAppState(data, setters) {
   if (Array.isArray(data.clockedInIds)) setters.setClockedInIds(data.clockedInIds)
   if (Array.isArray(data.records)) setters.setRecords(data.records)
   if (data.compensationRules) setters.setCompensationRules(data.compensationRules)
-  if (data.leaderPasswordHashes) setters.setLeaderPasswordHashes(data.leaderPasswordHashes)
+  if (data.leaderPasswordHashes) {
+    setters.setLeaderPasswordHashes((prev) => ({
+      ...prev,
+      ...data.leaderPasswordHashes,
+    }))
+  }
   if (data.pagePermissionOverrides) setters.setPagePermissionOverrides(data.pagePermissionOverrides)
   if (data.dataEntryPermissionOverrides) {
     setters.setDataEntryPermissionOverrides(data.dataEntryPermissionOverrides)
@@ -8721,6 +8796,8 @@ function App() {
                 currentUser={currentUser}
                 harvestingDateFrom={harvestingDateFrom}
                 harvestingDateTo={harvestingDateTo}
+                leaderPasswordHashes={leaderPasswordHashes}
+                onSetLeadershipPassword={handleSetLeadershipPassword}
               />
             }
           />
