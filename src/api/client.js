@@ -65,3 +65,33 @@ export async function checkApiHealth() {
   const response = await fetch(`${API_BASE}/api/health`)
   return response.ok
 }
+
+export async function fetchApiHealthStatus() {
+  if (!API_BASE) {
+    return { configured: false, healthy: false }
+  }
+
+  const response = await fetch(`${API_BASE}/api/health`)
+  const text = await response.text()
+
+  try {
+    const body = JSON.parse(text)
+    if (body?.ok && body?.service === 'mananasi-api') {
+      return { configured: true, healthy: true, url: API_BASE }
+    }
+    return {
+      configured: true,
+      healthy: false,
+      url: API_BASE,
+      reason: 'Health endpoint did not return the Mananasi API response.',
+    }
+  } catch {
+    return {
+      configured: true,
+      healthy: false,
+      url: API_BASE,
+      reason:
+        'This URL is serving the frontend app, not the Express API. On Railway, create a separate service with root directory server and point the scanner at that service domain.',
+    }
+  }
+}
