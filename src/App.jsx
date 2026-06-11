@@ -77,8 +77,6 @@ const seedHarvestSupervisors = mananasiStaffEmployees.filter(
     employee.role === 'harvesting-supervisor' || employee.role === 'harvesting-manager',
 )
 const initialDemoClockedInIds = buildDemoClockedInIds(mananasiStaffEmployees)
-const defaultSelectedHarvesterId = seedHarvesters[0]?.id ?? ''
-
 const activityModules = [
   {
     id: 'harvesting',
@@ -176,7 +174,7 @@ const DATA_ENTRY_PERMISSION_IDS = [
 ]
 
 const DATA_ENTRY_PERMISSION_LABELS = {
-  'harvesting-entry': 'Harvesting totals entry',
+  'harvesting-entry': 'Harvesting weight entry',
   'harvesting-batch': 'Harvesting batch allocation',
   'harvesting-compensation': 'Harvesting incentive rule',
   'haulage-trip': 'Haulage trip creation',
@@ -3564,19 +3562,211 @@ function EmployeeEditPage({
   )
 }
 
-function HarvestingPage({
+function HarvestWeightEntryPage({
   employees,
   currentUser,
   currentUserDataEntryPermissions,
   clockedInIds,
+  activeBatchNumber,
+  onSubmitRecord,
+}) {
+  const [selectedHarvesterId, setSelectedHarvesterId] = useState('')
+  const [currentBundleWeight, setCurrentBundleWeight] = useState('')
+  const [pendingBundleWeights, setPendingBundleWeights] = useState([])
+  const [entryStatus, setEntryStatus] = useState('')
+
+  const canEnterHarvestData = currentUserDataEntryPermissions.has('harvesting-entry')
+  const availableHarvesters = employees.filter((employee) => {
+    if (employee.role !== 'harvester') {
+      return false
+    }
+    if (!clockedInIds.includes(employee.id)) {
+      return false
+    }
+    return true
+  })
+
+  const runningTotal = Number(
+    pendingBundleWeights.reduce((sum, weight) => sum + weight, 0).toFixed(1),
+  )
+
+  function resetEntry(keepHarvester = false) {
+    if (!keepHarvester) {
+      setSelectedHarvesterId('')
+    }
+    setCurrentBundleWeight('')
+    setPendingBundleWeights([])
+  }
+
+  function handleAddBundleWeight() {
+    const weight = Number(currentBundleWeight)
+    if (Number.isNaN(weight) || weight <= 0) {
+      setEntryStatus('Enter a valid positive bundle weight before adding another bundle.')
+      return
+    }
+    setPendingBundleWeights((prev) => [...prev, Number(weight.toFixed(1))])
+    setCurrentBundleWeight('')
+    setEntryStatus('')
+  }
+
+  function handleUndoLastBundle() {
+    setPendingBundleWeights((prev) => prev.slice(0, -1))
+    setEntryStatus('')
+  }
+
+  function handleSubmit(event) {
+    event.preventDefault()
+    if (!canEnterHarvestData || !currentUser) {
+      setEntryStatus('You do not have permission to record harvest weights.')
+      return
+    }
+    if (!selectedHarvesterId) {
+      setEntryStatus('Select a clocked-in harvester first.')
+      return
+    }
+    const typedWeight = Number(currentBundleWeight)
+    const bundleWeights =
+      !Number.isNaN(typedWeight) && typedWeight > 0
+        ? [...pendingBundleWeights, Number(typedWeight.toFixed(1))]
+        : [...pendingBundleWeights]
+    if (bundleWeights.length === 0) {
+      setEntryStatus('Add at least one valid bundle weight before saving.')
+      return
+    }
+    onSubmitRecord(selectedHarvesterId, bundleWeights, currentUser.id)
+    const totalKg = Number(bundleWeights.reduce((sum, weight) => sum + weight, 0).toFixed(1))
+    const harvesterName =
+      employees.find((employee) => employee.id === selectedHarvesterId)?.name ?? 'Harvester'
+    resetEntry(true)
+    setEntryStatus(
+      `Saved ${totalKg} kg for ${harvesterName} (${bundleWeights.length} bundle${bundleWeights.length === 1 ? '' : 's'}).`,
+    )
+  }
+
+  return (
+    <section className="panel harvest-entry-page">
+      <h2>Record Harvest Weights</h2>
+      <p className="harvest-entry-lead">
+        Weigh each bundle individually. The app adds them up for you.
+      </p>
+      <p className="harvest-entry-batch">
+        Active batch: <strong>{normalizeBatchNumber(activeBatchNumber)}</strong>
+      </p>
+
+      {!currentUser && (
+        <div className="placeholder">Sign in to record harvest weights.</div>
+      )}
+
+      {currentUser && !canEnterHarvestData && (
+        <div className="placeholder">
+          Only harvesting supervisors and managers can record harvest weights.
+        </div>
+      )}
+
+      {currentUser && canEnterHarvestData && (
+        <form className="harvest-entry-form" onSubmit={handleSubmit}>
+          <label className="harvest-entry-field">
+            Harvester
+            <select
+              value={selectedHarvesterId}
+              onChange={(event) => {
+                setSelectedHarvesterId(event.target.value)
+                setEntryStatus('')
+              }}
+            >
+              <option value="">Select harvester</option>
+              {availableHarvesters.map((employee) => (
+                <option key={employee.id} value={employee.id}>
+                  {employee.name} ({employee.id})
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {availableHarvesters.length === 0 && (
+            <div className="placeholder">
+              No harvesters are clocked in right now. Ask harvesters to clock in at the scanner
+              first.
+            </div>
+          )}
+
+          <label className="harvest-entry-field">
+            Bundle weight (kg)
+            <input
+              type="number"
+              inputMode="decimal"
+              min="0.1"
+              step="0.1"
+              value={currentBundleWeight}
+              onChange={(event) => setCurrentBundleWeight(event.target.value)}
+              placeholder="e.g. 12.5"
+              disabled={!selectedHarvesterId}
+            />
+          </label>
+
+          <div className="harvest-entry-actions">
+            <button
+              type="button"
+              className="harvest-entry-button-secondary"
+              onClick={handleAddBundleWeight}
+              disabled={!selectedHarvesterId}
+            >
+              Add bundle
+            </button>
+            <button
+              type="button"
+              className="harvest-entry-button-secondary"
+              onClick={handleUndoLastBundle}
+              disabled={pendingBundleWeights.length === 0}
+            >
+              Undo last
+            </button>
+          </div>
+
+          <div className="harvest-entry-total" aria-live="polite">
+            <span className="harvest-entry-total-label">Total so far</span>
+            <span className="harvest-entry-total-value">{runningTotal} kg</span>
+            <span className="harvest-entry-total-meta">
+              {pendingBundleWeights.length} bundle{pendingBundleWeights.length === 1 ? '' : 's'}
+            </span>
+          </div>
+
+          {pendingBundleWeights.length > 0 && (
+            <ul className="harvest-entry-bundle-list">
+              {pendingBundleWeights.map((weight, index) => (
+                <li key={`${index}-${weight}`}>
+                  Bundle {index + 1}: {weight} kg
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <button
+            type="submit"
+            className="harvest-entry-button-primary"
+            disabled={!selectedHarvesterId}
+          >
+            Save harvest
+          </button>
+        </form>
+      )}
+
+      {entryStatus && <div className="harvest-entry-status">{entryStatus}</div>}
+
+      <Link className="action-link harvest-entry-back" to="/activities/harvesting">
+        Back to harvesting summary
+      </Link>
+    </section>
+  )
+}
+
+function HarvestingPage({
+  employees,
+  currentUser,
+  currentUserDataEntryPermissions,
   records,
   compensationRules,
   onSaveCompensationRules,
-  onSubmitRecord,
-  selectedHarvesterId,
-  onSelectHarvester,
-  kgInput,
-  onSetKgInput,
   dateFrom,
   dateTo,
   onDateFromChange,
@@ -3620,7 +3810,6 @@ function HarvestingPage({
     isAdmin ||
     currentUser?.role === 'harvesting-manager' ||
     currentUser?.role === 'harvesting-supervisor'
-  const isSupervisor = currentUser?.role === 'harvesting-supervisor'
   const canEnterHarvestData = currentUserDataEntryPermissions.has('harvesting-entry')
   const supervisors = employees.filter((employee) => employee.role === 'harvesting-supervisor')
   const availableBatches = Array.from(
@@ -3640,35 +3829,6 @@ function HarvestingPage({
   const distinctHarvesters = new Set(filteredRecords.map((record) => record.harvesterId)).size
   const averageKgPerHarvesterPerDay =
     distinctHarvesters > 0 ? Math.round(totalKg / (distinctHarvesters * effectiveDays)) : 0
-
-  const availableHarvesters = employees.filter((employee) => {
-    if (employee.role !== 'harvester') {
-      return false
-    }
-    if (!clockedInIds.includes(employee.id)) {
-      return false
-    }
-    if (canEnterHarvestData) {
-      return true
-    }
-    return currentUser?.id === employee.id
-  })
-
-  function handleSubmit(event) {
-    event.preventDefault()
-    const kg = Number(kgInput)
-    if (
-      !selectedHarvesterId ||
-      Number.isNaN(kg) ||
-      kg <= 0 ||
-      !currentUser ||
-      !canEnterHarvestData
-    ) {
-      return
-    }
-    onSubmitRecord(selectedHarvesterId, kg, currentUser.id)
-    onSetKgInput('')
-  }
 
   function handleCompensationSubmit(event) {
     event.preventDefault()
@@ -4067,44 +4227,12 @@ function HarvestingPage({
         </div>
       </CollapsibleSection>
 
-      {!currentUser && (
-        <div className="placeholder">
-          Select a user from the session panel in the left menu to start entering records.
-        </div>
-      )}
-
       {canEnterHarvestData && (
-        <form className="form-grid" onSubmit={handleSubmit}>
-          <label>
-            Harvester
-            <select
-              value={selectedHarvesterId}
-              onChange={(event) => onSelectHarvester(event.target.value)}
-            >
-              <option value="">Select harvester</option>
-              {availableHarvesters.map((employee) => (
-                <option key={employee.id} value={employee.id}>
-                  {employee.name} ({employee.id})
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Harvested KG
-            <input
-              value={kgInput}
-              onChange={(event) => onSetKgInput(event.target.value)}
-              placeholder="e.g. 500"
-              type="number"
-              min="1"
-            />
-          </label>
-          <button type="submit">Save Collection Record</button>
-        </form>
-      )}
-      {currentUser && !isSupervisor && (
-        <div className="placeholder">
-          Only users with the Harvesting Supervisor role can capture harvested kg records.
+        <div className="harvest-entry-promo">
+          <p>Supervisors record leaf mass on a separate mobile-friendly screen — one bundle at a time.</p>
+          <Link className="harvest-entry-promo-link" to="/activities/harvesting/entry">
+            Open harvest weight entry
+          </Link>
         </div>
       )}
     </section>
@@ -4162,9 +4290,9 @@ function HarvestingDailyPage({ employees, records }) {
           <thead>
             <tr>
               <th>Harvester</th>
+              <th>Bundles</th>
               <th>Leaf Mass (kg)</th>
               <th>Incentive</th>
-              <th>Batch</th>
               <th>Supervisor</th>
               <th>Batch</th>
               <th>Clock In</th>
@@ -4180,6 +4308,7 @@ function HarvestingDailyPage({ employees, records }) {
             {sortedDayRecords.map((record) => (
               <tr key={record.id}>
                 <td>{record.harvesterName}</td>
+                <td>{record.bundleWeights?.length ?? '—'}</td>
                 <td>{record.kg}</td>
                 <td>{record.incentiveKes}</td>
                 <td>{supervisorMap[record.recordedById]?.name ?? record.recordedByName}</td>
@@ -7817,6 +7946,7 @@ function HarvestingRecordPage({ employees, records }) {
             <thead>
               <tr>
                 <th>Date</th>
+                <th>Bundles</th>
                 <th>Leaf Mass (kg)</th>
                 <th>Incentive</th>
                 <th>Batch</th>
@@ -7828,6 +7958,7 @@ function HarvestingRecordPage({ employees, records }) {
               {timeline.map((day) => (
                 <tr key={`${selectedPerson.id}-${day.harvestedOn}`}>
                   <td>{formatDisplayDate(day.harvestedOn)}</td>
+                  <td>{day.isAbsent ? 'Absent' : (day.bundleWeights?.length ?? '—')}</td>
                   <td>{day.isAbsent ? 'Absent' : day.kg}</td>
                   <td>{day.isAbsent ? 'Absent' : day.incentiveKes}</td>
                   <td>{day.isAbsent ? 'NA' : day.batchNumber}</td>
@@ -8009,9 +8140,7 @@ function App() {
   const [dataEntryPermissionOverrides, setDataEntryPermissionOverrides] = useState(
     readDataEntryPermissionOverrides,
   )
-  const [selectedHarvesterId, setSelectedHarvesterId] = useState(defaultSelectedHarvesterId)
   const [attendanceRefreshing, setAttendanceRefreshing] = useState(false)
-  const [kgInput, setKgInput] = useState('')
   const [haulageTrips, setHaulageTrips] = useState(() =>
     buildSeedHaulageTrips(
       buildSeedRecords(
@@ -8416,13 +8545,17 @@ function App() {
     }
   }
 
-  function handleSubmitHarvestRecord(harvesterId, kg, recordedById) {
+  function handleSubmitHarvestRecord(harvesterId, bundleWeights, recordedById) {
     const harvester = employees.find((employee) => employee.id === harvesterId)
     const recorder = employees.find((employee) => employee.id === recordedById)
     if (!harvester || !recorder) {
       return
     }
-    if (recorder.role !== 'harvesting-supervisor' && recorder.role !== 'harvesting-manager') {
+    if (
+      recorder.role !== 'harvesting-supervisor' &&
+      recorder.role !== 'harvesting-manager' &&
+      recorder.role !== 'admin'
+    ) {
       return
     }
     if (harvester.role !== 'harvester') {
@@ -8431,6 +8564,13 @@ function App() {
     if (!clockedInIds.includes(harvester.id)) {
       return
     }
+    const weights = Array.isArray(bundleWeights)
+      ? bundleWeights.filter((weight) => typeof weight === 'number' && weight > 0)
+      : []
+    if (weights.length === 0) {
+      return
+    }
+    const kg = Number(weights.reduce((sum, weight) => sum + weight, 0).toFixed(1))
 
     const wage = calculateHarvestWage(kg, harvester, compensationRules)
     const supervisor = employees.find((employee) => employee.id === recordedById)
@@ -8438,6 +8578,7 @@ function App() {
       id: `${harvesterId}-${Date.now()}`,
       harvesterId,
       harvesterName: harvester.name,
+      bundleWeights: weights,
       kg,
       harvestedOn: new Date().toISOString().slice(0, 10),
       clockInTime: '7:15',
@@ -8651,6 +8792,9 @@ function App() {
           {allowedPages.has('harvesting') ? (
             <NavLink to="/activities/harvesting">Harvesting</NavLink>
           ) : null}
+          {currentUserDataEntryPermissions.has('harvesting-entry') ? (
+            <NavLink to="/activities/harvesting/entry">Record harvest weights</NavLink>
+          ) : null}
           {activityModules
             .filter((activity) => activity.id !== 'harvesting')
             .filter((activity) => allowedPages.has(activity.id))
@@ -8742,21 +8886,28 @@ function App() {
             element={<CustomersPage customers={customers} onAddCustomer={handleAddCustomer} />}
           />
           <Route
+            path="/activities/harvesting/entry"
+            element={
+              <HarvestWeightEntryPage
+                employees={employees}
+                currentUser={currentUser}
+                currentUserDataEntryPermissions={currentUserDataEntryPermissions}
+                clockedInIds={clockedInIds}
+                activeBatchNumber={activeBatchNumber}
+                onSubmitRecord={handleSubmitHarvestRecord}
+              />
+            }
+          />
+          <Route
             path="/activities/harvesting"
             element={
               <HarvestingPage
                 employees={employees}
                 currentUser={currentUser}
                 currentUserDataEntryPermissions={currentUserDataEntryPermissions}
-                clockedInIds={clockedInIds}
                 records={records}
                 compensationRules={compensationRules}
                 onSaveCompensationRules={setCompensationRules}
-                onSubmitRecord={handleSubmitHarvestRecord}
-                selectedHarvesterId={selectedHarvesterId}
-                onSelectHarvester={setSelectedHarvesterId}
-                kgInput={kgInput}
-                onSetKgInput={setKgInput}
                 dateFrom={harvestingDateFrom}
                 dateTo={harvestingDateTo}
                 onDateFromChange={setHarvestingDateFrom}
