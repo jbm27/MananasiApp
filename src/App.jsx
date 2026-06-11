@@ -4179,7 +4179,15 @@ function HarvestingPage({
               )}
               {harvestersSummary.map((item) => (
                 <tr key={item.harvesterId}>
-                  <td>{item.name}</td>
+                  <td>
+                    <span className="harvesting-summary-name">{item.name}</span>{' '}
+                    <Link
+                      className="harvesting-day-record-link"
+                      to={`/activities/harvesting/records/${item.harvesterId}?from=${summaryPeriodFrom}&to=${summaryPeriodTo}&batch=${selectedBatchFilter}`}
+                    >
+                      Day record
+                    </Link>
+                  </td>
                   <td>{item.daysWorked}</td>
                   <td>{item.leafMassKg.toLocaleString()}</td>
                   <td>{item.averageLeafMassPerDay.toLocaleString()}</td>
@@ -7939,12 +7947,9 @@ function HarvestingRecordPage({ employees, records }) {
       : records.filter((record) => record.batchNumber === selectedBatch)
 
   if (selectedPerson.role === 'harvester') {
-    const harvesterRecords = filteredRecords.filter((record) => record.harvesterId === personId)
-    const byDate = harvesterRecords.reduce((map, record) => {
-      map[record.harvestedOn] = record
-      return map
-    }, {})
-    const timeline = periodDatesDesc.map((date) => byDate[date] || { harvestedOn: date, isAbsent: true })
+    const harvesterRecords = [...filteredRecords.filter((record) => record.harvesterId === personId)].sort(
+      (a, b) => a.harvestedOn.localeCompare(b.harvestedOn),
+    )
     const daysWorked = harvesterRecords.length
     const totalKg = harvesterRecords.reduce((sum, record) => sum + record.kg, 0)
     const averageKg = daysWorked > 0 ? Math.round(totalKg / daysWorked) : 0
@@ -7952,42 +7957,52 @@ function HarvestingRecordPage({ employees, records }) {
     return (
       <section className="panel">
         <h2>{selectedPerson.name}</h2>
-        <p>
-          Days worked: <strong>{daysWorked}</strong> | Average leaf mass per day:{' '}
-          <strong>{averageKg} kg</strong>
+        <p className="harvesting-summary-period">
+          Period: {formatDisplayDate(dateFrom)} – {formatDisplayDate(dateTo)}
+          {selectedBatch !== 'all' ? ` | Batch ${selectedBatch}` : ''}
         </p>
-        {selectedBatch !== 'all' && <p>Batch: {selectedBatch}</p>}
         <Link className="action-link" to="/activities/harvesting">
           Back to Harvesting Summary
         </Link>
         <div className="table-wrap">
-          <table>
+          <table className="harvesting-day-record-table">
             <thead>
               <tr>
-                <th>Date</th>
-                <th>Bundles</th>
-                <th>Leaf Mass (kg)</th>
-                <th>Incentive</th>
-                <th>Batch</th>
-                <th>Clock in time</th>
-                <th>Clock out time</th>
+                <th colSpan="2">Days worked in period</th>
+              </tr>
+              <tr>
+                <th></th>
+                <th>Leaves (kg)</th>
               </tr>
             </thead>
             <tbody>
-              {timeline.map((day) => (
-                <tr key={`${selectedPerson.id}-${day.harvestedOn}`}>
-                  <td>{formatDisplayDate(day.harvestedOn)}</td>
-                  <td>{day.isAbsent ? 'Absent' : (day.bundleWeights?.length ?? '—')}</td>
-                  <td>{day.isAbsent ? 'Absent' : day.kg}</td>
-                  <td>{day.isAbsent ? 'Absent' : day.incentiveKes}</td>
-                  <td>{day.isAbsent ? 'NA' : day.batchNumber}</td>
-                  <td>{day.isAbsent ? 'NA' : day.clockInTime}</td>
-                  <td>{day.isAbsent ? 'NA' : day.clockOutTime}</td>
+              {harvesterRecords.length === 0 && (
+                <tr>
+                  <td colSpan="2">No harvest records for this period.</td>
+                </tr>
+              )}
+              {harvesterRecords.map((record) => (
+                <tr key={record.id}>
+                  <td>{formatDisplayDate(record.harvestedOn)}</td>
+                  <td>{record.kg.toLocaleString()}</td>
                 </tr>
               ))}
+              {harvesterRecords.length > 0 && (
+                <tr className="harvesting-summary-averages">
+                  <td></td>
+                  <td>
+                    <strong>{averageKg.toLocaleString()}</strong>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
+        {daysWorked > 0 && (
+          <p className="harvesting-day-record-footnote">
+            Average of above ({daysWorked} day{daysWorked === 1 ? '' : 's'} worked)
+          </p>
+        )}
       </section>
     )
   }

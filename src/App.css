@@ -729,6 +729,39 @@ th {
   border-top: 2px solid #cbd5e1;
 }
 
+.harvesting-summary-name {
+  font-weight: 600;
+}
+
+.harvesting-day-record-link {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 0.4rem;
+  background: #e2e8f0;
+  color: #0b5cad;
+  text-decoration: none;
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.harvesting-day-record-link:hover {
+  background: #cbd5e1;
+}
+
+.harvesting-day-record-table thead tr:first-child th {
+  text-align: center;
+  font-size: 0.9rem;
+  background: #f1f5f9;
+}
+
+.harvesting-day-record-footnote {
+  margin: 0.65rem 0 0;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
 @media (max-width: 900px) {
   .harvest-entry-page {
     max-width: none;
