@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getContractTypeLabel } from './employeePay.js'
 import { fetchAttendanceEventsForPeriod } from './api/client.js'
-import { build445PayPeriods, getDefaultPayPeriodId } from './payPeriods.js'
+import {
+  build445PayPeriods,
+  getDefaultPayPeriodId,
+  getFiscalYearForDate,
+} from './payPeriods.js'
 import {
   buildPayrollLines,
   canEditPayroll,
@@ -46,8 +50,8 @@ export default function PayrollPage({
   payrollAdjustments,
   onUpdatePayrollAdjustment,
 }) {
-  const currentYear = new Date().getFullYear()
-  const [selectedYear, setSelectedYear] = useState(currentYear)
+  const currentFiscalYear = getFiscalYearForDate(new Date().toISOString().slice(0, 10))
+  const [selectedYear, setSelectedYear] = useState(currentFiscalYear)
   const [selectedPeriodId, setSelectedPeriodId] = useState(getDefaultPayPeriodId())
   const [contractTypeFilter, setContractTypeFilter] = useState('all')
   const [attendanceEvents, setAttendanceEvents] = useState([])
@@ -140,24 +144,24 @@ export default function PayrollPage({
     <section className="panel payroll-page">
       <h2>Payroll</h2>
       <p>
-        Seasonal and supplementary employee payroll on a 4-4-5 calendar. Wages run to the last
-        Friday of each period; payment is the following Monday.
+        Seasonal and supplementary employee payroll on a 4-4-5 calendar starting 27 December each
+        year. Wages run to the last Friday of each period; payment is the following Monday.
       </p>
 
       <div className="form-grid payroll-toolbar">
         <label>
-          Year
+          Fiscal year
           <select
             value={selectedYear}
             onChange={(event) => {
               const year = Number(event.target.value)
               setSelectedYear(year)
-              setSelectedPeriodId(`${year}-P01`)
+              setSelectedPeriodId(`FY${year}-P01`)
             }}
           >
-            {[currentYear - 1, currentYear, currentYear + 1].map((year) => (
+            {[currentFiscalYear - 1, currentFiscalYear, currentFiscalYear + 1].map((year) => (
               <option key={year} value={year}>
-                {year}
+                FY{year}
               </option>
             ))}
           </select>
