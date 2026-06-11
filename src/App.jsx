@@ -496,6 +496,13 @@ function listDatesInRange(fromDate, toDate) {
   return dates
 }
 
+function countMondaySaturdayWorkDays(fromDate, toDate) {
+  return listDatesInRange(fromDate, toDate).filter((dateStr) => {
+    const day = new Date(`${dateStr}T12:00:00`).getDay()
+    return day >= 1 && day <= 6
+  }).length
+}
+
 function buildBatchNumber(startYear, fieldNumber) {
   return `${startYear}-${String(fieldNumber).padStart(3, '0')}`
 }
@@ -3779,7 +3786,7 @@ function HarvestingPage({
   const [showBatchAssignment, setShowBatchAssignment] = useState(false)
   const [showCompensationSettings, setShowCompensationSettings] = useState(false)
   const [showSupervisors, setShowSupervisors] = useState(false)
-  const [showLeafMassSummary, setShowLeafMassSummary] = useState(false)
+  const [showHarvestingSummary, setShowHarvestingSummary] = useState(false)
   const [showHarvesters, setShowHarvesters] = useState(false)
   const dateBounds = useMemo(() => {
     if (records.length === 0) {
@@ -3923,34 +3930,33 @@ function HarvestingPage({
         averageLeafMassPerDay: daysWorked > 0 ? Math.round(item.leafMassKg / daysWorked) : 0,
       }
     })
-    .sort((a, b) => b.leafMassKg - a.leafMassKg)
-  const dailyLeafMassSummary = Object.values(
-    filteredRecords.reduce((summary, record) => {
-      if (!summary[record.harvestedOn]) {
-        summary[record.harvestedOn] = {
-          harvestedOn: record.harvestedOn,
-          harvestersPresent: new Set(),
-          supervisorsPresent: new Set(),
-          totalLeafMassKg: 0,
+    .sort((a, b) => a.name.localeCompare(b.name))
+  const summaryPeriodFrom =
+    selectedBatchFilter === 'all'
+      ? dateFrom
+      : (filteredRecords.map((record) => record.harvestedOn).sort()[0] ?? dateFrom)
+  const summaryPeriodTo =
+    selectedBatchFilter === 'all'
+      ? dateTo
+      : (filteredRecords.map((record) => record.harvestedOn).sort().at(-1) ?? dateTo)
+  const monSatWorkDaysInPeriod = countMondaySaturdayWorkDays(summaryPeriodFrom, summaryPeriodTo)
+  const harvestingSummaryAverages =
+    harvestersSummary.length > 0
+      ? {
+          daysWorked: Math.round(
+            harvestersSummary.reduce((sum, item) => sum + item.daysWorked, 0) /
+              harvestersSummary.length,
+          ),
+          totalKg: Math.round(
+            harvestersSummary.reduce((sum, item) => sum + item.leafMassKg, 0) /
+              harvestersSummary.length,
+          ),
+          averageKgPerDay: Math.round(
+            harvestersSummary.reduce((sum, item) => sum + item.averageLeafMassPerDay, 0) /
+              harvestersSummary.length,
+          ),
         }
-      }
-      summary[record.harvestedOn].harvestersPresent.add(record.harvesterId)
-      summary[record.harvestedOn].supervisorsPresent.add(record.recordedById)
-      summary[record.harvestedOn].totalLeafMassKg += record.kg
-      return summary
-    }, {}),
-  )
-    .map((day) => ({
-      harvestedOn: day.harvestedOn,
-      harvestersPresentCount: day.harvestersPresent.size,
-      supervisorsPresentCount: day.supervisorsPresent.size,
-      totalLeafMassKg: day.totalLeafMassKg,
-      averagePerHarvester:
-        day.harvestersPresent.size > 0
-          ? Math.round(day.totalLeafMassKg / day.harvestersPresent.size)
-          : 0,
-    }))
-    .sort((a, b) => b.harvestedOn.localeCompare(a.harvestedOn))
+      : null
 
   return (
     <section className="panel">
@@ -4138,44 +4144,57 @@ function HarvestingPage({
       </CollapsibleSection>
 
       <CollapsibleSection
-        title="Leaf Mass Daily Summary"
-        isOpen={showLeafMassSummary}
-        onToggle={() => setShowLeafMassSummary((prev) => !prev)}
+        title="Harvesting Summary"
+        isOpen={showHarvestingSummary}
+        onToggle={() => setShowHarvestingSummary((prev) => !prev)}
         canExpand={canViewHarvestingSections}
         deniedMessage="Only Admin, Harvesting Manager, or Harvesting Supervisor can open this section."
       >
+        <p className="harvesting-summary-period">
+          Period: {formatDisplayDate(summaryPeriodFrom)} – {formatDisplayDate(summaryPeriodTo)}
+          {selectedBatchFilter !== 'all' ? ` | Batch ${selectedBatchFilter}` : ''}
+        </p>
         <div className="table-wrap">
-          <table>
+          <table className="harvesting-summary-table">
             <thead>
               <tr>
-                <th>Date</th>
-              <th>Batch</th>
-                <th>Harvesters Present</th>
-                <th>Supervisors Present</th>
-                <th>Total Leaf Mass</th>
-                <th>Average per Harvester</th>
-                <th></th>
+                <th colSpan="2">Work days in period</th>
+                <th colSpan="2">
+                  Number of work days (Monday–Saturday) in the defined period:{' '}
+                  {monSatWorkDaysInPeriod}
+                </th>
+              </tr>
+              <tr>
+                <th>Harvester</th>
+                <th>Days worked</th>
+                <th>Total kg</th>
+                <th>Average kg per day</th>
               </tr>
             </thead>
             <tbody>
-              {dailyLeafMassSummary.map((day) => (
-                <tr key={day.harvestedOn}>
-                  <td>{formatDisplayDate(day.harvestedOn)}</td>
-                  <td>{selectedBatchFilter === 'all' ? 'Multiple' : selectedBatchFilter}</td>
-                  <td>{day.harvestersPresentCount}</td>
-                  <td>{day.supervisorsPresentCount}</td>
-                  <td>{day.totalLeafMassKg.toLocaleString()} kg</td>
-                  <td>{day.averagePerHarvester.toLocaleString()} kg</td>
-                  <td>
-                    <Link
-                      className="action-link"
-                      to={`/activities/harvesting/daily/${day.harvestedOn}?from=${dateFrom}&to=${dateTo}&batch=${selectedBatchFilter}`}
-                    >
-                      View Record
-                    </Link>
-                  </td>
+              {harvestersSummary.length === 0 && (
+                <tr>
+                  <td colSpan="4">No harvesters worked during this period.</td>
+                </tr>
+              )}
+              {harvestersSummary.map((item) => (
+                <tr key={item.harvesterId}>
+                  <td>{item.name}</td>
+                  <td>{item.daysWorked}</td>
+                  <td>{item.leafMassKg.toLocaleString()}</td>
+                  <td>{item.averageLeafMassPerDay.toLocaleString()}</td>
                 </tr>
               ))}
+              {harvestingSummaryAverages && (
+                <tr className="harvesting-summary-averages">
+                  <td>
+                    <strong>Averages</strong>
+                  </td>
+                  <td>{harvestingSummaryAverages.daysWorked.toLocaleString()}</td>
+                  <td>{harvestingSummaryAverages.totalKg.toLocaleString()}</td>
+                  <td>{harvestingSummaryAverages.averageKgPerDay.toLocaleString()}</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

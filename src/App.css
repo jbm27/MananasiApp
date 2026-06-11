@@ -713,6 +713,22 @@ th {
   border-radius: 0.55rem;
 }
 
+.harvesting-summary-period {
+  margin: 0 0 0.75rem;
+  color: #475569;
+}
+
+.harvesting-summary-table thead tr:first-child th {
+  text-align: center;
+  font-size: 0.85rem;
+  background: #f1f5f9;
+}
+
+.harvesting-summary-averages {
+  background: #f8fafc;
+  border-top: 2px solid #cbd5e1;
+}
+
 @media (max-width: 900px) {
   .harvest-entry-page {
     max-width: none;
