@@ -771,3 +771,43 @@ th {
     padding: 1rem;
   }
 }
+
+.payroll-toolbar {
+  margin-top: 1rem;
+}
+
+.payroll-period-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin: 0.75rem 0 1rem;
+  color: #475569;
+  font-size: 0.92rem;
+}
+
+.payroll-table-wrap {
+  overflow-x: auto;
+}
+
+.payroll-table {
+  min-width: 2200px;
+  font-size: 0.85rem;
+}
+
+.payroll-table th,
+.payroll-table td {
+  white-space: nowrap;
+}
+
+.payroll-input {
+  width: 4.5rem;
+  padding: 0.25rem 0.35rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.35rem;
+  font-size: 0.82rem;
+}
+
+.payroll-totals-row {
+  background: #f8fafc;
+  border-top: 2px solid #cbd5e1;
+}

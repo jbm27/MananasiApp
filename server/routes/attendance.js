@@ -25,15 +25,32 @@ router.post('/events', async (req, res) => {
 
 router.get('/events', async (req, res) => {
   try {
-    const limit = Math.min(Number(req.query.limit ?? 100), 500)
+    const limit = Math.min(Number(req.query.limit ?? 100), 5000)
+    const fromDate = req.query.from ? String(req.query.from) : null
+    const toDate = req.query.to ? String(req.query.to) : null
+    const conditions = []
+    const params = []
+
+    if (fromDate) {
+      params.push(fromDate)
+      conditions.push(`occurred_at::date >= $${params.length}::date`)
+    }
+    if (toDate) {
+      params.push(toDate)
+      conditions.push(`occurred_at::date <= $${params.length}::date`)
+    }
+
+    params.push(limit)
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
     const result = await getPool().query(
       `SELECT id, employee_id AS "employeeId", event_type AS "eventType",
               occurred_at AS "occurredAt", device_id AS "deviceId",
               source_event_id AS "sourceEventId", created_at AS "createdAt"
        FROM attendance_events
+       ${whereClause}
        ORDER BY occurred_at DESC
-       LIMIT $1`,
-      [limit],
+       LIMIT $${params.length}`,
+      params,
     )
     res.json(result.rows)
   } catch (error) {

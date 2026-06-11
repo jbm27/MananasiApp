@@ -12,6 +12,7 @@ import {
 } from 'react-router-dom'
 import { jsPDF } from 'jspdf'
 import './App.css'
+import PayrollPage from './PayrollPage.jsx'
 import logoStandard from '../LogoStandard.png'
 import { mananasiStaffEmployees } from './mananasiStaffEmployees.js'
 import {
@@ -142,6 +143,7 @@ const PAGE_ACCESS_IDS = [
   'baling',
   'silage-production',
   'invoicing',
+  'payroll',
 ]
 
 const PAGE_ACCESS_LABELS = {
@@ -158,6 +160,7 @@ const PAGE_ACCESS_LABELS = {
   baling: 'Baling',
   'silage-production': 'Silage production',
   invoicing: 'Invoicing',
+  payroll: 'Payroll',
 }
 
 const DATA_ENTRY_PERMISSION_IDS = [
@@ -188,8 +191,8 @@ const DATA_ENTRY_PERMISSION_LABELS = {
 
 /** Policy defaults from organisation roles; James (admin) always receives full access in code. */
 const DEFAULT_PAGE_ACCESS_BY_EMPLOYEE_ID = {
-  '1002': ['dashboard', 'employees'],
-  '1010': ['dashboard', 'employees', 'invoicing', 'customers', 'stock'],
+  '1002': ['dashboard', 'employees', 'payroll'],
+  '1010': ['dashboard', 'employees', 'invoicing', 'customers', 'stock', 'payroll'],
   '1018': ['dashboard', 'stock'],
   '1019': [...PAGE_ACCESS_IDS],
   '1004': [
@@ -292,6 +295,9 @@ function pathnameToRequiredPageId(pathname) {
   }
   if (path.startsWith('/activities/invoicing')) {
     return 'invoicing'
+  }
+  if (path.startsWith('/payroll')) {
+    return 'payroll'
   }
   if (path.startsWith('/activities/')) {
     return null
@@ -8122,6 +8128,7 @@ function hydrateAppState(data, setters) {
   if (Array.isArray(data.balingRecords)) setters.setBalingRecords(data.balingRecords)
   if (Array.isArray(data.silageRecords)) setters.setSilageRecords(data.silageRecords)
   if (Array.isArray(data.invoiceDocuments)) setters.setInvoiceDocuments(data.invoiceDocuments)
+  if (data.payrollAdjustments) setters.setPayrollAdjustments(data.payrollAdjustments)
 }
 
 function App() {
@@ -8175,6 +8182,7 @@ function App() {
     readDataEntryPermissionOverrides,
   )
   const [attendanceRefreshing, setAttendanceRefreshing] = useState(false)
+  const [payrollAdjustments, setPayrollAdjustments] = useState({})
   const [haulageTrips, setHaulageTrips] = useState(() =>
     buildSeedHaulageTrips(
       buildSeedRecords(
@@ -8335,6 +8343,7 @@ function App() {
       setBalingRecords,
       setSilageRecords,
       setInvoiceDocuments,
+      setPayrollAdjustments,
     })
     hydratedRef.current = true
   }, [ready, initialData])
@@ -8362,6 +8371,7 @@ function App() {
       balingRecords,
       silageRecords,
       invoiceDocuments,
+      payrollAdjustments,
     }),
     [
       employees,
@@ -8384,6 +8394,7 @@ function App() {
       balingRecords,
       silageRecords,
       invoiceDocuments,
+      payrollAdjustments,
     ],
   )
 
@@ -8529,6 +8540,16 @@ function App() {
       unique.unshift('dashboard')
     }
     setPagePermissionOverrides((prev) => ({ ...prev, [employeeId]: unique }))
+  }
+
+  function handleUpdatePayrollAdjustment(periodId, employeeId, adjustment) {
+    setPayrollAdjustments((prev) => ({
+      ...prev,
+      [periodId]: {
+        ...(prev[periodId] ?? {}),
+        [employeeId]: adjustment,
+      },
+    }))
   }
 
   function handleClearEmployeePageAccessOverride(employeeId) {
@@ -8818,6 +8839,7 @@ function App() {
         <nav>
           {allowedPages.has('dashboard') ? <NavLink to="/">Dashboard</NavLink> : null}
           {allowedPages.has('employees') ? <NavLink to="/employees">Employees</NavLink> : null}
+          {allowedPages.has('payroll') ? <NavLink to="/payroll">Payroll</NavLink> : null}
           {isAppAdmin(currentUser) ? (
             <NavLink to="/admin/sign-in-accounts">Sign-in accounts</NavLink>
           ) : null}
@@ -8918,6 +8940,19 @@ function App() {
           <Route
             path="/customers"
             element={<CustomersPage customers={customers} onAddCustomer={handleAddCustomer} />}
+          />
+          <Route
+            path="/payroll"
+            element={
+              <PayrollPage
+                currentUser={currentUser}
+                employees={employees}
+                harvestRecords={records}
+                compensationRules={compensationRules}
+                payrollAdjustments={payrollAdjustments}
+                onUpdatePayrollAdjustment={handleUpdatePayrollAdjustment}
+              />
+            }
           />
           <Route
             path="/activities/harvesting/entry"

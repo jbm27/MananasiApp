@@ -61,6 +61,20 @@ export async function fetchAttendanceEvents(limit = 100) {
   return parseJsonResponse(response)
 }
 
+export async function fetchAttendanceEventsForPeriod(fromDate, toDate, limit = 5000) {
+  const params = new URLSearchParams({
+    from: fromDate,
+    to: toDate,
+    limit: String(limit),
+  })
+  const response = await fetch(`${API_BASE}/api/attendance/events?${params.toString()}`)
+  if (!response.ok) {
+    const body = await parseJsonResponse(response)
+    throw new Error(body?.error ?? `Failed to load attendance events (${response.status})`)
+  }
+  return parseJsonResponse(response)
+}
+
 export async function checkApiHealth() {
   const response = await fetch(`${API_BASE}/api/health`)
   return response.ok
