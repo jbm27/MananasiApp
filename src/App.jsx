@@ -13,6 +13,7 @@ import {
 import { jsPDF } from 'jspdf'
 import './App.css'
 import PayrollPage from './PayrollPage.jsx'
+import { formatKenyaDateTime } from './kenyaTime.js'
 import logoStandard from '../LogoStandard.png'
 import { mananasiStaffEmployees } from './mananasiStaffEmployees.js'
 import {
@@ -2523,7 +2524,7 @@ function EmployeesPage({
                 const employee = employees.find((item) => item.id === event.employeeId)
                 return (
                   <tr key={event.id}>
-                    <td>{new Date(event.occurredAt).toLocaleString()}</td>
+                    <td>{formatKenyaDateTime(event.occurredAt)}</td>
                     <td>{employee?.name ?? 'Unknown'}</td>
                     <td>
                       <code>{event.employeeId}</code>

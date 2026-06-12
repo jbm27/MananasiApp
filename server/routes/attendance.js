@@ -33,11 +33,15 @@ router.get('/events', async (req, res) => {
 
     if (fromDate) {
       params.push(fromDate)
-      conditions.push(`occurred_at::date >= $${params.length}::date`)
+      conditions.push(
+        `(occurred_at AT TIME ZONE 'Africa/Nairobi')::date >= $${params.length}::date`,
+      )
     }
     if (toDate) {
       params.push(toDate)
-      conditions.push(`occurred_at::date <= $${params.length}::date`)
+      conditions.push(
+        `(occurred_at AT TIME ZONE 'Africa/Nairobi')::date <= $${params.length}::date`,
+      )
     }
 
     params.push(limit)

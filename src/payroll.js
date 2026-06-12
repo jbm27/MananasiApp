@@ -1,4 +1,5 @@
 import { getEmployeeDailyWageKes } from './employeePay.js'
+import { toKenyaDateString } from './kenyaTime.js'
 
 const HOURS_PER_DAY = 8
 const SHA_RATE = 0.0275
@@ -43,8 +44,8 @@ export function countDaysWorkedFromAttendance(attendanceEvents, employeeId, from
     if (event.employeeId !== employeeId || event.eventType !== 'clock_in') {
       return
     }
-    const date = String(event.occurredAt).slice(0, 10)
-    if (date >= fromDate && date <= toDate) {
+    const date = toKenyaDateString(event.occurredAt)
+    if (date && date >= fromDate && date <= toDate) {
       dates.add(date)
     }
   })

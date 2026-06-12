@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { recordAttendanceEvent } from '../services/attendanceService.js'
 import { getAppState } from '../stateStore.js'
+import { parseKenyaLocalDateTime } from '../utils/kenyaTime.js'
 import {
   resolveEmployeeIdFromDevicePin,
   resolveEventTypeForPin,
@@ -47,8 +48,10 @@ function parseAttlogLine(line) {
   const statusCode = parts[2] ?? '0'
   const verifyMode = parts[3] ?? '0'
 
-  const occurredAt = new Date(dateTime.replace(' ', 'T'))
-  if (Number.isNaN(occurredAt.getTime())) {
+  let occurredAt
+  try {
+    occurredAt = parseKenyaLocalDateTime(dateTime)
+  } catch {
     return null
   }
 
