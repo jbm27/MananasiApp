@@ -12,6 +12,11 @@ import {
   createBlankPayrollAdjustment,
   sumPayrollColumn,
 } from './payroll.js'
+import {
+  buildSalaryPayrollLines,
+  createBlankSalaryAdjustment,
+  sumSalaryColumn,
+} from './salaryPayroll.js'
 
 function formatDisplayDate(dateStr) {
   if (!dateStr) {
@@ -24,11 +29,14 @@ function formatDisplayDate(dateStr) {
   })
 }
 
-function formatMoney(value) {
-  return Number(value ?? 0).toLocaleString()
+function formatMoney(value, decimals = 0) {
+  return Number(value ?? 0).toLocaleString(undefined, {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  })
 }
 
-function EditableNumberCell({ value, onChange, disabled, step = '0.1', min = '0' }) {
+function EditableNumberCell({ value, onChange, disabled, step = '1', min = '0' }) {
   return (
     <input
       className="payroll-input"
@@ -42,18 +50,34 @@ function EditableNumberCell({ value, onChange, disabled, step = '0.1', min = '0'
   )
 }
 
+function PayrollSection({ title, isOpen, onToggle, children }) {
+  return (
+    <div className="payroll-section">
+      <button type="button" className="payroll-section-toggle" onClick={onToggle}>
+        <span>{title}</span>
+        <span className="payroll-section-chevron">{isOpen ? '▾' : '▸'}</span>
+      </button>
+      {isOpen ? <div className="payroll-section-body">{children}</div> : null}
+    </div>
+  )
+}
+
 export default function PayrollPage({
   currentUser,
   employees,
   harvestRecords,
   compensationRules,
   payrollAdjustments,
+  salaryPayrollAdjustments,
   onUpdatePayrollAdjustment,
+  onUpdateSalaryPayrollAdjustment,
 }) {
   const currentFiscalYear = getFiscalYearForDate(new Date().toISOString().slice(0, 10))
   const [selectedYear, setSelectedYear] = useState(currentFiscalYear)
   const [selectedPeriodId, setSelectedPeriodId] = useState(getDefaultPayPeriodId())
   const [contractTypeFilter, setContractTypeFilter] = useState('all')
+  const [showWages, setShowWages] = useState(false)
+  const [showSalaries, setShowSalaries] = useState(false)
   const [attendanceEvents, setAttendanceEvents] = useState([])
   const [attendanceLoading, setAttendanceLoading] = useState(false)
   const [attendanceError, setAttendanceError] = useState('')
@@ -107,7 +131,18 @@ export default function PayrollPage({
     contractTypeFilter,
   ])
 
-  function handleAdjustmentChange(employeeId, field, rawValue) {
+  const salaryLines = useMemo(() => {
+    if (!selectedPeriod) {
+      return []
+    }
+    return buildSalaryPayrollLines({
+      employees,
+      salaryPayrollAdjustments,
+      periodId: selectedPeriod.id,
+    })
+  }, [employees, selectedPeriod, salaryPayrollAdjustments])
+
+  function handleWageAdjustmentChange(employeeId, field, rawValue) {
     if (!selectedPeriod || !canEdit) {
       return
     }
@@ -123,9 +158,24 @@ export default function PayrollPage({
     })
   }
 
-  const totals = {
+  function handleSalaryAdjustmentChange(employeeId, field, rawValue) {
+    if (!selectedPeriod || !canEdit) {
+      return
+    }
+    const numeric = Number(rawValue)
+    const value = Number.isNaN(numeric) ? 0 : numeric
+    const current = {
+      ...createBlankSalaryAdjustment(),
+      ...(salaryPayrollAdjustments[selectedPeriod.id]?.[employeeId] ?? {}),
+    }
+    onUpdateSalaryPayrollAdjustment(selectedPeriod.id, employeeId, {
+      ...current,
+      [field]: value,
+    })
+  }
+
+  const wageTotals = {
     daysWorked: sumPayrollColumn(payrollLines, 'daysWorked'),
-    paidLeaveDays: sumPayrollColumn(payrollLines, 'paidLeaveDays'),
     regularPay: sumPayrollColumn(payrollLines, 'regularPay'),
     overtimePay: sumPayrollColumn(payrollLines, 'overtimePay'),
     totalIncentiveKes: sumPayrollColumn(payrollLines, 'totalIncentiveKes'),
@@ -140,12 +190,28 @@ export default function PayrollPage({
     netPay: sumPayrollColumn(payrollLines, 'netPay'),
   }
 
+  const salaryTotals = {
+    grossSalary: sumSalaryColumn(salaryLines, 'grossSalary'),
+    grossPay: sumSalaryColumn(salaryLines, 'grossPay'),
+    nssf: sumSalaryColumn(salaryLines, 'nssf'),
+    pension: sumSalaryColumn(salaryLines, 'pension'),
+    ahl: sumSalaryColumn(salaryLines, 'ahl'),
+    sha: sumSalaryColumn(salaryLines, 'sha'),
+    paye: sumSalaryColumn(salaryLines, 'paye'),
+    helb: sumSalaryColumn(salaryLines, 'helb'),
+    totalDeductions: sumSalaryColumn(salaryLines, 'totalDeductions'),
+    salaryAdvance: sumSalaryColumn(salaryLines, 'salaryAdvance'),
+    azimaSacco: sumSalaryColumn(salaryLines, 'azimaSacco'),
+    welfareContribution: sumSalaryColumn(salaryLines, 'welfareContribution'),
+    netPay: sumSalaryColumn(salaryLines, 'netPay'),
+  }
+
   return (
     <section className="panel payroll-page">
       <h2>Payroll</h2>
       <p>
-        Seasonal and supplementary employee payroll on a 4-4-5 calendar starting 27 December each
-        year. Wages run to the last Friday of each period; payment is the following Monday.
+        Payroll on a 4-4-5 calendar starting 27 December each year. Seasonal and supplementary staff
+        are paid <strong>wages</strong>; regular staff are paid <strong>salaries</strong>.
       </p>
 
       <div className="form-grid payroll-toolbar">
@@ -179,17 +245,6 @@ export default function PayrollPage({
             ))}
           </select>
         </label>
-        <label>
-          Contract type
-          <select
-            value={contractTypeFilter}
-            onChange={(event) => setContractTypeFilter(event.target.value)}
-          >
-            <option value="all">Seasonal and supplementary</option>
-            <option value="seasonal">Seasonal only</option>
-            <option value="supplementary">Supplementary only</option>
-          </select>
-        </label>
       </div>
 
       {selectedPeriod && (
@@ -212,171 +267,368 @@ export default function PayrollPage({
         </div>
       )}
 
-      <div className="table-wrap payroll-table-wrap">
-        <table className="payroll-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Department</th>
-              <th>Contract</th>
-              <th>Daily rate</th>
-              <th>Days worked</th>
-              <th>Sick</th>
-              <th>Compassionate</th>
-              <th>Maternity</th>
-              <th>Unpaid</th>
-              <th>Regular pay</th>
-              <th>OT hrs</th>
-              <th>OT pay</th>
-              <th>Kg over 250</th>
-              <th>Incentive</th>
-              <th>Total earnings</th>
-              <th>Advance</th>
-              <th>Max advance</th>
-              <th>Azima Sacco</th>
-              <th>SHA</th>
-              <th>NSSF</th>
-              <th>AHL</th>
-              <th>HELB</th>
-              <th>PPE</th>
-              <th>Net pay</th>
-            </tr>
-          </thead>
-          <tbody>
-            {payrollLines.length === 0 && (
-              <tr>
-                <td colSpan="24">No seasonal or supplementary employees match this filter.</td>
-              </tr>
-            )}
-            {payrollLines.map((line) => (
-              <tr key={line.employeeId}>
-                <td>{line.name}</td>
-                <td>{line.department}</td>
-                <td>{getContractTypeLabel(line.contractType)}</td>
-                <td>{formatMoney(line.dailyRate)}</td>
-                <td>{line.daysWorked}</td>
-                <td>
-                  <EditableNumberCell
-                    value={line.sickLeaveDays}
-                    onChange={(value) => handleAdjustmentChange(line.employeeId, 'sickLeaveDays', value)}
-                    disabled={!canEdit}
-                  />
-                </td>
-                <td>
-                  <EditableNumberCell
-                    value={line.compassionateLeaveDays}
-                    onChange={(value) =>
-                      handleAdjustmentChange(line.employeeId, 'compassionateLeaveDays', value)
-                    }
-                    disabled={!canEdit}
-                  />
-                </td>
-                <td>
-                  <EditableNumberCell
-                    value={line.maternityLeaveDays}
-                    onChange={(value) =>
-                      handleAdjustmentChange(line.employeeId, 'maternityLeaveDays', value)
-                    }
-                    disabled={!canEdit}
-                  />
-                </td>
-                <td>
-                  <EditableNumberCell
-                    value={line.unpaidLeaveDays}
-                    onChange={(value) =>
-                      handleAdjustmentChange(line.employeeId, 'unpaidLeaveDays', value)
-                    }
-                    disabled={!canEdit}
-                  />
-                </td>
-                <td>{formatMoney(line.regularPay)}</td>
-                <td>
-                  <EditableNumberCell
-                    value={line.overtimeHours}
-                    onChange={(value) => handleAdjustmentChange(line.employeeId, 'overtimeHours', value)}
-                    disabled={!canEdit}
-                    step="0.5"
-                  />
-                </td>
-                <td>{formatMoney(line.overtimePay)}</td>
-                <td>{formatMoney(line.kgsOver250)}</td>
-                <td>{formatMoney(line.totalIncentiveKes)}</td>
-                <td>{formatMoney(line.totalEarnings)}</td>
-                <td>
-                  <EditableNumberCell
-                    value={line.salaryAdvance}
-                    onChange={(value) => handleAdjustmentChange(line.employeeId, 'salaryAdvance', value)}
-                    disabled={!canEdit}
-                  />
-                </td>
-                <td>{formatMoney(line.maxSalaryAdvance)}</td>
-                <td>
-                  <EditableNumberCell
-                    value={line.azimaSacco}
-                    onChange={(value) => handleAdjustmentChange(line.employeeId, 'azimaSacco', value)}
-                    disabled={!canEdit}
-                  />
-                </td>
-                <td>{formatMoney(line.shaDeductions)}</td>
-                <td>{formatMoney(line.nssf)}</td>
-                <td>{formatMoney(line.ahl)}</td>
-                <td>
-                  <EditableNumberCell
-                    value={line.helb}
-                    onChange={(value) => handleAdjustmentChange(line.employeeId, 'helb', value)}
-                    disabled={!canEdit}
-                  />
-                </td>
-                <td>
-                  <EditableNumberCell
-                    value={line.ppeDeductions}
-                    onChange={(value) =>
-                      handleAdjustmentChange(line.employeeId, 'ppeDeductions', value)
-                    }
-                    disabled={!canEdit}
-                  />
-                </td>
-                <td>
-                  <strong>{formatMoney(line.netPay)}</strong>
-                </td>
-              </tr>
-            ))}
-            {payrollLines.length > 0 && (
-              <tr className="payroll-totals-row">
-                <td colSpan="4">
-                  <strong>Totals</strong>
-                </td>
-                <td>{totals.daysWorked}</td>
-                <td colSpan="4"></td>
-                <td>{formatMoney(totals.regularPay)}</td>
-                <td></td>
-                <td>{formatMoney(totals.overtimePay)}</td>
-                <td></td>
-                <td>{formatMoney(totals.totalIncentiveKes)}</td>
-                <td>{formatMoney(totals.totalEarnings)}</td>
-                <td>{formatMoney(totals.salaryAdvance)}</td>
-                <td></td>
-                <td>{formatMoney(totals.azimaSacco)}</td>
-                <td>{formatMoney(totals.shaDeductions)}</td>
-                <td>{formatMoney(totals.nssf)}</td>
-                <td>{formatMoney(totals.ahl)}</td>
-                <td>{formatMoney(totals.helb)}</td>
-                <td>{formatMoney(totals.ppeDeductions)}</td>
-                <td>
-                  <strong>{formatMoney(totals.netPay)}</strong>
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <PayrollSection title="Wages" isOpen={showWages} onToggle={() => setShowWages((prev) => !prev)}>
+        <div className="form-grid payroll-toolbar">
+          <label>
+            Contract type
+            <select
+              value={contractTypeFilter}
+              onChange={(event) => setContractTypeFilter(event.target.value)}
+            >
+              <option value="all">Seasonal and supplementary</option>
+              <option value="seasonal">Seasonal only</option>
+              <option value="supplementary">Supplementary only</option>
+            </select>
+          </label>
+        </div>
 
-      <div className="rules-box">
-        <strong>Calculations:</strong> Regular pay = daily rate × (days worked + sick + compassionate
-        + maternity leave). Overtime = hours × hourly rate × 1.5. SHA = max(KES 300, 2.75% of total
-        earnings). NSSF = 6%. AHL = 1.5%. Max advance = half of base earnings to the advance Friday
-        (harvester incentives excluded).
-      </div>
+        <div className="table-wrap payroll-table-wrap">
+          <table className="payroll-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Department</th>
+                <th>Contract</th>
+                <th>Daily rate</th>
+                <th>Days worked</th>
+                <th>Sick</th>
+                <th>Compassionate</th>
+                <th>Maternity</th>
+                <th>Unpaid</th>
+                <th>Regular pay</th>
+                <th>OT hrs</th>
+                <th>OT pay</th>
+                <th>Kg over 250</th>
+                <th>Incentive</th>
+                <th>Total earnings</th>
+                <th>Advance</th>
+                <th>Max advance</th>
+                <th>Azima Sacco</th>
+                <th>SHA</th>
+                <th>NSSF</th>
+                <th>AHL</th>
+                <th>HELB</th>
+                <th>PPE</th>
+                <th>Net pay</th>
+              </tr>
+            </thead>
+            <tbody>
+              {payrollLines.length === 0 && (
+                <tr>
+                  <td colSpan="24">No seasonal or supplementary employees match this filter.</td>
+                </tr>
+              )}
+              {payrollLines.map((line) => (
+                <tr key={line.employeeId}>
+                  <td>{line.name}</td>
+                  <td>{line.department}</td>
+                  <td>{getContractTypeLabel(line.contractType)}</td>
+                  <td>{formatMoney(line.dailyRate)}</td>
+                  <td>{line.daysWorked}</td>
+                  <td>
+                    <EditableNumberCell
+                      value={line.sickLeaveDays}
+                      onChange={(value) =>
+                        handleWageAdjustmentChange(line.employeeId, 'sickLeaveDays', value)
+                      }
+                      disabled={!canEdit}
+                      step="0.1"
+                    />
+                  </td>
+                  <td>
+                    <EditableNumberCell
+                      value={line.compassionateLeaveDays}
+                      onChange={(value) =>
+                        handleWageAdjustmentChange(line.employeeId, 'compassionateLeaveDays', value)
+                      }
+                      disabled={!canEdit}
+                      step="0.1"
+                    />
+                  </td>
+                  <td>
+                    <EditableNumberCell
+                      value={line.maternityLeaveDays}
+                      onChange={(value) =>
+                        handleWageAdjustmentChange(line.employeeId, 'maternityLeaveDays', value)
+                      }
+                      disabled={!canEdit}
+                      step="0.1"
+                    />
+                  </td>
+                  <td>
+                    <EditableNumberCell
+                      value={line.unpaidLeaveDays}
+                      onChange={(value) =>
+                        handleWageAdjustmentChange(line.employeeId, 'unpaidLeaveDays', value)
+                      }
+                      disabled={!canEdit}
+                      step="0.1"
+                    />
+                  </td>
+                  <td>{formatMoney(line.regularPay)}</td>
+                  <td>
+                    <EditableNumberCell
+                      value={line.overtimeHours}
+                      onChange={(value) =>
+                        handleWageAdjustmentChange(line.employeeId, 'overtimeHours', value)
+                      }
+                      disabled={!canEdit}
+                      step="0.5"
+                    />
+                  </td>
+                  <td>{formatMoney(line.overtimePay)}</td>
+                  <td>{formatMoney(line.kgsOver250)}</td>
+                  <td>{formatMoney(line.totalIncentiveKes)}</td>
+                  <td>{formatMoney(line.totalEarnings)}</td>
+                  <td>
+                    <EditableNumberCell
+                      value={line.salaryAdvance}
+                      onChange={(value) =>
+                        handleWageAdjustmentChange(line.employeeId, 'salaryAdvance', value)
+                      }
+                      disabled={!canEdit}
+                    />
+                  </td>
+                  <td>{formatMoney(line.maxSalaryAdvance)}</td>
+                  <td>
+                    <EditableNumberCell
+                      value={line.azimaSacco}
+                      onChange={(value) =>
+                        handleWageAdjustmentChange(line.employeeId, 'azimaSacco', value)
+                      }
+                      disabled={!canEdit}
+                    />
+                  </td>
+                  <td>{formatMoney(line.shaDeductions)}</td>
+                  <td>{formatMoney(line.nssf)}</td>
+                  <td>{formatMoney(line.ahl)}</td>
+                  <td>
+                    <EditableNumberCell
+                      value={line.helb}
+                      onChange={(value) => handleWageAdjustmentChange(line.employeeId, 'helb', value)}
+                      disabled={!canEdit}
+                    />
+                  </td>
+                  <td>
+                    <EditableNumberCell
+                      value={line.ppeDeductions}
+                      onChange={(value) =>
+                        handleWageAdjustmentChange(line.employeeId, 'ppeDeductions', value)
+                      }
+                      disabled={!canEdit}
+                    />
+                  </td>
+                  <td>
+                    <strong>{formatMoney(line.netPay)}</strong>
+                  </td>
+                </tr>
+              ))}
+              {payrollLines.length > 0 && (
+                <tr className="payroll-totals-row">
+                  <td colSpan="4">
+                    <strong>Totals</strong>
+                  </td>
+                  <td>{wageTotals.daysWorked}</td>
+                  <td colSpan="4"></td>
+                  <td>{formatMoney(wageTotals.regularPay)}</td>
+                  <td></td>
+                  <td>{formatMoney(wageTotals.overtimePay)}</td>
+                  <td></td>
+                  <td>{formatMoney(wageTotals.totalIncentiveKes)}</td>
+                  <td>{formatMoney(wageTotals.totalEarnings)}</td>
+                  <td>{formatMoney(wageTotals.salaryAdvance)}</td>
+                  <td></td>
+                  <td>{formatMoney(wageTotals.azimaSacco)}</td>
+                  <td>{formatMoney(wageTotals.shaDeductions)}</td>
+                  <td>{formatMoney(wageTotals.nssf)}</td>
+                  <td>{formatMoney(wageTotals.ahl)}</td>
+                  <td>{formatMoney(wageTotals.helb)}</td>
+                  <td>{formatMoney(wageTotals.ppeDeductions)}</td>
+                  <td>
+                    <strong>{formatMoney(wageTotals.netPay)}</strong>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="rules-box">
+          <strong>Wages:</strong> Regular pay = daily rate × (days worked + sick + compassionate +
+          maternity leave). Overtime = hours × hourly rate × 1.5. SHA = max(KES 300, 2.75% of total
+          earnings). NSSF = 6%. AHL = 1.5%.
+        </div>
+      </PayrollSection>
+
+      <PayrollSection
+        title="Salaries"
+        isOpen={showSalaries}
+        onToggle={() => setShowSalaries((prev) => !prev)}
+      >
+        <div className="table-wrap payroll-table-wrap">
+          <table className="payroll-table payroll-salary-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Department</th>
+                <th>Gross salary</th>
+                <th>Overtime</th>
+                <th>Allowances</th>
+                <th>Backdated / unpaid leave</th>
+                <th>Gross pay</th>
+                <th>NSSF</th>
+                <th>Tier 1</th>
+                <th>Tier 2</th>
+                <th>Pension</th>
+                <th>AHL</th>
+                <th>SHA</th>
+                <th>Taxable salary</th>
+                <th>Tax</th>
+                <th>Tax relief</th>
+                <th>PAYE</th>
+                <th>HELB</th>
+                <th>Total deductions</th>
+                <th>Advance</th>
+                <th>Azima Sacco</th>
+                <th>Welfare</th>
+                <th>Net pay</th>
+              </tr>
+            </thead>
+            <tbody>
+              {salaryLines.length === 0 && (
+                <tr>
+                  <td colSpan="23">No salaried employees with a monthly salary on record.</td>
+                </tr>
+              )}
+              {salaryLines.map((line) => (
+                <tr key={line.employeeId}>
+                  <td>{line.name}</td>
+                  <td>{line.department}</td>
+                  <td>{formatMoney(line.grossSalary)}</td>
+                  <td>
+                    <EditableNumberCell
+                      value={line.overtime}
+                      onChange={(value) =>
+                        handleSalaryAdjustmentChange(line.employeeId, 'overtime', value)
+                      }
+                      disabled={!canEdit}
+                    />
+                  </td>
+                  <td>
+                    <EditableNumberCell
+                      value={line.allowances}
+                      onChange={(value) =>
+                        handleSalaryAdjustmentChange(line.employeeId, 'allowances', value)
+                      }
+                      disabled={!canEdit}
+                    />
+                  </td>
+                  <td>
+                    <EditableNumberCell
+                      value={line.backdatedPay}
+                      onChange={(value) =>
+                        handleSalaryAdjustmentChange(line.employeeId, 'backdatedPay', value)
+                      }
+                      disabled={!canEdit}
+                    />
+                  </td>
+                  <td>{formatMoney(line.grossPay)}</td>
+                  <td>{formatMoney(line.nssf)}</td>
+                  <td>{formatMoney(line.nssfTier1)}</td>
+                  <td>{formatMoney(line.nssfTier2)}</td>
+                  <td>{formatMoney(line.pension)}</td>
+                  <td>{formatMoney(line.ahl)}</td>
+                  <td>{formatMoney(line.sha)}</td>
+                  <td>{formatMoney(line.taxableSalary)}</td>
+                  <td>{formatMoney(line.tax, 2)}</td>
+                  <td>
+                    <EditableNumberCell
+                      value={line.taxRelief}
+                      onChange={(value) =>
+                        handleSalaryAdjustmentChange(line.employeeId, 'taxRelief', value)
+                      }
+                      disabled={!canEdit}
+                    />
+                  </td>
+                  <td>{formatMoney(line.paye, 2)}</td>
+                  <td>
+                    <EditableNumberCell
+                      value={line.helb}
+                      onChange={(value) =>
+                        handleSalaryAdjustmentChange(line.employeeId, 'helb', value)
+                      }
+                      disabled={!canEdit}
+                    />
+                  </td>
+                  <td>{formatMoney(line.totalDeductions, 2)}</td>
+                  <td>
+                    <EditableNumberCell
+                      value={line.salaryAdvance}
+                      onChange={(value) =>
+                        handleSalaryAdjustmentChange(line.employeeId, 'salaryAdvance', value)
+                      }
+                      disabled={!canEdit}
+                    />
+                  </td>
+                  <td>
+                    <EditableNumberCell
+                      value={line.azimaSacco}
+                      onChange={(value) =>
+                        handleSalaryAdjustmentChange(line.employeeId, 'azimaSacco', value)
+                      }
+                      disabled={!canEdit}
+                    />
+                  </td>
+                  <td>
+                    <EditableNumberCell
+                      value={line.welfareContribution}
+                      onChange={(value) =>
+                        handleSalaryAdjustmentChange(line.employeeId, 'welfareContribution', value)
+                      }
+                      disabled={!canEdit}
+                    />
+                  </td>
+                  <td>
+                    <strong>{formatMoney(line.netPay, 2)}</strong>
+                  </td>
+                </tr>
+              ))}
+              {salaryLines.length > 0 && (
+                <tr className="payroll-totals-row">
+                  <td colSpan="2">
+                    <strong>Totals</strong>
+                  </td>
+                  <td>{formatMoney(salaryTotals.grossSalary)}</td>
+                  <td colSpan="3"></td>
+                  <td>{formatMoney(salaryTotals.grossPay)}</td>
+                  <td>{formatMoney(salaryTotals.nssf)}</td>
+                  <td colSpan="2"></td>
+                  <td>{formatMoney(salaryTotals.pension)}</td>
+                  <td>{formatMoney(salaryTotals.ahl)}</td>
+                  <td>{formatMoney(salaryTotals.sha)}</td>
+                  <td colSpan="3"></td>
+                  <td>{formatMoney(salaryTotals.paye, 2)}</td>
+                  <td></td>
+                  <td>{formatMoney(salaryTotals.totalDeductions, 2)}</td>
+                  <td>{formatMoney(salaryTotals.salaryAdvance)}</td>
+                  <td>{formatMoney(salaryTotals.azimaSacco)}</td>
+                  <td>{formatMoney(salaryTotals.welfareContribution)}</td>
+                  <td>
+                    <strong>{formatMoney(salaryTotals.netPay, 2)}</strong>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="rules-box">
+          <strong>Salaries:</strong> Gross pay = gross salary + overtime + allowances + backdated
+          pay. NSSF = Tier 1 (540) + Tier 2 (min((gross pay − 9,000) × 5%, 5,940)). Pension = 5%.
+          AHL = 1.5%. SHA = 2.75%. PAYE = tax − tax relief (default KES 2,400 personal relief; set to
+          0 if not applicable). Net pay = gross pay − total deductions − advance − Sacco − welfare.
+        </div>
+      </PayrollSection>
     </section>
   )
 }

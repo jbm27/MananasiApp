@@ -8130,6 +8130,7 @@ function hydrateAppState(data, setters) {
   if (Array.isArray(data.silageRecords)) setters.setSilageRecords(data.silageRecords)
   if (Array.isArray(data.invoiceDocuments)) setters.setInvoiceDocuments(data.invoiceDocuments)
   if (data.payrollAdjustments) setters.setPayrollAdjustments(data.payrollAdjustments)
+  if (data.salaryPayrollAdjustments) setters.setSalaryPayrollAdjustments(data.salaryPayrollAdjustments)
 }
 
 function App() {
@@ -8184,6 +8185,7 @@ function App() {
   )
   const [attendanceRefreshing, setAttendanceRefreshing] = useState(false)
   const [payrollAdjustments, setPayrollAdjustments] = useState({})
+  const [salaryPayrollAdjustments, setSalaryPayrollAdjustments] = useState({})
   const [haulageTrips, setHaulageTrips] = useState(() =>
     buildSeedHaulageTrips(
       buildSeedRecords(
@@ -8345,6 +8347,7 @@ function App() {
       setSilageRecords,
       setInvoiceDocuments,
       setPayrollAdjustments,
+      setSalaryPayrollAdjustments,
     })
     hydratedRef.current = true
   }, [ready, initialData])
@@ -8373,6 +8376,7 @@ function App() {
       silageRecords,
       invoiceDocuments,
       payrollAdjustments,
+      salaryPayrollAdjustments,
     }),
     [
       employees,
@@ -8396,6 +8400,7 @@ function App() {
       silageRecords,
       invoiceDocuments,
       payrollAdjustments,
+      salaryPayrollAdjustments,
     ],
   )
 
@@ -8545,6 +8550,16 @@ function App() {
 
   function handleUpdatePayrollAdjustment(periodId, employeeId, adjustment) {
     setPayrollAdjustments((prev) => ({
+      ...prev,
+      [periodId]: {
+        ...(prev[periodId] ?? {}),
+        [employeeId]: adjustment,
+      },
+    }))
+  }
+
+  function handleUpdateSalaryPayrollAdjustment(periodId, employeeId, adjustment) {
+    setSalaryPayrollAdjustments((prev) => ({
       ...prev,
       [periodId]: {
         ...(prev[periodId] ?? {}),
@@ -8951,7 +8966,9 @@ function App() {
                 harvestRecords={records}
                 compensationRules={compensationRules}
                 payrollAdjustments={payrollAdjustments}
+                salaryPayrollAdjustments={salaryPayrollAdjustments}
                 onUpdatePayrollAdjustment={handleUpdatePayrollAdjustment}
+                onUpdateSalaryPayrollAdjustment={handleUpdateSalaryPayrollAdjustment}
               />
             }
           />

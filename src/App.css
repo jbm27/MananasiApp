@@ -811,3 +811,39 @@ th {
   background: #f8fafc;
   border-top: 2px solid #cbd5e1;
 }
+
+.payroll-section {
+  margin-top: 1.25rem;
+}
+
+.payroll-section-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.85rem 1rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.55rem;
+  background: #f1f5f9;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #0f172a;
+  cursor: pointer;
+  text-align: left;
+}
+
+.payroll-section-toggle:hover {
+  background: #e2e8f0;
+}
+
+.payroll-section-chevron {
+  color: #475569;
+}
+
+.payroll-section-body {
+  margin-top: 0.85rem;
+}
+
+.payroll-salary-table {
+  min-width: 2600px;
+}
