@@ -13,6 +13,11 @@ import {
 import { jsPDF } from 'jspdf'
 import './App.css'
 import PayrollPage from './PayrollPage.jsx'
+import {
+  canApprovePayroll,
+  createPayrollApproval,
+  isPayrollPeriodApproved,
+} from './payroll.js'
 import { formatKenyaDateTime } from './kenyaTime.js'
 import logoStandard from '../LogoStandard.png'
 import { mananasiStaffEmployees } from './mananasiStaffEmployees.js'
@@ -8131,6 +8136,7 @@ function hydrateAppState(data, setters) {
   if (Array.isArray(data.invoiceDocuments)) setters.setInvoiceDocuments(data.invoiceDocuments)
   if (data.payrollAdjustments) setters.setPayrollAdjustments(data.payrollAdjustments)
   if (data.salaryPayrollAdjustments) setters.setSalaryPayrollAdjustments(data.salaryPayrollAdjustments)
+  if (data.payrollApprovals) setters.setPayrollApprovals(data.payrollApprovals)
 }
 
 function App() {
@@ -8186,6 +8192,7 @@ function App() {
   const [attendanceRefreshing, setAttendanceRefreshing] = useState(false)
   const [payrollAdjustments, setPayrollAdjustments] = useState({})
   const [salaryPayrollAdjustments, setSalaryPayrollAdjustments] = useState({})
+  const [payrollApprovals, setPayrollApprovals] = useState({})
   const [haulageTrips, setHaulageTrips] = useState(() =>
     buildSeedHaulageTrips(
       buildSeedRecords(
@@ -8348,6 +8355,7 @@ function App() {
       setInvoiceDocuments,
       setPayrollAdjustments,
       setSalaryPayrollAdjustments,
+      setPayrollApprovals,
     })
     hydratedRef.current = true
   }, [ready, initialData])
@@ -8377,6 +8385,7 @@ function App() {
       invoiceDocuments,
       payrollAdjustments,
       salaryPayrollAdjustments,
+      payrollApprovals,
     }),
     [
       employees,
@@ -8401,6 +8410,7 @@ function App() {
       invoiceDocuments,
       payrollAdjustments,
       salaryPayrollAdjustments,
+      payrollApprovals,
     ],
   )
 
@@ -8549,6 +8559,9 @@ function App() {
   }
 
   function handleUpdatePayrollAdjustment(periodId, employeeId, adjustment) {
+    if (isPayrollPeriodApproved(payrollApprovals, periodId)) {
+      return
+    }
     setPayrollAdjustments((prev) => ({
       ...prev,
       [periodId]: {
@@ -8559,6 +8572,9 @@ function App() {
   }
 
   function handleUpdateSalaryPayrollAdjustment(periodId, employeeId, adjustment) {
+    if (isPayrollPeriodApproved(payrollApprovals, periodId)) {
+      return
+    }
     setSalaryPayrollAdjustments((prev) => ({
       ...prev,
       [periodId]: {
@@ -8566,6 +8582,27 @@ function App() {
         [employeeId]: adjustment,
       },
     }))
+  }
+
+  function handleApprovePayrollPeriod(periodId) {
+    if (!currentUser || !canApprovePayroll(currentUser)) {
+      return
+    }
+    setPayrollApprovals((prev) => ({
+      ...prev,
+      [periodId]: createPayrollApproval(currentUser),
+    }))
+  }
+
+  function handleReleasePayrollPeriod(periodId) {
+    if (!currentUser || !canApprovePayroll(currentUser)) {
+      return
+    }
+    setPayrollApprovals((prev) => {
+      const next = { ...prev }
+      delete next[periodId]
+      return next
+    })
   }
 
   function handleClearEmployeePageAccessOverride(employeeId) {
@@ -8967,8 +9004,11 @@ function App() {
                 compensationRules={compensationRules}
                 payrollAdjustments={payrollAdjustments}
                 salaryPayrollAdjustments={salaryPayrollAdjustments}
+                payrollApprovals={payrollApprovals}
                 onUpdatePayrollAdjustment={handleUpdatePayrollAdjustment}
                 onUpdateSalaryPayrollAdjustment={handleUpdateSalaryPayrollAdjustment}
+                onApprovePayrollPeriod={handleApprovePayrollPeriod}
+                onReleasePayrollPeriod={handleReleasePayrollPeriod}
               />
             }
           />

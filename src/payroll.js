@@ -10,6 +10,7 @@ const AHL_RATE = 0.015
 const OVERTIME_MULTIPLIER = 1.5
 
 export const PAYROLL_EDITOR_EMPLOYEE_IDS = new Set(['1002', '1010', '1019'])
+export const PAYROLL_APPROVER_EMPLOYEE_ID = '1019'
 
 export function canEditPayroll(user) {
   if (!user) {
@@ -19,6 +20,34 @@ export function canEditPayroll(user) {
     return true
   }
   return PAYROLL_EDITOR_EMPLOYEE_IDS.has(user.id)
+}
+
+export function canApprovePayroll(user) {
+  return user?.id === PAYROLL_APPROVER_EMPLOYEE_ID
+}
+
+export function isPayrollPeriodApproved(payrollApprovals, periodId) {
+  return payrollApprovals?.[periodId]?.status === 'approved'
+}
+
+export function getPayrollPeriodApproval(payrollApprovals, periodId) {
+  return payrollApprovals?.[periodId] ?? null
+}
+
+export function canModifyPayrollPeriod(user, payrollApprovals, periodId) {
+  if (!periodId) {
+    return false
+  }
+  return canEditPayroll(user) && !isPayrollPeriodApproved(payrollApprovals, periodId)
+}
+
+export function createPayrollApproval(user) {
+  return {
+    status: 'approved',
+    approvedById: user.id,
+    approvedByName: user.name,
+    approvedAt: new Date().toISOString(),
+  }
 }
 
 export function isPayrollEmployee(employee) {

@@ -861,6 +861,80 @@ th {
   border-color: #dc2626;
 }
 
+.payroll-approval-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.55rem;
+  background: #f8fafc;
+}
+
+.payroll-approval-banner--approved {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.payroll-approval-banner-main p {
+  margin: 0.45rem 0 0;
+  color: #475569;
+}
+
+.payroll-approval-status {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.payroll-approval-status--draft {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.payroll-approval-status--approved {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.payroll-approval-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.payroll-approval-actions button {
+  padding: 0.55rem 0.9rem;
+  border-radius: 0.45rem;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.payroll-approval-actions button:hover {
+  background: #f1f5f9;
+}
+
+.payroll-approval-actions .payroll-approve-button {
+  border-color: #15803d;
+  background: #16a34a;
+  color: #fff;
+}
+
+.payroll-approval-actions .payroll-approve-button:hover {
+  background: #15803d;
+}
+
+.payroll-locked-notice {
+  border-left: 4px solid #f59e0b;
+}
+
 .payroll-salary-table {
   min-width: 2600px;
 }

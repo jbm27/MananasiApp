@@ -12,8 +12,11 @@ import {
 } from './payPeriods.js'
 import {
   buildPayrollLines,
+  canApprovePayroll,
   canEditPayroll,
+  canModifyPayrollPeriod,
   createBlankPayrollAdjustment,
+  getPayrollPeriodApproval,
   sumPayrollColumn,
 } from './payroll.js'
 import {
@@ -21,6 +24,19 @@ import {
   createBlankSalaryAdjustment,
   sumSalaryColumn,
 } from './salaryPayroll.js'
+
+function formatDisplayDateTime(isoDateTime) {
+  if (!isoDateTime) {
+    return '—'
+  }
+  return new Date(isoDateTime).toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
 
 function formatDisplayDate(dateStr) {
   if (!dateStr) {
@@ -73,8 +89,11 @@ export default function PayrollPage({
   compensationRules,
   payrollAdjustments,
   salaryPayrollAdjustments,
+  payrollApprovals,
   onUpdatePayrollAdjustment,
   onUpdateSalaryPayrollAdjustment,
+  onApprovePayrollPeriod,
+  onReleasePayrollPeriod,
 }) {
   const currentFiscalYear = getFiscalYearForDate(new Date().toISOString().slice(0, 10))
   const [selectedYear, setSelectedYear] = useState(currentFiscalYear)
@@ -88,9 +107,15 @@ export default function PayrollPage({
   const [attendanceError, setAttendanceError] = useState('')
 
   const canEdit = canEditPayroll(currentUser)
+  const canApprove = canApprovePayroll(currentUser)
   const periods = useMemo(() => build445PayPeriods(selectedYear), [selectedYear])
   const selectedPeriod =
     periods.find((period) => period.id === selectedPeriodId) ?? periods[0] ?? null
+  const periodApproval = selectedPeriod
+    ? getPayrollPeriodApproval(payrollApprovals, selectedPeriod.id)
+    : null
+  const isPeriodApproved = periodApproval?.status === 'approved'
+  const canModify = canModifyPayrollPeriod(currentUser, payrollApprovals, selectedPeriod?.id)
 
   useEffect(() => {
     if (!periods.some((period) => period.id === selectedPeriodId)) {
@@ -172,7 +197,7 @@ export default function PayrollPage({
   }, [employees, selectedPeriod, salaryPayrollAdjustments, attendanceEvents, harvestRecords])
 
   function handleAdvanceChange(line, rawValue) {
-    if (!selectedPeriod || !canEdit) {
+    if (!selectedPeriod || !canModify) {
       return
     }
     if (line.adjustmentSource === 'wage') {
@@ -183,7 +208,7 @@ export default function PayrollPage({
   }
 
   function handleWageAdjustmentChange(employeeId, field, rawValue) {
-    if (!selectedPeriod || !canEdit) {
+    if (!selectedPeriod || !canModify) {
       return
     }
     const numeric = Number(rawValue)
@@ -199,7 +224,7 @@ export default function PayrollPage({
   }
 
   function handleSalaryAdjustmentChange(employeeId, field, rawValue) {
-    if (!selectedPeriod || !canEdit) {
+    if (!selectedPeriod || !canModify) {
       return
     }
     const numeric = Number(rawValue)
@@ -312,6 +337,61 @@ export default function PayrollPage({
           Payroll adjustments can only be edited by Naomi, Doreen, or James Boyd-Moss.
         </div>
       )}
+      {canEdit && isPeriodApproved && (
+        <div className="placeholder payroll-locked-notice">
+          This pay period has been approved and is locked. James Boyd-Moss must release it before
+          further edits can be made.
+        </div>
+      )}
+
+      {selectedPeriod && (
+        <div
+          className={`payroll-approval-banner${isPeriodApproved ? ' payroll-approval-banner--approved' : ''}`}
+        >
+          <div className="payroll-approval-banner-main">
+            {isPeriodApproved ? (
+              <>
+                <span className="payroll-approval-status payroll-approval-status--approved">
+                  Approved
+                </span>
+                <p>
+                  Signed off by {periodApproval.approvedByName} on{' '}
+                  {formatDisplayDateTime(periodApproval.approvedAt)}. Advances, wages, and salaries
+                  for this period cannot be changed.
+                </p>
+              </>
+            ) : (
+              <>
+                <span className="payroll-approval-status payroll-approval-status--draft">Draft</span>
+                <p>
+                  Advances and payroll for this period are editable. James Boyd-Moss must approve
+                  before figures are finalised for payment.
+                </p>
+              </>
+            )}
+          </div>
+          {canApprove && (
+            <div className="payroll-approval-actions">
+              {isPeriodApproved ? (
+                <button
+                  type="button"
+                  onClick={() => onReleasePayrollPeriod(selectedPeriod.id)}
+                >
+                  Release for editing
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="payroll-approve-button"
+                  onClick={() => onApprovePayrollPeriod(selectedPeriod.id)}
+                >
+                  Approve payroll &amp; advances
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <PayrollSection
         title="Advances"
@@ -358,7 +438,7 @@ export default function PayrollPage({
                     <EditableNumberCell
                       value={line.amountClaimed}
                       onChange={(value) => handleAdvanceChange(line, value)}
-                      disabled={!canEdit}
+                      disabled={!canModify}
                     />
                   </td>
                 </tr>
@@ -448,7 +528,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleWageAdjustmentChange(line.employeeId, 'sickLeaveDays', value)
                       }
-                      disabled={!canEdit}
+                      disabled={!canModify}
                       step="0.1"
                     />
                   </td>
@@ -458,7 +538,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleWageAdjustmentChange(line.employeeId, 'compassionateLeaveDays', value)
                       }
-                      disabled={!canEdit}
+                      disabled={!canModify}
                       step="0.1"
                     />
                   </td>
@@ -468,7 +548,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleWageAdjustmentChange(line.employeeId, 'maternityLeaveDays', value)
                       }
-                      disabled={!canEdit}
+                      disabled={!canModify}
                       step="0.1"
                     />
                   </td>
@@ -478,7 +558,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleWageAdjustmentChange(line.employeeId, 'unpaidLeaveDays', value)
                       }
-                      disabled={!canEdit}
+                      disabled={!canModify}
                       step="0.1"
                     />
                   </td>
@@ -489,7 +569,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleWageAdjustmentChange(line.employeeId, 'overtimeHours', value)
                       }
-                      disabled={!canEdit}
+                      disabled={!canModify}
                       step="0.5"
                     />
                   </td>
@@ -503,7 +583,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleWageAdjustmentChange(line.employeeId, 'salaryAdvance', value)
                       }
-                      disabled={!canEdit}
+                      disabled={!canModify}
                     />
                   </td>
                   <td>{formatMoney(line.maxSalaryAdvance)}</td>
@@ -513,7 +593,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleWageAdjustmentChange(line.employeeId, 'azimaSacco', value)
                       }
-                      disabled={!canEdit}
+                      disabled={!canModify}
                     />
                   </td>
                   <td>{formatMoney(line.shaDeductions)}</td>
@@ -523,7 +603,7 @@ export default function PayrollPage({
                     <EditableNumberCell
                       value={line.helb}
                       onChange={(value) => handleWageAdjustmentChange(line.employeeId, 'helb', value)}
-                      disabled={!canEdit}
+                      disabled={!canModify}
                     />
                   </td>
                   <td>
@@ -532,7 +612,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleWageAdjustmentChange(line.employeeId, 'ppeDeductions', value)
                       }
-                      disabled={!canEdit}
+                      disabled={!canModify}
                     />
                   </td>
                   <td>
@@ -629,7 +709,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleSalaryAdjustmentChange(line.employeeId, 'overtime', value)
                       }
-                      disabled={!canEdit}
+                      disabled={!canModify}
                     />
                   </td>
                   <td>
@@ -638,7 +718,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleSalaryAdjustmentChange(line.employeeId, 'allowances', value)
                       }
-                      disabled={!canEdit}
+                      disabled={!canModify}
                     />
                   </td>
                   <td>
@@ -647,7 +727,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleSalaryAdjustmentChange(line.employeeId, 'backdatedPay', value)
                       }
-                      disabled={!canEdit}
+                      disabled={!canModify}
                     />
                   </td>
                   <td>{formatMoney(line.grossPay)}</td>
@@ -665,7 +745,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleSalaryAdjustmentChange(line.employeeId, 'taxRelief', value)
                       }
-                      disabled={!canEdit}
+                      disabled={!canModify}
                     />
                   </td>
                   <td>{formatMoney(line.paye, 2)}</td>
@@ -675,7 +755,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleSalaryAdjustmentChange(line.employeeId, 'helb', value)
                       }
-                      disabled={!canEdit}
+                      disabled={!canModify}
                     />
                   </td>
                   <td>{formatMoney(line.totalDeductions, 2)}</td>
@@ -685,7 +765,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleSalaryAdjustmentChange(line.employeeId, 'salaryAdvance', value)
                       }
-                      disabled={!canEdit}
+                      disabled={!canModify}
                     />
                   </td>
                   <td>{formatMoney(line.maxSalaryAdvance)}</td>
@@ -695,7 +775,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleSalaryAdjustmentChange(line.employeeId, 'azimaSacco', value)
                       }
-                      disabled={!canEdit}
+                      disabled={!canModify}
                     />
                   </td>
                   <td>
@@ -704,7 +784,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleSalaryAdjustmentChange(line.employeeId, 'welfareContribution', value)
                       }
-                      disabled={!canEdit}
+                      disabled={!canModify}
                     />
                   </td>
                   <td>
