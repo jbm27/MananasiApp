@@ -16,7 +16,7 @@ import PayrollPage from './PayrollPage.jsx'
 import {
   canApprovePayroll,
   createPayrollApproval,
-  isPayrollPeriodApproved,
+  isPayrollSectionApproved,
 } from './payroll.js'
 import { formatKenyaDateTime } from './kenyaTime.js'
 import logoStandard from '../LogoStandard.png'
@@ -8558,8 +8558,8 @@ function App() {
     setPagePermissionOverrides((prev) => ({ ...prev, [employeeId]: unique }))
   }
 
-  function handleUpdatePayrollAdjustment(periodId, employeeId, adjustment) {
-    if (isPayrollPeriodApproved(payrollApprovals, periodId)) {
+  function handleUpdatePayrollAdjustment(periodId, employeeId, adjustment, section = 'wages') {
+    if (isPayrollSectionApproved(payrollApprovals, periodId, section)) {
       return
     }
     setPayrollAdjustments((prev) => ({
@@ -8571,8 +8571,8 @@ function App() {
     }))
   }
 
-  function handleUpdateSalaryPayrollAdjustment(periodId, employeeId, adjustment) {
-    if (isPayrollPeriodApproved(payrollApprovals, periodId)) {
+  function handleUpdateSalaryPayrollAdjustment(periodId, employeeId, adjustment, section = 'salaries') {
+    if (isPayrollSectionApproved(payrollApprovals, periodId, section)) {
       return
     }
     setSalaryPayrollAdjustments((prev) => ({
@@ -8584,24 +8584,36 @@ function App() {
     }))
   }
 
-  function handleApprovePayrollPeriod(periodId) {
+  function handleApprovePayrollSection(periodId, section) {
     if (!currentUser || !canApprovePayroll(currentUser)) {
       return
     }
     setPayrollApprovals((prev) => ({
       ...prev,
-      [periodId]: createPayrollApproval(currentUser),
+      [periodId]: {
+        ...(prev[periodId] ?? {}),
+        [section]: createPayrollApproval(currentUser),
+      },
     }))
   }
 
-  function handleReleasePayrollPeriod(periodId) {
+  function handleReleasePayrollSection(periodId, section) {
     if (!currentUser || !canApprovePayroll(currentUser)) {
       return
     }
     setPayrollApprovals((prev) => {
-      const next = { ...prev }
-      delete next[periodId]
-      return next
+      const periodRecord = { ...(prev[periodId] ?? {}) }
+      delete periodRecord[section]
+      if (periodRecord.status === 'approved') {
+        delete periodRecord.status
+        delete periodRecord.approvedById
+        delete periodRecord.approvedByName
+        delete periodRecord.approvedAt
+      }
+      return {
+        ...prev,
+        [periodId]: periodRecord,
+      }
     })
   }
 
@@ -9007,8 +9019,8 @@ function App() {
                 payrollApprovals={payrollApprovals}
                 onUpdatePayrollAdjustment={handleUpdatePayrollAdjustment}
                 onUpdateSalaryPayrollAdjustment={handleUpdateSalaryPayrollAdjustment}
-                onApprovePayrollPeriod={handleApprovePayrollPeriod}
-                onReleasePayrollPeriod={handleReleasePayrollPeriod}
+                onApprovePayrollSection={handleApprovePayrollSection}
+                onReleasePayrollSection={handleReleasePayrollSection}
               />
             }
           />

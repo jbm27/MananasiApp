@@ -22,23 +22,46 @@ export function canEditPayroll(user) {
   return PAYROLL_EDITOR_EMPLOYEE_IDS.has(user.id)
 }
 
+export const PAYROLL_APPROVAL_SECTIONS = ['advances', 'wages', 'salaries']
+
 export function canApprovePayroll(user) {
   return user?.id === PAYROLL_APPROVER_EMPLOYEE_ID
 }
 
-export function isPayrollPeriodApproved(payrollApprovals, periodId) {
-  return payrollApprovals?.[periodId]?.status === 'approved'
+function normalizeLegacyPeriodApproval(periodApprovals) {
+  if (!periodApprovals || typeof periodApprovals !== 'object') {
+    return {}
+  }
+  if (periodApprovals.status === 'approved' && !periodApprovals.advances) {
+    const legacyRecord = {
+      status: 'approved',
+      approvedById: periodApprovals.approvedById,
+      approvedByName: periodApprovals.approvedByName,
+      approvedAt: periodApprovals.approvedAt,
+    }
+    return {
+      advances: legacyRecord,
+      wages: legacyRecord,
+      salaries: legacyRecord,
+    }
+  }
+  return periodApprovals
 }
 
-export function getPayrollPeriodApproval(payrollApprovals, periodId) {
-  return payrollApprovals?.[periodId] ?? null
+export function getPayrollSectionApproval(payrollApprovals, periodId, section) {
+  const periodApprovals = normalizeLegacyPeriodApproval(payrollApprovals?.[periodId])
+  return periodApprovals[section] ?? null
 }
 
-export function canModifyPayrollPeriod(user, payrollApprovals, periodId) {
-  if (!periodId) {
+export function isPayrollSectionApproved(payrollApprovals, periodId, section) {
+  return getPayrollSectionApproval(payrollApprovals, periodId, section)?.status === 'approved'
+}
+
+export function canModifyPayrollSection(user, payrollApprovals, periodId, section) {
+  if (!periodId || !PAYROLL_APPROVAL_SECTIONS.includes(section)) {
     return false
   }
-  return canEditPayroll(user) && !isPayrollPeriodApproved(payrollApprovals, periodId)
+  return canEditPayroll(user) && !isPayrollSectionApproved(payrollApprovals, periodId, section)
 }
 
 export function createPayrollApproval(user) {

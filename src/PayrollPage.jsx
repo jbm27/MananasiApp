@@ -14,9 +14,9 @@ import {
   buildPayrollLines,
   canApprovePayroll,
   canEditPayroll,
-  canModifyPayrollPeriod,
+  canModifyPayrollSection,
   createBlankPayrollAdjustment,
-  getPayrollPeriodApproval,
+  getPayrollSectionApproval,
   sumPayrollColumn,
 } from './payroll.js'
 import {
@@ -82,6 +82,55 @@ function PayrollSection({ title, isOpen, onToggle, children }) {
   )
 }
 
+function PayrollSectionApprovalFooter({
+  sectionLabel,
+  draftMessage,
+  approval,
+  canApprove,
+  onApprove,
+  onRelease,
+}) {
+  const isApproved = approval?.status === 'approved'
+
+  return (
+    <div
+      className={`payroll-section-approval${isApproved ? ' payroll-section-approval--approved' : ''}`}
+    >
+      <div className="payroll-section-approval-main">
+        {isApproved ? (
+          <>
+            <span className="payroll-approval-status payroll-approval-status--approved">
+              Approved
+            </span>
+            <p>
+              {sectionLabel} signed off by {approval.approvedByName} on{' '}
+              {formatDisplayDateTime(approval.approvedAt)}.
+            </p>
+          </>
+        ) : (
+          <>
+            <span className="payroll-approval-status payroll-approval-status--draft">Draft</span>
+            <p>{draftMessage}</p>
+          </>
+        )}
+      </div>
+      {canApprove && (
+        <div className="payroll-approval-actions">
+          {isApproved ? (
+            <button type="button" onClick={onRelease}>
+              Release for editing
+            </button>
+          ) : (
+            <button type="button" className="payroll-approve-button" onClick={onApprove}>
+              Approve {sectionLabel.toLowerCase()}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function PayrollPage({
   currentUser,
   employees,
@@ -92,8 +141,8 @@ export default function PayrollPage({
   payrollApprovals,
   onUpdatePayrollAdjustment,
   onUpdateSalaryPayrollAdjustment,
-  onApprovePayrollPeriod,
-  onReleasePayrollPeriod,
+  onApprovePayrollSection,
+  onReleasePayrollSection,
 }) {
   const currentFiscalYear = getFiscalYearForDate(new Date().toISOString().slice(0, 10))
   const [selectedYear, setSelectedYear] = useState(currentFiscalYear)
@@ -111,11 +160,33 @@ export default function PayrollPage({
   const periods = useMemo(() => build445PayPeriods(selectedYear), [selectedYear])
   const selectedPeriod =
     periods.find((period) => period.id === selectedPeriodId) ?? periods[0] ?? null
-  const periodApproval = selectedPeriod
-    ? getPayrollPeriodApproval(payrollApprovals, selectedPeriod.id)
+  const advancesApproval = selectedPeriod
+    ? getPayrollSectionApproval(payrollApprovals, selectedPeriod.id, 'advances')
     : null
-  const isPeriodApproved = periodApproval?.status === 'approved'
-  const canModify = canModifyPayrollPeriod(currentUser, payrollApprovals, selectedPeriod?.id)
+  const wagesApproval = selectedPeriod
+    ? getPayrollSectionApproval(payrollApprovals, selectedPeriod.id, 'wages')
+    : null
+  const salariesApproval = selectedPeriod
+    ? getPayrollSectionApproval(payrollApprovals, selectedPeriod.id, 'salaries')
+    : null
+  const canModifyAdvances = canModifyPayrollSection(
+    currentUser,
+    payrollApprovals,
+    selectedPeriod?.id,
+    'advances',
+  )
+  const canModifyWages = canModifyPayrollSection(
+    currentUser,
+    payrollApprovals,
+    selectedPeriod?.id,
+    'wages',
+  )
+  const canModifySalaries = canModifyPayrollSection(
+    currentUser,
+    payrollApprovals,
+    selectedPeriod?.id,
+    'salaries',
+  )
 
   useEffect(() => {
     if (!periods.some((period) => period.id === selectedPeriodId)) {
@@ -197,18 +268,18 @@ export default function PayrollPage({
   }, [employees, selectedPeriod, salaryPayrollAdjustments, attendanceEvents, harvestRecords])
 
   function handleAdvanceChange(line, rawValue) {
-    if (!selectedPeriod || !canModify) {
+    if (!selectedPeriod || !canModifyAdvances) {
       return
     }
     if (line.adjustmentSource === 'wage') {
-      handleWageAdjustmentChange(line.employeeId, 'salaryAdvance', rawValue)
+      handleWageAdvanceChange(line.employeeId, rawValue)
       return
     }
-    handleSalaryAdjustmentChange(line.employeeId, 'salaryAdvance', rawValue)
+    handleSalaryAdvanceChange(line.employeeId, rawValue)
   }
 
-  function handleWageAdjustmentChange(employeeId, field, rawValue) {
-    if (!selectedPeriod || !canModify) {
+  function handleWageAdvanceChange(employeeId, rawValue) {
+    if (!selectedPeriod || !canModifyAdvances) {
       return
     }
     const numeric = Number(rawValue)
@@ -217,14 +288,16 @@ export default function PayrollPage({
       ...createBlankPayrollAdjustment(),
       ...(payrollAdjustments[selectedPeriod.id]?.[employeeId] ?? {}),
     }
-    onUpdatePayrollAdjustment(selectedPeriod.id, employeeId, {
-      ...current,
-      [field]: value,
-    })
+    onUpdatePayrollAdjustment(
+      selectedPeriod.id,
+      employeeId,
+      { ...current, salaryAdvance: value },
+      'advances',
+    )
   }
 
-  function handleSalaryAdjustmentChange(employeeId, field, rawValue) {
-    if (!selectedPeriod || !canModify) {
+  function handleSalaryAdvanceChange(employeeId, rawValue) {
+    if (!selectedPeriod || !canModifyAdvances) {
       return
     }
     const numeric = Number(rawValue)
@@ -233,10 +306,48 @@ export default function PayrollPage({
       ...createBlankSalaryAdjustment(),
       ...(salaryPayrollAdjustments[selectedPeriod.id]?.[employeeId] ?? {}),
     }
-    onUpdateSalaryPayrollAdjustment(selectedPeriod.id, employeeId, {
-      ...current,
-      [field]: value,
-    })
+    onUpdateSalaryPayrollAdjustment(
+      selectedPeriod.id,
+      employeeId,
+      { ...current, salaryAdvance: value },
+      'advances',
+    )
+  }
+
+  function handleWageAdjustmentChange(employeeId, field, rawValue) {
+    if (!selectedPeriod || !canModifyWages) {
+      return
+    }
+    const numeric = Number(rawValue)
+    const value = Number.isNaN(numeric) ? 0 : numeric
+    const current = {
+      ...createBlankPayrollAdjustment(),
+      ...(payrollAdjustments[selectedPeriod.id]?.[employeeId] ?? {}),
+    }
+    onUpdatePayrollAdjustment(
+      selectedPeriod.id,
+      employeeId,
+      { ...current, [field]: value },
+      'wages',
+    )
+  }
+
+  function handleSalaryAdjustmentChange(employeeId, field, rawValue) {
+    if (!selectedPeriod || !canModifySalaries) {
+      return
+    }
+    const numeric = Number(rawValue)
+    const value = Number.isNaN(numeric) ? 0 : numeric
+    const current = {
+      ...createBlankSalaryAdjustment(),
+      ...(salaryPayrollAdjustments[selectedPeriod.id]?.[employeeId] ?? {}),
+    }
+    onUpdateSalaryPayrollAdjustment(
+      selectedPeriod.id,
+      employeeId,
+      { ...current, [field]: value },
+      'salaries',
+    )
   }
 
   const advanceTotals = {
@@ -337,61 +448,6 @@ export default function PayrollPage({
           Payroll adjustments can only be edited by Naomi, Doreen, or James Boyd-Moss.
         </div>
       )}
-      {canEdit && isPeriodApproved && (
-        <div className="placeholder payroll-locked-notice">
-          This pay period has been approved and is locked. James Boyd-Moss must release it before
-          further edits can be made.
-        </div>
-      )}
-
-      {selectedPeriod && (
-        <div
-          className={`payroll-approval-banner${isPeriodApproved ? ' payroll-approval-banner--approved' : ''}`}
-        >
-          <div className="payroll-approval-banner-main">
-            {isPeriodApproved ? (
-              <>
-                <span className="payroll-approval-status payroll-approval-status--approved">
-                  Approved
-                </span>
-                <p>
-                  Signed off by {periodApproval.approvedByName} on{' '}
-                  {formatDisplayDateTime(periodApproval.approvedAt)}. Advances, wages, and salaries
-                  for this period cannot be changed.
-                </p>
-              </>
-            ) : (
-              <>
-                <span className="payroll-approval-status payroll-approval-status--draft">Draft</span>
-                <p>
-                  Advances and payroll for this period are editable. James Boyd-Moss must approve
-                  before figures are finalised for payment.
-                </p>
-              </>
-            )}
-          </div>
-          {canApprove && (
-            <div className="payroll-approval-actions">
-              {isPeriodApproved ? (
-                <button
-                  type="button"
-                  onClick={() => onReleasePayrollPeriod(selectedPeriod.id)}
-                >
-                  Release for editing
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="payroll-approve-button"
-                  onClick={() => onApprovePayrollPeriod(selectedPeriod.id)}
-                >
-                  Approve payroll &amp; advances
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      )}
 
       <PayrollSection
         title="Advances"
@@ -438,7 +494,7 @@ export default function PayrollPage({
                     <EditableNumberCell
                       value={line.amountClaimed}
                       onChange={(value) => handleAdvanceChange(line, value)}
-                      disabled={!canModify}
+                      disabled={!canModifyAdvances}
                     />
                   </td>
                 </tr>
@@ -456,6 +512,17 @@ export default function PayrollPage({
             </tbody>
           </table>
         </div>
+
+        {selectedPeriod && (
+          <PayrollSectionApprovalFooter
+            sectionLabel="Advances"
+            draftMessage="Advance amounts are editable. Approve before advance Friday payment; wages and salaries can still be edited separately."
+            approval={advancesApproval}
+            canApprove={canApprove}
+            onApprove={() => onApprovePayrollSection(selectedPeriod.id, 'advances')}
+            onRelease={() => onReleasePayrollSection(selectedPeriod.id, 'advances')}
+          />
+        )}
 
         <div className="rules-box">
           <strong>Advances:</strong> Max claimable = 50% of base earnings to advance Friday.
@@ -528,7 +595,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleWageAdjustmentChange(line.employeeId, 'sickLeaveDays', value)
                       }
-                      disabled={!canModify}
+                      disabled={!canModifyWages}
                       step="0.1"
                     />
                   </td>
@@ -538,7 +605,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleWageAdjustmentChange(line.employeeId, 'compassionateLeaveDays', value)
                       }
-                      disabled={!canModify}
+                      disabled={!canModifyWages}
                       step="0.1"
                     />
                   </td>
@@ -548,7 +615,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleWageAdjustmentChange(line.employeeId, 'maternityLeaveDays', value)
                       }
-                      disabled={!canModify}
+                      disabled={!canModifyWages}
                       step="0.1"
                     />
                   </td>
@@ -558,7 +625,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleWageAdjustmentChange(line.employeeId, 'unpaidLeaveDays', value)
                       }
-                      disabled={!canModify}
+                      disabled={!canModifyWages}
                       step="0.1"
                     />
                   </td>
@@ -569,7 +636,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleWageAdjustmentChange(line.employeeId, 'overtimeHours', value)
                       }
-                      disabled={!canModify}
+                      disabled={!canModifyWages}
                       step="0.5"
                     />
                   </td>
@@ -580,10 +647,8 @@ export default function PayrollPage({
                   <td>
                     <EditableNumberCell
                       value={line.salaryAdvance}
-                      onChange={(value) =>
-                        handleWageAdjustmentChange(line.employeeId, 'salaryAdvance', value)
-                      }
-                      disabled={!canModify}
+                      onChange={(value) => handleWageAdvanceChange(line.employeeId, value)}
+                      disabled={!canModifyAdvances}
                     />
                   </td>
                   <td>{formatMoney(line.maxSalaryAdvance)}</td>
@@ -593,7 +658,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleWageAdjustmentChange(line.employeeId, 'azimaSacco', value)
                       }
-                      disabled={!canModify}
+                      disabled={!canModifyWages}
                     />
                   </td>
                   <td>{formatMoney(line.shaDeductions)}</td>
@@ -603,7 +668,7 @@ export default function PayrollPage({
                     <EditableNumberCell
                       value={line.helb}
                       onChange={(value) => handleWageAdjustmentChange(line.employeeId, 'helb', value)}
-                      disabled={!canModify}
+                      disabled={!canModifyWages}
                     />
                   </td>
                   <td>
@@ -612,7 +677,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleWageAdjustmentChange(line.employeeId, 'ppeDeductions', value)
                       }
-                      disabled={!canModify}
+                      disabled={!canModifyWages}
                     />
                   </td>
                   <td>
@@ -649,6 +714,17 @@ export default function PayrollPage({
             </tbody>
           </table>
         </div>
+
+        {selectedPeriod && (
+          <PayrollSectionApprovalFooter
+            sectionLabel="Wages"
+            draftMessage="Seasonal and supplementary wage payroll is editable pending your approval at payment date."
+            approval={wagesApproval}
+            canApprove={canApprove}
+            onApprove={() => onApprovePayrollSection(selectedPeriod.id, 'wages')}
+            onRelease={() => onReleasePayrollSection(selectedPeriod.id, 'wages')}
+          />
+        )}
 
         <div className="rules-box">
           <strong>Wages:</strong> Regular pay = daily rate × (days worked + sick + compassionate +
@@ -709,7 +785,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleSalaryAdjustmentChange(line.employeeId, 'overtime', value)
                       }
-                      disabled={!canModify}
+                      disabled={!canModifySalaries}
                     />
                   </td>
                   <td>
@@ -718,7 +794,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleSalaryAdjustmentChange(line.employeeId, 'allowances', value)
                       }
-                      disabled={!canModify}
+                      disabled={!canModifySalaries}
                     />
                   </td>
                   <td>
@@ -727,7 +803,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleSalaryAdjustmentChange(line.employeeId, 'backdatedPay', value)
                       }
-                      disabled={!canModify}
+                      disabled={!canModifySalaries}
                     />
                   </td>
                   <td>{formatMoney(line.grossPay)}</td>
@@ -745,7 +821,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleSalaryAdjustmentChange(line.employeeId, 'taxRelief', value)
                       }
-                      disabled={!canModify}
+                      disabled={!canModifySalaries}
                     />
                   </td>
                   <td>{formatMoney(line.paye, 2)}</td>
@@ -755,17 +831,15 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleSalaryAdjustmentChange(line.employeeId, 'helb', value)
                       }
-                      disabled={!canModify}
+                      disabled={!canModifySalaries}
                     />
                   </td>
                   <td>{formatMoney(line.totalDeductions, 2)}</td>
                   <td>
                     <EditableNumberCell
                       value={line.salaryAdvance}
-                      onChange={(value) =>
-                        handleSalaryAdjustmentChange(line.employeeId, 'salaryAdvance', value)
-                      }
-                      disabled={!canModify}
+                      onChange={(value) => handleSalaryAdvanceChange(line.employeeId, value)}
+                      disabled={!canModifyAdvances}
                     />
                   </td>
                   <td>{formatMoney(line.maxSalaryAdvance)}</td>
@@ -775,7 +849,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleSalaryAdjustmentChange(line.employeeId, 'azimaSacco', value)
                       }
-                      disabled={!canModify}
+                      disabled={!canModifySalaries}
                     />
                   </td>
                   <td>
@@ -784,7 +858,7 @@ export default function PayrollPage({
                       onChange={(value) =>
                         handleSalaryAdjustmentChange(line.employeeId, 'welfareContribution', value)
                       }
-                      disabled={!canModify}
+                      disabled={!canModifySalaries}
                     />
                   </td>
                   <td>
@@ -821,6 +895,17 @@ export default function PayrollPage({
             </tbody>
           </table>
         </div>
+
+        {selectedPeriod && (
+          <PayrollSectionApprovalFooter
+            sectionLabel="Salaries"
+            draftMessage="Regular staff salary payroll is editable pending your approval at payment date."
+            approval={salariesApproval}
+            canApprove={canApprove}
+            onApprove={() => onApprovePayrollSection(selectedPeriod.id, 'salaries')}
+            onRelease={() => onReleasePayrollSection(selectedPeriod.id, 'salaries')}
+          />
+        )}
 
         <div className="rules-box">
           <strong>Salaries:</strong> Gross pay = gross salary + overtime + allowances + backdated
