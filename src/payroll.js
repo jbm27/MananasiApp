@@ -1,5 +1,6 @@
 import { getEmployeeDailyWageKes } from './employeePay.js'
 import { toKenyaDateString } from './kenyaTime.js'
+import { calculateMaxAdvanceClaimable } from './payrollAdvances.js'
 
 const HOURS_PER_DAY = 8
 const SHA_RATE = 0.0275
@@ -70,42 +71,6 @@ function sumHarvestMetrics(records, employeeId, fromDate, toDate, incentiveThres
   return { totalIncentiveKes, kgsOver250 }
 }
 
-function sumBaseEarningsToDate(employee, records, attendanceEvents, fromDate, toDate) {
-  const dailyRate = getEmployeeDailyWageKes(employee)
-  if (employee.role === 'harvester') {
-    return records
-      .filter(
-        (record) =>
-          record.harvesterId === employee.id &&
-          record.harvestedOn >= fromDate &&
-          record.harvestedOn <= toDate,
-      )
-      .reduce((sum, record) => sum + Number(record.baseWageKes ?? dailyRate), 0)
-  }
-  const daysWorked = countDaysWorkedFromAttendance(attendanceEvents, employee.id, fromDate, toDate)
-  return dailyRate * daysWorked
-}
-
-export function calculateMaxSalaryAdvance(
-  employee,
-  records,
-  attendanceEvents,
-  periodStartDate,
-  advanceFriday,
-) {
-  if (!advanceFriday || advanceFriday < periodStartDate) {
-    return 0
-  }
-  const earningsToDate = sumBaseEarningsToDate(
-    employee,
-    records,
-    attendanceEvents,
-    periodStartDate,
-    advanceFriday,
-  )
-  return Math.floor(earningsToDate / 2)
-}
-
 export function calculatePayrollLine({
   employee,
   period,
@@ -147,12 +112,11 @@ export function calculatePayrollLine({
   const ppeDeductions = Number(adjustment.ppeDeductions) || 0
   const totalDeductions = salaryAdvance + azimaSacco + shaDeductions + nssf + ahl + helb + ppeDeductions
   const netPay = totalEarnings - totalDeductions
-  const maxSalaryAdvance = calculateMaxSalaryAdvance(
+  const maxSalaryAdvance = calculateMaxAdvanceClaimable(
     employee,
-    harvestRecords,
+    period,
     attendanceEvents,
-    period.startDate,
-    period.advanceFriday,
+    harvestRecords,
   )
 
   return {

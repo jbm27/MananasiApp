@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { getContractTypeLabel } from './employeePay.js'
 import { fetchAttendanceEventsForPeriod } from './api/client.js'
 import {
+  buildAdvanceLines,
+  sumAdvanceColumn,
+} from './payrollAdvances.js'
+import {
   build445PayPeriods,
   getDefaultPayPeriodId,
   getFiscalYearForDate,
@@ -76,6 +80,7 @@ export default function PayrollPage({
   const [selectedYear, setSelectedYear] = useState(currentFiscalYear)
   const [selectedPeriodId, setSelectedPeriodId] = useState(getDefaultPayPeriodId())
   const [contractTypeFilter, setContractTypeFilter] = useState('all')
+  const [showAdvances, setShowAdvances] = useState(true)
   const [showWages, setShowWages] = useState(false)
   const [showSalaries, setShowSalaries] = useState(false)
   const [attendanceEvents, setAttendanceEvents] = useState([])
@@ -108,6 +113,27 @@ export default function PayrollPage({
       .finally(() => setAttendanceLoading(false))
   }, [selectedPeriod])
 
+  const advanceLines = useMemo(() => {
+    if (!selectedPeriod) {
+      return []
+    }
+    return buildAdvanceLines({
+      employees,
+      period: selectedPeriod,
+      payrollAdjustments,
+      salaryPayrollAdjustments,
+      attendanceEvents,
+      harvestRecords,
+    })
+  }, [
+    employees,
+    selectedPeriod,
+    payrollAdjustments,
+    salaryPayrollAdjustments,
+    attendanceEvents,
+    harvestRecords,
+  ])
+
   const payrollLines = useMemo(() => {
     if (!selectedPeriod) {
       return []
@@ -139,8 +165,22 @@ export default function PayrollPage({
       employees,
       salaryPayrollAdjustments,
       periodId: selectedPeriod.id,
+      period: selectedPeriod,
+      attendanceEvents,
+      harvestRecords,
     })
-  }, [employees, selectedPeriod, salaryPayrollAdjustments])
+  }, [employees, selectedPeriod, salaryPayrollAdjustments, attendanceEvents, harvestRecords])
+
+  function handleAdvanceChange(line, rawValue) {
+    if (!selectedPeriod || !canEdit) {
+      return
+    }
+    if (line.adjustmentSource === 'wage') {
+      handleWageAdjustmentChange(line.employeeId, 'salaryAdvance', rawValue)
+      return
+    }
+    handleSalaryAdjustmentChange(line.employeeId, 'salaryAdvance', rawValue)
+  }
 
   function handleWageAdjustmentChange(employeeId, field, rawValue) {
     if (!selectedPeriod || !canEdit) {
@@ -172,6 +212,12 @@ export default function PayrollPage({
       ...current,
       [field]: value,
     })
+  }
+
+  const advanceTotals = {
+    earningsToDate: sumAdvanceColumn(advanceLines, 'earningsToDate'),
+    maxClaimable: sumAdvanceColumn(advanceLines, 'maxClaimable'),
+    amountClaimed: sumAdvanceColumn(advanceLines, 'amountClaimed'),
   }
 
   const wageTotals = {
@@ -266,6 +312,77 @@ export default function PayrollPage({
           Payroll adjustments can only be edited by Naomi, Doreen, or James Boyd-Moss.
         </div>
       )}
+
+      <PayrollSection
+        title="Advances"
+        isOpen={showAdvances}
+        onToggle={() => setShowAdvances((prev) => !prev)}
+      >
+        <p className="payroll-advance-intro">
+          Each employee may claim up to half of earnings from the start of this pay period through
+          advance Friday ({formatDisplayDate(selectedPeriod?.advanceFriday)}), excluding harvesting
+          bonuses. Enter the actual amount claimed — it may be less than the maximum.
+        </p>
+
+        <div className="table-wrap payroll-table-wrap">
+          <table className="payroll-table payroll-advance-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Department</th>
+                <th>Contract</th>
+                <th>Earnings to date</th>
+                <th>Max claimable</th>
+                <th>Amount claimed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {advanceLines.length === 0 && (
+                <tr>
+                  <td colSpan="6">No employees on record for this period.</td>
+                </tr>
+              )}
+              {advanceLines.map((line) => (
+                <tr
+                  key={line.employeeId}
+                  className={
+                    line.amountClaimed > line.maxClaimable ? 'payroll-advance-over-max' : undefined
+                  }
+                >
+                  <td>{line.name}</td>
+                  <td>{line.department}</td>
+                  <td>{getContractTypeLabel(line.contractType)}</td>
+                  <td>{formatMoney(line.earningsToDate)}</td>
+                  <td>{formatMoney(line.maxClaimable)}</td>
+                  <td>
+                    <EditableNumberCell
+                      value={line.amountClaimed}
+                      onChange={(value) => handleAdvanceChange(line, value)}
+                      disabled={!canEdit}
+                    />
+                  </td>
+                </tr>
+              ))}
+              {advanceLines.length > 0 && (
+                <tr className="payroll-totals-row">
+                  <td colSpan="3">
+                    <strong>Totals</strong>
+                  </td>
+                  <td>{formatMoney(advanceTotals.earningsToDate)}</td>
+                  <td>{formatMoney(advanceTotals.maxClaimable)}</td>
+                  <td>{formatMoney(advanceTotals.amountClaimed)}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="rules-box">
+          <strong>Advances:</strong> Max claimable = 50% of base earnings to advance Friday.
+          Harvesters: daily base wage only (no kg incentive). Other wage staff: daily rate × days
+          worked. Salaried staff: monthly salary prorated by calendar days in the period.
+        </div>
+      </PayrollSection>
 
       <PayrollSection title="Wages" isOpen={showWages} onToggle={() => setShowWages((prev) => !prev)}>
         <div className="form-grid payroll-toolbar">
@@ -489,6 +606,7 @@ export default function PayrollPage({
                 <th>HELB</th>
                 <th>Total deductions</th>
                 <th>Advance</th>
+                <th>Max advance</th>
                 <th>Azima Sacco</th>
                 <th>Welfare</th>
                 <th>Net pay</th>
@@ -497,7 +615,7 @@ export default function PayrollPage({
             <tbody>
               {salaryLines.length === 0 && (
                 <tr>
-                  <td colSpan="23">No salaried employees with a monthly salary on record.</td>
+                  <td colSpan="24">No salaried employees with a monthly salary on record.</td>
                 </tr>
               )}
               {salaryLines.map((line) => (
@@ -570,6 +688,7 @@ export default function PayrollPage({
                       disabled={!canEdit}
                     />
                   </td>
+                  <td>{formatMoney(line.maxSalaryAdvance)}</td>
                   <td>
                     <EditableNumberCell
                       value={line.azimaSacco}
@@ -611,6 +730,7 @@ export default function PayrollPage({
                   <td></td>
                   <td>{formatMoney(salaryTotals.totalDeductions, 2)}</td>
                   <td>{formatMoney(salaryTotals.salaryAdvance)}</td>
+                  <td></td>
                   <td>{formatMoney(salaryTotals.azimaSacco)}</td>
                   <td>{formatMoney(salaryTotals.welfareContribution)}</td>
                   <td>

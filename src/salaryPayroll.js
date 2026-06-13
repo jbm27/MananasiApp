@@ -1,3 +1,5 @@
+import { calculateMaxAdvanceClaimable } from './payrollAdvances.js'
+
 const NSSF_TIER_1_KES = 540
 const NSSF_TIER_2_LOWER_LIMIT_KES = 9000
 const NSSF_TIER_2_RATE = 0.05
@@ -48,6 +50,7 @@ export function calculateMonthlyTax(taxableSalary) {
 export function calculateSalaryLine({
   employee,
   adjustment = createBlankSalaryAdjustment(),
+  maxSalaryAdvance = 0,
 }) {
   const grossSalary = Math.round(Number(employee.monthlySalaryKes) || 0)
   const overtime = Number(adjustment.overtime) || 0
@@ -98,6 +101,7 @@ export function calculateSalaryLine({
     helb,
     totalDeductions: Math.round(totalDeductions * 100) / 100,
     salaryAdvance,
+    maxSalaryAdvance,
     azimaSacco,
     welfareContribution,
     netPay: Math.round(netPay * 100) / 100,
@@ -106,7 +110,14 @@ export function calculateSalaryLine({
   }
 }
 
-export function buildSalaryPayrollLines({ employees, salaryPayrollAdjustments = {}, periodId }) {
+export function buildSalaryPayrollLines({
+  employees,
+  salaryPayrollAdjustments = {},
+  periodId,
+  period = null,
+  attendanceEvents = [],
+  harvestRecords = [],
+}) {
   const periodAdjustments = salaryPayrollAdjustments[periodId] ?? {}
   return employees
     .filter((employee) => isSalariedEmployee(employee))
@@ -117,15 +128,19 @@ export function buildSalaryPayrollLines({ employees, salaryPayrollAdjustments = 
       }
       return a.name.localeCompare(b.name)
     })
-    .map((employee) =>
-      calculateSalaryLine({
+    .map((employee) => {
+      const maxSalaryAdvance = period
+        ? calculateMaxAdvanceClaimable(employee, period, attendanceEvents, harvestRecords)
+        : 0
+      return calculateSalaryLine({
         employee,
+        maxSalaryAdvance,
         adjustment: {
           ...createBlankSalaryAdjustment(),
           ...(periodAdjustments[employee.id] ?? {}),
         },
-      }),
-    )
+      })
+    })
 }
 
 export function sumSalaryColumn(lines, key) {

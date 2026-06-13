@@ -844,6 +844,23 @@ th {
   margin-top: 0.85rem;
 }
 
+.payroll-advance-intro {
+  margin: 0 0 0.85rem;
+  color: #475569;
+}
+
+.payroll-advance-table {
+  min-width: 900px;
+}
+
+.payroll-advance-over-max {
+  background: #fef2f2;
+}
+
+.payroll-advance-over-max .payroll-input {
+  border-color: #dc2626;
+}
+
 .payroll-salary-table {
   min-width: 2600px;
 }
