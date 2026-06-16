@@ -4416,6 +4416,19 @@ function HarvestingDailyPage({ employees, records }) {
   )
 }
 
+function getDecorticationStaffingWarnings(supervisorId, operatorCount) {
+  const warnings = []
+  if (!supervisorId) {
+    warnings.push('No supervisor selected (standard is 1 supervisor per shift).')
+  }
+  if (operatorCount !== 7) {
+    warnings.push(
+      `${operatorCount} operator${operatorCount === 1 ? '' : 's'} selected (standard is 7 operators per shift).`,
+    )
+  }
+  return warnings
+}
+
 function DecorticationPage({
   currentUser,
   currentUserDataEntryPermissions,
@@ -4567,6 +4580,10 @@ function DecorticationPage({
       runtimeHours: Number(records.reduce((sum, record) => sum + record.runtimeHours, 0).toFixed(1)),
     }
   })
+  const staffingWarnings = getDecorticationStaffingWarnings(
+    supervisorId,
+    selectedOperatorIds.length,
+  )
 
   function handleOperatorToggle(operatorId) {
     setSelectedOperatorIds((prev) =>
@@ -4583,14 +4600,6 @@ function DecorticationPage({
       setAssignmentStatus('You do not have permission to assign decortication teams.')
       return
     }
-    if (!supervisorId) {
-      setAssignmentStatus('Select a clocked-in supervisor before saving the team assignment.')
-      return
-    }
-    if (selectedOperatorIds.length !== 7) {
-      setAssignmentStatus('Select exactly 7 clocked-in operators for this shift.')
-      return
-    }
     if (!shiftDate || !batchNumber) {
       setAssignmentStatus('Date and batch number are required.')
       return
@@ -4599,11 +4608,14 @@ function DecorticationPage({
       setAssignmentStatus('Shift number must be greater than zero.')
       return
     }
-    const supervisor = employees.find((employee) => employee.id === supervisorId)
-    if (!supervisor) {
+    const supervisor = supervisorId
+      ? employees.find((employee) => employee.id === supervisorId)
+      : null
+    if (supervisorId && !supervisor) {
       setAssignmentStatus('Selected supervisor could not be found.')
       return
     }
+    const warnings = getDecorticationStaffingWarnings(supervisorId, selectedOperatorIds.length)
     const assignmentId = `ASG-${Date.now()}`
     onCreateDecorticationShift({
       assignmentId,
@@ -4611,8 +4623,8 @@ function DecorticationPage({
       machine,
       shiftNumber: shift,
       batchNumber,
-      supervisorId: supervisor.id,
-      supervisorName: supervisor.name,
+      supervisorId: supervisor?.id ?? '',
+      supervisorName: supervisor?.name ?? '',
       operatorIds: selectedOperatorIds,
       operatorNames: selectedOperatorIds
         .map((id) => employees.find((employee) => employee.id === id)?.name)
@@ -4623,7 +4635,11 @@ function DecorticationPage({
       leafInputKg: 0,
     })
     setSelectedOperatorIds([])
-    setAssignmentStatus('Team assignment saved. It is now visible in Decortication Records.')
+    setAssignmentStatus(
+      warnings.length > 0
+        ? `Warning: ${warnings.join(' ')} Team assignment saved. It is now visible in Decortication Records.`
+        : 'Team assignment saved. It is now visible in Decortication Records.',
+    )
     setShowProductionRecords(true)
   }
 
@@ -4778,7 +4794,7 @@ function DecorticationPage({
             </select>
           </label>
           <label>
-            Operators (clocked in, select 7)
+            Operators (clocked in, standard 7)
             <div className="checklist">
               {clockedInOperators.map((operator) => (
                 <label key={operator.id} className="check-item">
@@ -4792,14 +4808,34 @@ function DecorticationPage({
               ))}
             </div>
           </label>
+          {staffingWarnings.length > 0 ? (
+            <div className="staffing-warning" role="alert">
+              <strong>Staffing advisory</strong>
+              <ul>
+                {staffingWarnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+              <p>You can still save this shift assignment.</p>
+            </div>
+          ) : null}
           <button type="submit" disabled={!canManageDecortication}>
             Save Team Assignment
           </button>
         </form>
         <div className="placeholder">
-          Each machine must have 8 staff total per shift: 1 supervisor + 7 operators.
+          Standard staffing per machine shift is 1 supervisor + 7 operators. The app will warn if
+          this is not met, but you can still save the shift.
         </div>
-        {assignmentStatus && <div className="placeholder">{assignmentStatus}</div>}
+        {assignmentStatus ? (
+          <div
+            className={
+              assignmentStatus.startsWith('Warning:') ? 'staffing-warning' : 'placeholder'
+            }
+          >
+            {assignmentStatus}
+          </div>
+        ) : null}
       </CollapsibleSection>
 
       <CollapsibleSection
