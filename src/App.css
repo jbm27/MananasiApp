@@ -265,6 +265,18 @@ th {
   border-color: #f59e0b;
 }
 
+.record-edit-form h4 {
+  margin: 0 0 0.5rem;
+  grid-column: 1 / -1;
+}
+
+.record-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  grid-column: 1 / -1;
+}
+
 .collapsible-section {
   margin-top: 1rem;
 }

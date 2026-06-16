@@ -4438,7 +4438,7 @@ function DecorticationPage({
   decorticationRecords,
   dryingRecords,
   onCreateDecorticationShift,
-  onUpdateDecorticationProduction,
+  onUpdateDecorticationRecord,
   dateFrom,
   dateTo,
   onDateFromChange,
@@ -4462,8 +4462,15 @@ function DecorticationPage({
   const [supervisorId, setSupervisorId] = useState('')
   const [selectedOperatorIds, setSelectedOperatorIds] = useState([])
   const [editingRecordId, setEditingRecordId] = useState('')
+  const [editDate, setEditDate] = useState('')
+  const [editMachine, setEditMachine] = useState('D2')
+  const [editShiftNumber, setEditShiftNumber] = useState('1')
+  const [editBatchNumber, setEditBatchNumber] = useState('')
+  const [editSupervisorId, setEditSupervisorId] = useState('')
+  const [editOperatorIds, setEditOperatorIds] = useState([])
   const [editWaterM3, setEditWaterM3] = useState('')
   const [editRuntimeHours, setEditRuntimeHours] = useState('')
+  const [editStatus, setEditStatus] = useState('')
   const [viewingRecordId, setViewingRecordId] = useState('')
   const [attendanceViewingEmployeeId, setAttendanceViewingEmployeeId] = useState('')
   const [assignmentStatus, setAssignmentStatus] = useState('')
@@ -4646,30 +4653,94 @@ function DecorticationPage({
   function startEditingRecord(record) {
     setEditingRecordId(record.id)
     setViewingRecordId(record.id)
-    setEditWaterM3(String(record.waterM3))
-    setEditRuntimeHours(String(record.runtimeHours))
+    setEditDate(record.date)
+    setEditMachine(record.machine)
+    setEditShiftNumber(String(record.shiftNumber))
+    setEditBatchNumber(record.batchNumber)
+    setEditSupervisorId(record.supervisorId ?? '')
+    setEditOperatorIds([...(record.operatorIds ?? [])])
+    setEditWaterM3(record.waterM3 > 0 ? String(record.waterM3) : '')
+    setEditRuntimeHours(record.runtimeHours > 0 ? String(record.runtimeHours) : '')
+    setEditStatus('')
   }
 
-  function handleUpdateProduction(event) {
-    if (event?.preventDefault) {
-      event.preventDefault()
-    }
+  function cancelEditingRecord() {
+    setEditingRecordId('')
+    setEditStatus('')
+  }
+
+  function handleEditOperatorToggle(operatorId) {
+    setEditOperatorIds((prev) =>
+      prev.includes(operatorId)
+        ? prev.filter((id) => id !== operatorId)
+        : [...prev, operatorId],
+    )
+  }
+
+  function handleSaveRecordEdit(event) {
+    event.preventDefault()
     if (!canManageDecortication || !editingRecordId) {
       return
     }
-    const water = Number(editWaterM3)
-    const runtime = Number(editRuntimeHours)
-    if ([water, runtime].some((value) => Number.isNaN(value) || value <= 0)) {
+    const shift = Number(editShiftNumber)
+    if (!editDate || !editBatchNumber) {
+      setEditStatus('Date and batch number are required.')
       return
     }
-    onUpdateDecorticationProduction(editingRecordId, {
+    if (Number.isNaN(shift) || shift <= 0) {
+      setEditStatus('Shift number must be greater than zero.')
+      return
+    }
+    const water = editWaterM3 === '' ? 0 : Number(editWaterM3)
+    const runtime = editRuntimeHours === '' ? 0 : Number(editRuntimeHours)
+    if ([water, runtime].some((value) => Number.isNaN(value) || value < 0)) {
+      setEditStatus('Water and runtime must be zero or positive numbers.')
+      return
+    }
+    const supervisor = editSupervisorId
+      ? employees.find((employee) => employee.id === editSupervisorId)
+      : null
+    if (editSupervisorId && !supervisor) {
+      setEditStatus('Selected supervisor could not be found.')
+      return
+    }
+    const operatorNames = editOperatorIds
+      .map((id) => employees.find((employee) => employee.id === id)?.name)
+      .filter(Boolean)
+    const result = onUpdateDecorticationRecord(editingRecordId, {
+      date: editDate,
+      machine: editMachine,
+      shiftNumber: shift,
+      batchNumber: editBatchNumber,
+      supervisorId: supervisor?.id ?? '',
+      supervisorName: supervisor?.name ?? '',
+      operatorIds: editOperatorIds,
+      operatorNames,
       waterM3: water,
       runtimeHours: runtime,
     })
+    if (!result.ok) {
+      setEditStatus(result.message)
+      return
+    }
+    const warnings = getDecorticationStaffingWarnings(editSupervisorId, editOperatorIds.length)
+    setEditStatus(
+      warnings.length > 0
+        ? `Warning: ${warnings.join(' ')} ${result.message}`
+        : result.message,
+    )
     setEditingRecordId('')
-    setEditWaterM3('')
-    setEditRuntimeHours('')
   }
+
+  const allDecorticationSupervisors = employees.filter(
+    (employee) => employee.role === 'decortication-supervisor',
+  )
+  const allDecorticatorOperators = employees.filter(
+    (employee) => employee.role === 'decorticator-operator',
+  )
+  const editStaffingWarnings = editingRecordId
+    ? getDecorticationStaffingWarnings(editSupervisorId, editOperatorIds.length)
+    : []
 
   return (
     <section className="panel">
@@ -4914,65 +4985,156 @@ function DecorticationPage({
                       )}
                     </td>
                     <td>
-                      {editingRecordId === record.id ? (
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.1"
-                          value={editWaterM3}
-                          onChange={(event) => setEditWaterM3(event.target.value)}
-                        />
-                      ) : record.waterM3 > 0 ? (
-                        record.waterM3
-                      ) : (
-                        'Pending'
-                      )}
+                      {record.waterM3 > 0 ? record.waterM3 : 'Pending'}
+                    </td>
+                    <td>
+                      {record.runtimeHours > 0 ? record.runtimeHours : 'Pending'}
                     </td>
                     <td>
                       {editingRecordId === record.id ? (
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.1"
-                          value={editRuntimeHours}
-                          onChange={(event) => setEditRuntimeHours(event.target.value)}
-                        />
-                      ) : record.runtimeHours > 0 ? (
-                        record.runtimeHours
+                        <span>Editing below</span>
                       ) : (
-                        'Pending'
-                      )}
-                    </td>
-                    <td>
-                      {editingRecordId === record.id ? (
                         <>
-                          <button type="button" onClick={handleUpdateProduction}>
-                            Save
+                          <button
+                            type="button"
+                            onClick={() => startEditingRecord(record)}
+                            disabled={!canManageDecortication}
+                          >
+                            Edit Shift
                           </button>
-                          <button type="button" onClick={() => setEditingRecordId('')}>
-                            Cancel
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setViewingRecordId((prev) => (prev === record.id ? '' : record.id))
+                            }
+                          >
+                            {viewingRecordId === record.id ? 'Hide Record' : 'View Record'}
                           </button>
                         </>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => startEditingRecord(record)}
-                          disabled={!canManageDecortication}
-                        >
-                          Edit
-                        </button>
                       )}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setViewingRecordId((prev) => (prev === record.id ? '' : record.id))
-                        }
-                      >
-                        {viewingRecordId === record.id ? 'Hide Record' : 'View Record'}
-                      </button>
                     </td>
                   </tr>
-                  {viewingRecordId === record.id && (
+                  {editingRecordId === record.id && (
+                    <tr key={`${record.id}-edit`}>
+                      <td colSpan="11">
+                        <form className="form-grid record-edit-form" onSubmit={handleSaveRecordEdit}>
+                          <h4>Edit shift details</h4>
+                          <label>
+                            Machine
+                            <select
+                              value={editMachine}
+                              onChange={(event) => setEditMachine(event.target.value)}
+                            >
+                              {machines.map((machineCode) => (
+                                <option key={machineCode} value={machineCode}>
+                                  {machineCode}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            Date
+                            <input
+                              type="date"
+                              value={editDate}
+                              onChange={(event) => setEditDate(event.target.value)}
+                            />
+                          </label>
+                          <label>
+                            Shift Number
+                            <input
+                              type="number"
+                              min="1"
+                              value={editShiftNumber}
+                              onChange={(event) => setEditShiftNumber(event.target.value)}
+                            />
+                          </label>
+                          <label>
+                            Batch Number
+                            <select
+                              value={editBatchNumber}
+                              onChange={(event) => setEditBatchNumber(event.target.value)}
+                            >
+                              {availableBatches.map((batch) => (
+                                <option key={batch} value={batch}>
+                                  {batch}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            Supervisor
+                            <select
+                              value={editSupervisorId}
+                              onChange={(event) => setEditSupervisorId(event.target.value)}
+                            >
+                              <option value="">No supervisor</option>
+                              {allDecorticationSupervisors.map((person) => (
+                                <option key={person.id} value={person.id}>
+                                  {person.name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            Operators (standard 7)
+                            <div className="checklist">
+                              {allDecorticatorOperators.map((operator) => (
+                                <label key={operator.id} className="check-item">
+                                  <span>{operator.name}</span>
+                                  <input
+                                    type="checkbox"
+                                    checked={editOperatorIds.includes(operator.id)}
+                                    onChange={() => handleEditOperatorToggle(operator.id)}
+                                  />
+                                </label>
+                              ))}
+                            </div>
+                          </label>
+                          <label>
+                            Water (m3)
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.1"
+                              value={editWaterM3}
+                              onChange={(event) => setEditWaterM3(event.target.value)}
+                              placeholder="0"
+                            />
+                          </label>
+                          <label>
+                            Runtime (hrs)
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.1"
+                              value={editRuntimeHours}
+                              onChange={(event) => setEditRuntimeHours(event.target.value)}
+                              placeholder="0"
+                            />
+                          </label>
+                          {editStaffingWarnings.length > 0 ? (
+                            <div className="staffing-warning" role="alert">
+                              <strong>Staffing advisory</strong>
+                              <ul>
+                                {editStaffingWarnings.map((warning) => (
+                                  <li key={warning}>{warning}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                          <div className="record-edit-actions">
+                            <button type="submit">Save Changes</button>
+                            <button type="button" className="secondary-button" onClick={cancelEditingRecord}>
+                              Cancel
+                            </button>
+                          </div>
+                        </form>
+                        {editStatus ? <div className="placeholder">{editStatus}</div> : null}
+                      </td>
+                    </tr>
+                  )}
+                  {viewingRecordId === record.id && editingRecordId !== record.id && (
                     <tr key={`${record.id}-detail`}>
                       <td colSpan="11">
                         <div className="placeholder">
@@ -8931,10 +9093,97 @@ function App() {
     ])
   }
 
-  function handleUpdateDecorticationProduction(recordId, updates) {
+  function handleUpdateDecorticationRecord(recordId, updates) {
+    const record = decorticationRecords.find((item) => item.id === recordId)
+    if (!record) {
+      return { ok: false, message: 'Decortication record could not be found.' }
+    }
+
+    const normalizedBatchNumber = normalizeBatchNumber(updates.batchNumber ?? record.batchNumber)
+    const nextFields = {
+      date: updates.date ?? record.date,
+      machine: updates.machine ?? record.machine,
+      shiftNumber: updates.shiftNumber ?? record.shiftNumber,
+      batchNumber: normalizedBatchNumber,
+      supervisorId: updates.supervisorId ?? record.supervisorId,
+      supervisorName: updates.supervisorName ?? record.supervisorName,
+      operatorIds: updates.operatorIds ?? record.operatorIds,
+      operatorNames: updates.operatorNames ?? record.operatorNames,
+      waterM3: updates.waterM3 ?? record.waterM3,
+      runtimeHours: updates.runtimeHours ?? record.runtimeHours,
+    }
+
+    const identityChanged =
+      nextFields.date !== record.date ||
+      nextFields.machine !== record.machine ||
+      nextFields.shiftNumber !== record.shiftNumber ||
+      nextFields.batchNumber !== normalizeBatchNumber(record.batchNumber)
+
+    const linkedDryingRecord = dryingRecords.find((item) => item.decorticationRecordId === recordId)
+    if (linkedDryingRecord && identityChanged) {
+      const sourceStockCode = buildStockCode(record.batchNumber, record.machine, 'UBR')
+      const hasBrushingActivity =
+        brushingStockMovements.some((item) => item.sourceStockCode === sourceStockCode) ||
+        brushingDailyRecords.some((item) => item.sourceStockCode === sourceStockCode)
+      if (hasBrushingActivity) {
+        return {
+          ok: false,
+          message:
+            'Cannot change date, machine, shift, or batch because drying output for this shift has already been used in brushing.',
+        }
+      }
+    }
+
     setDecorticationRecords((prev) =>
-      prev.map((record) => (record.id === recordId ? { ...record, ...updates } : record)),
+      prev.map((item) => (item.id === recordId ? { ...item, ...nextFields } : item)),
     )
+
+    if (record.assignmentId) {
+      setDecorticationAssignments((prev) =>
+        prev.map((item) =>
+          item.id === record.assignmentId
+            ? {
+                ...item,
+                date: nextFields.date,
+                machine: nextFields.machine,
+                shiftNumber: nextFields.shiftNumber,
+                batchNumber: nextFields.batchNumber,
+                supervisorId: nextFields.supervisorId,
+                supervisorName: nextFields.supervisorName,
+                operatorIds: nextFields.operatorIds,
+                operatorNames: nextFields.operatorNames,
+              }
+            : item,
+        ),
+      )
+    }
+
+    if (linkedDryingRecord) {
+      const dryingTimeDays = Math.max(
+        0,
+        Math.floor(
+          (new Date(linkedDryingRecord.weighedDate).getTime() -
+            new Date(nextFields.date).getTime()) /
+            (1000 * 60 * 60 * 24),
+        ),
+      )
+      setDryingRecords((prev) =>
+        prev.map((item) =>
+          item.id === linkedDryingRecord.id
+            ? {
+                ...item,
+                decorticationDate: nextFields.date,
+                machine: nextFields.machine,
+                shiftNumber: nextFields.shiftNumber,
+                batchNumber: nextFields.batchNumber,
+                dryingTimeDays,
+              }
+            : item,
+        ),
+      )
+    }
+
+    return { ok: true, message: 'Shift details updated.' }
   }
 
   function handleAddDryingRecord(input) {
@@ -9299,7 +9548,7 @@ function App() {
                 decorticationAssignments={decorticationAssignments}
                 decorticationRecords={decorticationRecords}
                 onCreateDecorticationShift={handleCreateDecorticationAssignment}
-                onUpdateDecorticationProduction={handleUpdateDecorticationProduction}
+                onUpdateDecorticationRecord={handleUpdateDecorticationRecord}
                 dryingRecords={dryingRecords}
                 dateFrom={decorticationDateFrom}
                 dateTo={decorticationDateTo}
