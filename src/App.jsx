@@ -5105,6 +5105,7 @@ function DryingPage({
   decorticationRecords,
   dryingRecords,
   onAddDryingRecord,
+  onCancelDryingRecord,
   dateFrom,
   dateTo,
   onDateFromChange,
@@ -5196,6 +5197,35 @@ function DryingPage({
     setPendingBundleWeights((prev) => [...prev, Number(weight.toFixed(1))])
     setCurrentBundleWeight('')
     setEntryStatus('')
+  }
+
+  function handleUndoLastBundle() {
+    setPendingBundleWeights((prev) => prev.slice(0, -1))
+    setEntryStatus('')
+  }
+
+  function handleCancelInProgressEntry() {
+    setSelectedDecorticationRecordId('')
+    setCurrentBundleWeight('')
+    setPendingBundleWeights([])
+    setEntryStatus('Entry cleared. You can start again.')
+  }
+
+  function handleCancelSavedRecord(record) {
+    if (!canManageDrying) {
+      return
+    }
+    const confirmed = window.confirm(
+      `Cancel the drying record for ${formatDisplayDate(record.weighedDate)} (${record.machine}, shift ${record.shiftNumber})? The decorticator shift will be available to weigh again.`,
+    )
+    if (!confirmed) {
+      return
+    }
+    const result = onCancelDryingRecord(record.id)
+    setEntryStatus(result.message)
+    if (result.ok) {
+      setShowDryingEntry(true)
+    }
   }
 
   function handleSubmitDryingEntry(event) {
@@ -5361,8 +5391,23 @@ function DryingPage({
           <button type="button" onClick={handleAddBundleWeight} disabled={!canSubmitDryingEntry}>
             Add Another Bundle
           </button>
+          <button
+            type="button"
+            onClick={handleUndoLastBundle}
+            disabled={!canSubmitDryingEntry || pendingBundleWeights.length === 0}
+          >
+            Undo Last Bundle
+          </button>
           <button type="submit" disabled={!canSubmitDryingEntry}>
             Complete
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={handleCancelInProgressEntry}
+            disabled={!canSubmitDryingEntry}
+          >
+            Cancel Entry
           </button>
         </form>
         <div className="placeholder">
@@ -5370,6 +5415,14 @@ function DryingPage({
           {pendingBundleWeights.length > 0
             ? ` | Total so far: ${pendingBundleWeights.reduce((sum, weight) => sum + weight, 0).toFixed(1)} kg`
             : ''}
+          {pendingBundleWeights.length > 0
+            ? ` | Weights: ${pendingBundleWeights.map((weight) => `${weight} kg`).join(', ')}`
+            : ''}
+        </div>
+        <div className="placeholder">
+          Use <strong>Cancel Entry</strong> to clear a mistake before completing. After saving, use{' '}
+          <strong>Cancel Record</strong> in the table below to remove the entry and weigh the shift
+          again.
         </div>
         {!canSubmitDryingEntry && (
           <div className="placeholder">
@@ -5399,6 +5452,7 @@ function DryingPage({
                 <th>Bundles</th>
                 <th>Dried Fibre (kg)</th>
                 <th>Drying Time (days)</th>
+                {canManageDrying ? <th>Actions</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -5413,11 +5467,22 @@ function DryingPage({
                   <td>{record.bundleWeights.length}</td>
                   <td>{record.totalDriedKg}</td>
                   <td>{record.dryingTimeDays}</td>
+                  {canManageDrying ? (
+                    <td>
+                      <button
+                        type="button"
+                        className="action-link action-link-button cancel-record-button"
+                        onClick={() => handleCancelSavedRecord(record)}
+                      >
+                        Cancel Record
+                      </button>
+                    </td>
+                  ) : null}
                 </tr>
               ))}
               {sortedDryingRecords.length === 0 && (
                 <tr>
-                  <td colSpan="9">No drying records found for the current filter.</td>
+                  <td colSpan={canManageDrying ? 10 : 9}>No drying records found for the current filter.</td>
                 </tr>
               )}
             </tbody>
@@ -8876,6 +8941,29 @@ function App() {
     setDryingRecords((prev) => [{ id: `DRY-${Date.now()}`, ...input }, ...prev])
   }
 
+  function handleCancelDryingRecord(recordId) {
+    const record = dryingRecords.find((item) => item.id === recordId)
+    if (!record) {
+      return { ok: false, message: 'Drying record could not be found.' }
+    }
+    const sourceStockCode = buildStockCode(record.batchNumber, record.machine, 'UBR')
+    const hasBrushingActivity =
+      brushingStockMovements.some((item) => item.sourceStockCode === sourceStockCode) ||
+      brushingDailyRecords.some((item) => item.sourceStockCode === sourceStockCode)
+    if (hasBrushingActivity) {
+      return {
+        ok: false,
+        message:
+          'This drying record cannot be cancelled because brushing stock has already been recorded for this batch and machine.',
+      }
+    }
+    setDryingRecords((prev) => prev.filter((item) => item.id !== recordId))
+    return {
+      ok: true,
+      message: 'Drying record cancelled. The decorticator shift is available to record again.',
+    }
+  }
+
   function handleAddBrushingStockMovement(input) {
     setBrushingStockMovements((prev) => [{ id: `BRM-${Date.now()}`, ...input }, ...prev])
   }
@@ -9234,6 +9322,7 @@ function App() {
                 decorticationRecords={decorticationRecords}
                 dryingRecords={dryingRecords}
                 onAddDryingRecord={handleAddDryingRecord}
+                onCancelDryingRecord={handleCancelDryingRecord}
                 dateFrom={dryingDateFrom}
                 dateTo={dryingDateTo}
                 onDateFromChange={setDryingDateFrom}

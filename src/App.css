@@ -244,6 +244,27 @@ th {
   cursor: pointer;
 }
 
+.secondary-button,
+.cancel-record-button {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.4rem;
+  background: #ffffff;
+  color: #334155;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0.35rem 0.7rem;
+}
+
+.secondary-button:hover,
+.cancel-record-button:hover {
+  background: #f8fafc;
+}
+
+.cancel-record-button {
+  color: #b45309;
+  border-color: #f59e0b;
+}
+
 .collapsible-section {
   margin-top: 1rem;
 }
