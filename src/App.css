@@ -538,6 +538,30 @@ th {
   margin: 0;
 }
 
+.employee-search-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem 1rem;
+  margin-top: 1.5rem;
+}
+
+.employee-search-field {
+  flex: 1 1 280px;
+  display: grid;
+  gap: 0.35rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.employee-search-field input {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.4rem;
+  padding: 0.55rem 0.7rem;
+  font-size: 1rem;
+}
+
 .page-access-admin {
   margin: 1.25rem 0;
   padding: 1rem 0;

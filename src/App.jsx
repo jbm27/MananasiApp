@@ -2440,6 +2440,7 @@ function EmployeesPage({
   const canManageEmployees =
     currentUser?.role === 'admin' || currentUser?.role === 'harvesting-manager'
   const [showRecentEvents, setShowRecentEvents] = useState(false)
+  const [employeeSearch, setEmployeeSearch] = useState('')
   const clockedInCount = clockedInIds.length
   const recentClockEvents = attendanceEvents.slice(0, RECENT_CLOCK_EVENTS_LIMIT)
   const roleDefinitions = useMemo(
@@ -2468,6 +2469,80 @@ function EmployeesPage({
     ...roleDefinitions,
     ...unknownRoles.map((role) => ({ id: role, name: getEmployeeRoleLabel(role) })),
   ]
+  const employeeSearchQuery = employeeSearch.trim().toLowerCase()
+  const isSearchingEmployees = employeeSearchQuery.length > 0
+  const employeeSearchResults = useMemo(() => {
+    if (!employeeSearchQuery) {
+      return []
+    }
+    return employees
+      .filter((employee) => {
+        const searchableText = [
+          employee.name,
+          employee.id,
+          employee.phone,
+          employee.email,
+          employee.position,
+          getEmployeeRoleLabel(employee.role),
+        ]
+          .map((value) => String(value ?? '').toLowerCase())
+          .join(' ')
+        return searchableText.includes(employeeSearchQuery)
+      })
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [employees, employeeSearchQuery])
+
+  function renderEmployeeRow(employee, { alwaysShowRole = false } = {}) {
+    const showRoleColumn = alwaysShowRole || canManageEmployees
+    return (
+      <tr key={employee.id}>
+        <td>
+          <code>{employee.id}</code>
+        </td>
+        <td>{employee.name}</td>
+        {showRoleColumn ? (
+          <td>
+            {canManageEmployees ? (
+              <select
+                value={employee.role}
+                onChange={(event) => onUpdateEmployeeRole(employee.id, event.target.value)}
+                aria-label={`Role for ${employee.name}`}
+              >
+                {employeeRoleOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              getEmployeeRoleLabel(employee.role)
+            )}
+          </td>
+        ) : null}
+        <td>
+          {getContractTypeLabel(employee.contractType)}
+          {employee.contractType === 'seasonal' && employee.seasonalGrade
+            ? ` (${getSeasonalGradeLabel(employee.seasonalGrade)})`
+            : ''}
+        </td>
+        <td>
+          <span
+            className={clockedInIds.includes(employee.id) ? 'badge badge-on' : 'badge badge-off'}
+          >
+            {clockedInIds.includes(employee.id) ? 'Clocked In' : 'Not Clocked In'}
+          </span>
+        </td>
+        <td>
+          <Link
+            to={`/employees/${employee.id}?from=${harvestingDateFrom}&to=${harvestingDateTo}`}
+            className="action-link"
+          >
+            View details
+          </Link>
+        </td>
+      </tr>
+    )
+  }
 
   function toggleRole(roleId) {
     setOpenRoles((prev) => ({
@@ -2479,7 +2554,7 @@ function EmployeesPage({
   return (
     <section className="panel">
       <h2>Employees</h2>
-      <p>Browse employees by job type and open each profile for details.</p>
+      <p>Browse employees by job type, or search by name, work no, phone, email, position, or role.</p>
       {!canManageEmployees && (
         <div className="placeholder">
           Only Admin or Harvesting Manager can add new employees.
@@ -2550,7 +2625,56 @@ function EmployeesPage({
         </div>
       </CollapsibleSection>
 
-      {orderedRoles.map((roleItem) => {
+      <div className="employee-search-toolbar">
+        <label className="employee-search-field">
+          Search employees
+          <input
+            type="search"
+            value={employeeSearch}
+            onChange={(event) => setEmployeeSearch(event.target.value)}
+            placeholder="Name, work no, phone, email, position, or role"
+          />
+        </label>
+        {isSearchingEmployees ? (
+          <button type="button" className="secondary-button" onClick={() => setEmployeeSearch('')}>
+            Clear search
+          </button>
+        ) : null}
+      </div>
+
+      {isSearchingEmployees ? (
+        <CollapsibleSection
+          title={`Search results (${employeeSearchResults.length})`}
+          isOpen
+          onToggle={() => {}}
+        >
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Work No</th>
+                  <th>Name</th>
+                  <th>Role</th>
+                  <th>Contract</th>
+                  <th>Clock-in</th>
+                  <th>View details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {employeeSearchResults.map((employee) =>
+                  renderEmployeeRow(employee, { alwaysShowRole: true }),
+                )}
+                {employeeSearchResults.length === 0 && (
+                  <tr>
+                    <td colSpan="6">No employees match your search.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </CollapsibleSection>
+      ) : (
+        orderedRoles.map((roleItem) => {
         const roleEmployees = (employeesByRole[roleItem.id] ?? [])
           .slice()
           .sort((a, b) => a.name.localeCompare(b.name))
@@ -2574,54 +2698,7 @@ function EmployeesPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {roleEmployees.map((employee) => (
-                    <tr key={employee.id}>
-                      <td>
-                        <code>{employee.id}</code>
-                      </td>
-                      <td>{employee.name}</td>
-                      {canManageEmployees ? (
-                        <td>
-                          <select
-                            value={employee.role}
-                            onChange={(event) =>
-                              onUpdateEmployeeRole(employee.id, event.target.value)
-                            }
-                            aria-label={`Role for ${employee.name}`}
-                          >
-                            {employeeRoleOptions.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                      ) : null}
-                      <td>
-                        {getContractTypeLabel(employee.contractType)}
-                        {employee.contractType === 'seasonal' && employee.seasonalGrade
-                          ? ` (${getSeasonalGradeLabel(employee.seasonalGrade)})`
-                          : ''}
-                      </td>
-                      <td>
-                        <span
-                          className={
-                            clockedInIds.includes(employee.id) ? 'badge badge-on' : 'badge badge-off'
-                          }
-                        >
-                          {clockedInIds.includes(employee.id) ? 'Clocked In' : 'Not Clocked In'}
-                        </span>
-                      </td>
-                      <td>
-                        <Link
-                          to={`/employees/${employee.id}?from=${harvestingDateFrom}&to=${harvestingDateTo}`}
-                          className="action-link"
-                        >
-                          View details
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
+                  {roleEmployees.map((employee) => renderEmployeeRow(employee))}
                   {roleEmployees.length === 0 && (
                     <tr>
                       <td colSpan={canManageEmployees ? 6 : 5}>No employees with this role yet.</td>
@@ -2632,7 +2709,8 @@ function EmployeesPage({
             </div>
           </CollapsibleSection>
         )
-      })}
+      })
+      )}
     </section>
   )
 }
