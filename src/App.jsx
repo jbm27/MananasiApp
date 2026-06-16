@@ -2434,6 +2434,7 @@ function EmployeesPage({
   attendanceEvents,
   onRefreshAttendance,
   attendanceRefreshing,
+  onUpdateEmployeeRole,
 }) {
   const navigate = useNavigate()
   const canManageEmployees =
@@ -2566,6 +2567,7 @@ function EmployeesPage({
                   <tr>
                     <th>Work No</th>
                     <th>Name</th>
+                    {canManageEmployees ? <th>Role</th> : null}
                     <th>Contract</th>
                     <th>Clock-in</th>
                     <th>View details</th>
@@ -2578,6 +2580,23 @@ function EmployeesPage({
                         <code>{employee.id}</code>
                       </td>
                       <td>{employee.name}</td>
+                      {canManageEmployees ? (
+                        <td>
+                          <select
+                            value={employee.role}
+                            onChange={(event) =>
+                              onUpdateEmployeeRole(employee.id, event.target.value)
+                            }
+                            aria-label={`Role for ${employee.name}`}
+                          >
+                            {employeeRoleOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      ) : null}
                       <td>
                         {getContractTypeLabel(employee.contractType)}
                         {employee.contractType === 'seasonal' && employee.seasonalGrade
@@ -2605,7 +2624,7 @@ function EmployeesPage({
                   ))}
                   {roleEmployees.length === 0 && (
                     <tr>
-                      <td colSpan="5">No employees with this role yet.</td>
+                      <td colSpan={canManageEmployees ? 6 : 5}>No employees with this role yet.</td>
                     </tr>
                   )}
                 </tbody>
@@ -3192,7 +3211,13 @@ function EmployeeRecordPage({
   )
 }
 
-function EmployeeProfileEditor({ employee, canEdit, onSubmit, submitLabel = 'Save employee details' }) {
+function EmployeeProfileEditor({
+  employee,
+  canEdit,
+  onSubmit,
+  submitLabel = 'Save employee details',
+  canEditRole = false,
+}) {
   function handleSubmit(event) {
     event.preventDefault()
     if (!canEdit) {
@@ -3252,6 +3277,18 @@ function EmployeeProfileEditor({ employee, canEdit, onSubmit, submitLabel = 'Sav
       <p className="placeholder">
         Work No / scanner User ID: <code>{employee.id}</code>
       </p>
+      {canEditRole ? (
+        <label>
+          App role
+          <select name="profileRole" defaultValue={employee.role ?? 'harvester'} disabled={!canEdit}>
+            {employeeRoleOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <label>
         Position
         <input name="profilePosition" defaultValue={employee.position ?? ''} disabled={!canEdit} />
@@ -3420,6 +3457,7 @@ function EmployeeEditPage({
   const employee = employees.find((item) => item.id === employeeId)
   const canEditEmployeeProfile =
     currentUser?.role === 'admin' || currentUser?.role === 'harvesting-manager'
+  const canEditRole = canEditEmployeeProfile
   const canEditRoleAndPermissions = currentUser?.role === 'admin'
   const [selectedPages, setSelectedPages] = useState(() =>
     employee ? new Set(getBasePageListForEditor(employee.id, pagePermissionOverrides, employees)) : new Set(),
@@ -3479,14 +3517,16 @@ function EmployeeEditPage({
 
   function handleSaveRoleAndPermissions(event) {
     event.preventDefault()
-    if (!canEditRoleAndPermissions) {
+    if (!canEditRole) {
       return
     }
     const formData = new FormData(event.currentTarget)
     const nextRole = String(formData.get('employeeRole') ?? employee.role)
     onUpdateEmployeeRole(employee.id, nextRole)
-    onSaveEmployeePageAccess(employee.id, [...selectedPages])
-    onSaveEmployeeDataEntryPermissions(employee.id, [...selectedDataEntryPermissions])
+    if (canEditRoleAndPermissions) {
+      onSaveEmployeePageAccess(employee.id, [...selectedPages])
+      onSaveEmployeeDataEntryPermissions(employee.id, [...selectedDataEntryPermissions])
+    }
   }
 
   function toggleDataEntryPermission(permissionId) {
@@ -3516,13 +3556,21 @@ function EmployeeEditPage({
       <div className="card-grid">
         <article className="card">
           <h3>Role and page permissions</h3>
-          {!canEditRoleAndPermissions && (
-            <p className="placeholder">Only Admin can edit role and page permissions.</p>
+          {!canEditRole && (
+            <p className="placeholder">Only Admin or Harvesting Manager can edit employee roles.</p>
+          )}
+          {!canEditRoleAndPermissions && canEditRole && (
+            <p className="placeholder">Only Admin can edit page and data-entry permissions.</p>
           )}
           <form className="form-grid" onSubmit={handleSaveRoleAndPermissions}>
             <label>
               Role
-              <select name="employeeRole" defaultValue={employee.role} disabled={!canEditRoleAndPermissions}>
+              <select
+                key={employee.role}
+                name="employeeRole"
+                defaultValue={employee.role}
+                disabled={!canEditRole}
+              >
                 {employeeRoleOptions.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
@@ -3561,7 +3609,11 @@ function EmployeeEditPage({
                 </label>
               ))}
             </fieldset>
-            {canEditRoleAndPermissions && <button type="submit">Save role and permissions</button>}
+            {canEditRole && (
+              <button type="submit">
+                {canEditRoleAndPermissions ? 'Save role and permissions' : 'Save role'}
+              </button>
+            )}
           </form>
         </article>
         <article className="card">
@@ -3570,9 +3622,10 @@ function EmployeeEditPage({
             <p className="placeholder">Only Admin or Harvesting Manager can edit these fields.</p>
           )}
           <EmployeeProfileEditor
-            key={employee.id}
+            key={`${employee.id}-${employee.role}`}
             employee={employee}
             canEdit={canEditEmployeeProfile}
+            canEditRole={canEditRole}
             onSubmit={(profile) => onUpdateEmployeeProfile(employee.id, profile)}
           />
         </article>
@@ -8535,13 +8588,39 @@ function App() {
 
   function handleUpdateEmployeeRole(employeeId, role) {
     setEmployees((prev) =>
-      prev.map((employee) => (employee.id === employeeId ? { ...employee, role } : employee)),
+      prev.map((employee) => {
+        if (employee.id !== employeeId) {
+          return employee
+        }
+        const oldRoleLabel = getEmployeeRoleLabel(employee.role)
+        const next = { ...employee, role }
+        if (!employee.position || employee.position === oldRoleLabel) {
+          next.position = getEmployeeRoleLabel(role)
+        }
+        return next
+      }),
     )
   }
 
   function handleUpdateEmployeeProfile(employeeId, profile) {
     setEmployees((prev) =>
-      prev.map((employee) => (employee.id === employeeId ? { ...employee, ...profile } : employee)),
+      prev.map((employee) => {
+        if (employee.id !== employeeId) {
+          return employee
+        }
+        const next = { ...employee, ...profile }
+        if (profile.role && profile.role !== employee.role) {
+          const oldRoleLabel = getEmployeeRoleLabel(employee.role)
+          if (
+            !profile.position ||
+            profile.position === oldRoleLabel ||
+            employee.position === oldRoleLabel
+          ) {
+            next.position = getEmployeeRoleLabel(profile.role)
+          }
+        }
+        return next
+      }),
     )
   }
 
@@ -8948,6 +9027,7 @@ function App() {
                 attendanceEvents={attendanceEvents}
                 onRefreshAttendance={handleRefreshAttendance}
                 attendanceRefreshing={attendanceRefreshing}
+                onUpdateEmployeeRole={handleUpdateEmployeeRole}
               />
             }
           />

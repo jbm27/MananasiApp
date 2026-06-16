@@ -74,6 +74,9 @@ export function mergeEmployeesWithSeed(storedEmployees, seedEmployees) {
         next[key] = value
       }
     }
+    if (employee.role) {
+      next.role = employee.role
+    }
     return next
   })
 
@@ -98,8 +101,10 @@ function parseOptionalNumber(value) {
 export function parseEmployeeProfileFromForm(formData) {
   const contractType = String(formData.get('contractType') ?? 'regular').trim() || 'regular'
   const seasonalGradeRaw = String(formData.get('seasonalGrade') ?? '').trim()
+  const roleRaw = String(formData.get('profileRole') ?? '').trim()
 
   return {
+    ...(roleRaw ? { role: roleRaw } : {}),
     name: String(formData.get('profileName') ?? '').trim(),
     position: String(formData.get('profilePosition') ?? '').trim(),
     department: String(formData.get('profileDepartment') ?? '').trim(),
