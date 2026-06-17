@@ -1,0 +1,111 @@
+const DEMO_CUSTOMER_ID = 'CUST-001'
+const DEMO_INVOICE_ID = 'INV-SEED-1087'
+
+/** Real harvest entries in production began on this date (inclusive). */
+export const REAL_HARVEST_DATA_START_DATE = '2026-06-12'
+
+function isSeedHarvestRecord(record) {
+  return /^\d{4}-\d{4}-\d{2}-\d{2}$/.test(String(record?.id ?? ''))
+}
+
+function shouldRemoveHarvestRecord(record) {
+  const harvestedOn = String(record?.harvestedOn ?? '')
+  if (isSeedHarvestRecord(record)) {
+    return true
+  }
+  if (harvestedOn && harvestedOn < REAL_HARVEST_DATA_START_DATE) {
+    return true
+  }
+  return false
+}
+
+function isSeedHaulageTrip(trip) {
+  return /^TRIP-\d{4}-\d{2}-\d{2}-/.test(String(trip?.id ?? ''))
+}
+
+function isSeedDecorticationRecord(record) {
+  return /^DEC-\d{4}-\d{2}-\d{2}-/.test(String(record?.id ?? ''))
+}
+
+function isSeedDryingRecord(record) {
+  return String(record?.id ?? '').startsWith('DRY-DEC-')
+}
+
+function isSeedDecorticationAssignment(assignment) {
+  return /^ASG-\d{4}-\d{2}-\d{2}-/.test(String(assignment?.id ?? ''))
+}
+
+function hasSeedMarker(id) {
+  return String(id ?? '').includes('-SEED-')
+}
+
+function isSeedFuelEntry(entry) {
+  return /^FUEL-\d{4}-\d{2}-\d{2}$/.test(String(entry?.id ?? ''))
+}
+
+function isSeedMaintenanceEntry(entry) {
+  return /^MTN-(SVC|REP)-\d{4}-\d{2}-\d{2}$/.test(String(entry?.id ?? ''))
+}
+
+export function sanitizePersistedAppState(data) {
+  if (!data || typeof data !== 'object') {
+    return data
+  }
+
+  const records = Array.isArray(data.records)
+    ? data.records.filter((record) => !shouldRemoveHarvestRecord(record))
+    : data.records
+  const haulageTrips = Array.isArray(data.haulageTrips)
+    ? data.haulageTrips.filter((trip) => !isSeedHaulageTrip(trip))
+    : data.haulageTrips
+  const decorticationRecords = Array.isArray(data.decorticationRecords)
+    ? data.decorticationRecords.filter((record) => !isSeedDecorticationRecord(record))
+    : data.decorticationRecords
+  const decorticationAssignments = Array.isArray(data.decorticationAssignments)
+    ? data.decorticationAssignments.filter((assignment) => !isSeedDecorticationAssignment(assignment))
+    : data.decorticationAssignments
+  const dryingRecords = Array.isArray(data.dryingRecords)
+    ? data.dryingRecords.filter((record) => !isSeedDryingRecord(record))
+    : data.dryingRecords
+  const brushingStockMovements = Array.isArray(data.brushingStockMovements)
+    ? data.brushingStockMovements.filter((record) => !hasSeedMarker(record.id))
+    : data.brushingStockMovements
+  const brushingDailyRecords = Array.isArray(data.brushingDailyRecords)
+    ? data.brushingDailyRecords.filter((record) => !hasSeedMarker(record.id))
+    : data.brushingDailyRecords
+  const balingRecords = Array.isArray(data.balingRecords)
+    ? data.balingRecords.filter((record) => !hasSeedMarker(record.id))
+    : data.balingRecords
+  const silageRecords = Array.isArray(data.silageRecords)
+    ? data.silageRecords.filter((record) => !hasSeedMarker(record.id))
+    : data.silageRecords
+  const invoiceDocuments = Array.isArray(data.invoiceDocuments)
+    ? data.invoiceDocuments.filter((document) => document.id !== DEMO_INVOICE_ID)
+    : data.invoiceDocuments
+  const customers = Array.isArray(data.customers)
+    ? data.customers.filter((customer) => customer.id !== DEMO_CUSTOMER_ID)
+    : data.customers
+  const fuelEntries = Array.isArray(data.fuelEntries)
+    ? data.fuelEntries.filter((entry) => !isSeedFuelEntry(entry))
+    : data.fuelEntries
+  const maintenanceEntries = Array.isArray(data.maintenanceEntries)
+    ? data.maintenanceEntries.filter((entry) => !isSeedMaintenanceEntry(entry))
+    : data.maintenanceEntries
+
+  return {
+    ...data,
+    records,
+    haulageTrips,
+    fuelEntries,
+    maintenanceEntries,
+    decorticationRecords,
+    decorticationAssignments,
+    dryingRecords,
+    brushingStockMovements,
+    brushingDailyRecords,
+    balingRecords,
+    silageRecords,
+    invoiceDocuments,
+    customers,
+  }
+}

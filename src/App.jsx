@@ -31,11 +31,10 @@ import {
   CONTRACT_TYPE_OPTIONS,
   SEASONAL_GRADE_OPTIONS,
   createBlankEmployeeTemplate,
-  employeeRecordsNeedSeedMerge,
   formatEmployeeFieldValue,
-  mergeEmployeesWithSeed,
   parseEmployeeProfileFromForm,
 } from './employeeFields.js'
+import { sanitizePersistedAppState } from './appStateSanitize.js'
 
 const RECENT_CLOCK_EVENTS_LIMIT = 10
 import { useBackendSync } from './hooks/useBackendSync.js'
@@ -56,34 +55,6 @@ function nextEmployeeWorkNumber(employees) {
   )
 }
 
-function buildDemoClockedInIds(employeeList) {
-  const ids = new Set()
-  employeeList
-    .filter((employee) => employee.role === 'harvester')
-    .slice(0, 10)
-    .forEach((employee) => ids.add(employee.id))
-  employeeList
-    .filter((employee) => employee.role === 'truck-driver')
-    .forEach((employee) => ids.add(employee.id))
-  employeeList
-    .filter((employee) => employee.role === 'decorticator-operator')
-    .slice(0, 14)
-    .forEach((employee) => ids.add(employee.id))
-  employeeList
-    .filter((employee) => employee.role === 'decortication-supervisor')
-    .forEach((employee) => ids.add(employee.id))
-  employeeList
-    .filter((employee) => employee.role === 'harvesting-manager')
-    .forEach((employee) => ids.add(employee.id))
-  return [...ids]
-}
-
-const seedHarvesters = mananasiStaffEmployees.filter((employee) => employee.role === 'harvester')
-const seedHarvestSupervisors = mananasiStaffEmployees.filter(
-  (employee) =>
-    employee.role === 'harvesting-supervisor' || employee.role === 'harvesting-manager',
-)
-const initialDemoClockedInIds = buildDemoClockedInIds(mananasiStaffEmployees)
 const activityModules = [
   {
     id: 'harvesting',
@@ -414,29 +385,9 @@ const integrationDevice = {
   fit: 'Primary biometric device planned for attendance with field GSM/4G connectivity.',
 }
 
-const initialCustomers = [
-  {
-    id: 'CUST-001',
-    name: 'Ita Francia Linen Knitting Company Limited',
-    addressLine1: '4th floor 3th building',
-    addressLine2: '26th Zhenxing Road, Chancheng District',
-    city: 'Foshan City',
-    postCode: '',
-    country: 'China',
-    email: '',
-    phone: '',
-    companyRegistration: '91440605L082304604',
-  },
-]
-
 const defaultCompensationRules = {
   incentiveThresholdKg: 250,
   incentiveRateKesPerKg: 1,
-}
-
-function seededKg(employeeIndex, dayOffset) {
-  const raw = ((employeeIndex + 3) * 37 + dayOffset * 19) % 351
-  return 200 + raw
 }
 
 function formatDisplayDate(isoDate) {
@@ -604,218 +555,6 @@ function buildBarcodeBits(value) {
   return bits
 }
 
-function buildSeedRecords(harvesters, supervisors, compensationRules, activeBatchNumber) {
-  const today = new Date()
-  const records = []
-  if (harvesters.length === 0 || supervisors.length === 0) {
-    return records
-  }
-  let supervisorPool = [...supervisors]
-  while (supervisorPool.length < 3) {
-    supervisorPool.push(supervisorPool[supervisorPool.length - 1])
-  }
-  const [supervisorOne, supervisorTwo, supervisorThree] = supervisorPool
-
-  for (let dayOffset = 1; dayOffset <= 30; dayOffset += 1) {
-    const dayDate = new Date(today)
-    dayDate.setDate(today.getDate() - dayOffset)
-    const harvestedOn = dayDate.toISOString().slice(0, 10)
-
-    harvesters.forEach((harvester, employeeIndex) => {
-      const recordedBy =
-        dayOffset <= 20
-          ? supervisorOne
-          : employeeIndex % 2 === 0
-            ? supervisorTwo
-            : supervisorThree
-      const kg = seededKg(employeeIndex, dayOffset)
-      const clockInTime = `7:${String(10 + ((employeeIndex + dayOffset) % 10)).padStart(2, '0')}`
-      const clockOutTime = `4:${String(40 + ((employeeIndex + dayOffset) % 20)).padStart(2, '0')}`
-      const wage = calculateHarvestWage(kg, harvester, compensationRules)
-      records.push({
-        id: `${harvester.id}-${harvestedOn}`,
-        harvesterId: harvester.id,
-        harvesterName: harvester.name,
-        kg,
-        harvestedOn,
-        baseWageKes: wage.baseWageKes,
-        incentiveKes: wage.incentiveKes,
-        wageKes: wage.wageKes,
-        recordedById: recordedBy.id,
-        recordedByName: recordedBy.name,
-        supervisorDailyWageKes: getEmployeeDailyWageKes(recordedBy),
-        batchNumber: normalizeBatchNumber(activeBatchNumber),
-        clockInTime,
-        clockOutTime,
-      })
-    })
-  }
-
-  return records
-}
-
-function buildSeedHaulageTrips(records, employees) {
-  const drivers = employees.filter((employee) => employee.role === 'truck-driver')
-  const dedicatedLoaders = employees.filter((employee) => employee.role === 'loader')
-  const loaders =
-    dedicatedLoaders.length >= 2
-      ? dedicatedLoaders
-      : employees.filter((employee) => employee.role === 'decorticator-operator').slice(0, 2)
-  if (drivers.length === 0 || loaders.length < 2 || records.length === 0) {
-    return []
-  }
-
-  const truckCapacityKg = 15000
-  const groupedByDateBatch = records.reduce((map, record) => {
-    const key = `${record.harvestedOn}__${record.batchNumber}`
-    if (!map[key]) {
-      map[key] = {
-        date: record.harvestedOn,
-        batchNumber: record.batchNumber,
-        records: [],
-      }
-    }
-    map[key].records.push(record)
-    return map
-  }, {})
-
-  const sortedDateBatchGroups = Object.values(groupedByDateBatch).sort((a, b) =>
-    a.date === b.date ? a.batchNumber.localeCompare(b.batchNumber) : a.date.localeCompare(b.date),
-  )
-
-  return sortedDateBatchGroups.flatMap((group, groupIndex) => {
-    const totalOfficialWeightKg = group.records.reduce((sum, record) => sum + record.kg, 0)
-    const tripsNeeded = Math.max(1, Math.ceil(totalOfficialWeightKg / truckCapacityKg))
-    let remainingWeight = totalOfficialWeightKg
-    return Array.from({ length: tripsNeeded }, (_, tripIndex) => {
-      const officialWeightKg =
-        tripIndex === tripsNeeded - 1 ? remainingWeight : truckCapacityKg
-      remainingWeight -= officialWeightKg
-      const weighbridgeWeightKg = officialWeightKg + (groupIndex % 2 === 0 ? -20 : 15)
-      const selectedLoaders = [
-        loaders[(groupIndex + tripIndex) % loaders.length],
-        loaders[(groupIndex + tripIndex + 1) % loaders.length],
-      ]
-      const seededTripDistanceKm = 42 + ((groupIndex + tripIndex) % 7)
-      return {
-        id: `TRIP-${group.date}-${group.batchNumber}-${tripIndex + 1}`,
-        date: group.date,
-        tripNumber: tripIndex + 1,
-        batchNumber: group.batchNumber,
-        officialWeightKg,
-        weighbridgeWeightKg,
-        driverId: drivers[0].id,
-        driverName: drivers[0].name,
-        loaderIds: selectedLoaders.map((loader) => loader.id),
-        loaderNames: selectedLoaders.map((loader) => loader.name),
-        tripDistanceKm: seededTripDistanceKm,
-      }
-    })
-  })
-}
-
-function buildSeedFuelAndMaintenance(haulageTrips) {
-  const sortedTrips = [...haulageTrips].sort((a, b) => a.date.localeCompare(b.date))
-  const distanceByDate = sortedTrips.reduce((map, trip) => {
-    map[trip.date] = (map[trip.date] ?? 0) + (trip.tripDistanceKm ?? 0)
-    return map
-  }, {})
-  const dates = Object.keys(distanceByDate).sort()
-
-  const fuelEntries = []
-  for (let i = 0; i < dates.length; i += 7) {
-    const windowDates = dates.slice(i, i + 7)
-    const totalDistanceKm = windowDates.reduce((sum, date) => sum + (distanceByDate[date] ?? 0), 0)
-    const litres = Number((totalDistanceKm / 2.5).toFixed(1))
-    const costKes = Math.round(litres * 176)
-    if (windowDates.length > 0) {
-      fuelEntries.push({
-        id: `FUEL-${windowDates[windowDates.length - 1]}`,
-        date: windowDates[windowDates.length - 1],
-        litres,
-        costKes,
-      })
-    }
-  }
-
-  const maintenanceEntries = []
-  let cumulativeDistance = 0
-  let nextServiceAtKm = 5000
-  dates.forEach((date, idx) => {
-    cumulativeDistance += distanceByDate[date] ?? 0
-    if (cumulativeDistance >= nextServiceAtKm) {
-      maintenanceEntries.push({
-        id: `MTN-SVC-${date}`,
-        date,
-        type: 'service',
-        costKes: 100000,
-      })
-      nextServiceAtKm += 5000
-    }
-    if (idx % 14 === 0) {
-      maintenanceEntries.push({
-        id: `MTN-REP-${date}`,
-        date,
-        type: 'repair',
-        costKes: 38000 + (idx % 3) * 6000,
-      })
-    }
-  })
-
-  return { fuelEntries, maintenanceEntries }
-}
-
-function buildSeedDecorticationRecords(haulageTrips, employees) {
-  const supervisors = employees.filter((employee) => employee.role === 'decortication-supervisor')
-  const operators = employees.filter((employee) => employee.role === 'decorticator-operator')
-  const primarySupervisor = supervisors[0]
-  const secondarySupervisor = supervisors[1] ?? supervisors[0]
-  const machinePlan = [
-    { machine: 'D2', supervisor: primarySupervisor },
-    { machine: 'D3', supervisor: secondarySupervisor },
-  ]
-  if (!primarySupervisor || operators.length < 14) {
-    return []
-  }
-
-  const grouped = haulageTrips.reduce((map, trip) => {
-    const key = `${trip.date}__${trip.batchNumber}`
-    if (!map[key]) {
-      map[key] = { date: trip.date, batchNumber: trip.batchNumber, officialWeightKg: 0 }
-    }
-    map[key].officialWeightKg += trip.officialWeightKg
-    return map
-  }, {})
-
-  const groups = Object.values(grouped).sort((a, b) =>
-    a.date === b.date ? a.batchNumber.localeCompare(b.batchNumber) : a.date.localeCompare(b.date),
-  )
-
-  return groups.flatMap((group, idx) => {
-    const totalFibreKg = group.officialWeightKg * 0.015
-    return machinePlan.map((machineConfig, machineIndex) => {
-      const fibreKg = Number((totalFibreKg / 2 + (machineIndex === 0 ? 1.2 : -1.2)).toFixed(1))
-      const operatorStart = machineIndex * 7
-      const assignedOperators = operators.slice(operatorStart, operatorStart + 7)
-      return {
-        id: `DEC-${group.date}-${group.batchNumber}-${machineConfig.machine}-1`,
-        date: group.date,
-        machine: machineConfig.machine,
-        shiftNumber: 1,
-        batchNumber: group.batchNumber,
-        leafInputKg: Number((group.officialWeightKg / 2).toFixed(1)),
-        fibreKg,
-        waterM3: Number((11.2 + ((idx + machineIndex) % 4) * 0.6).toFixed(1)),
-        runtimeHours: Number((6.1 + ((idx + machineIndex) % 3) * 0.4).toFixed(1)),
-        supervisorId: machineConfig.supervisor.id,
-        supervisorName: machineConfig.supervisor.name,
-        operatorIds: assignedOperators.map((person) => person.id),
-        operatorNames: assignedOperators.map((person) => person.name),
-      }
-    })
-  })
-}
-
 function buildDecorticationAssignmentsFromRecords(decorticationRecords) {
   const assignmentMap = {}
   decorticationRecords.forEach((record) => {
@@ -835,277 +574,6 @@ function buildDecorticationAssignmentsFromRecords(decorticationRecords) {
     }
   })
   return Object.values(assignmentMap)
-}
-
-function buildSeedDryingRecords(decorticationRecords, employees) {
-  let dryers = employees.filter((employee) => employee.role === 'dryer')
-  if (dryers.length === 0) {
-    dryers = employees.filter((employee) => employee.role === 'decorticator-operator').slice(0, 3)
-  }
-  if (dryers.length === 0) {
-    return []
-  }
-  return decorticationRecords
-    .slice(0, 24)
-    .map((record, index) => {
-      const weighedDate = new Date(record.date)
-      weighedDate.setDate(weighedDate.getDate() + 2 + (index % 3))
-      const bundleCount = 8 + (index % 3)
-      const totalDriedKg = Number((record.fibreKg * (0.95 + (index % 3) * 0.01)).toFixed(1))
-      const averageBundle = totalDriedKg / bundleCount
-      const bundleWeights = Array.from({ length: bundleCount }, (_, bundleIndex) =>
-        Number((averageBundle + (bundleIndex % 2 === 0 ? 0.2 : -0.2)).toFixed(1)),
-      )
-      const normalizedTotal = Number(
-        bundleWeights.reduce((sum, weight) => sum + weight, 0).toFixed(1),
-      )
-      const dryer = dryers[index % dryers.length]
-      return {
-        id: `DRY-${record.id}`,
-        decorticationRecordId: record.id,
-        decorticationDate: record.date,
-        weighedDate: weighedDate.toISOString().slice(0, 10),
-        machine: record.machine,
-        shiftNumber: record.shiftNumber,
-        batchNumber: record.batchNumber,
-        bundleWeights,
-        totalDriedKg: normalizedTotal,
-        dryingTimeDays: Math.max(
-          0,
-          Math.floor((weighedDate.getTime() - new Date(record.date).getTime()) / (1000 * 60 * 60 * 24)),
-        ),
-        dryerId: dryer.id,
-        dryerName: dryer.name,
-      }
-    })
-    .sort((a, b) => b.weighedDate.localeCompare(a.weighedDate))
-}
-
-function buildSeedBrushingData(dryingRecords, employees) {
-  const supervisors = employees.filter((employee) => employee.role === 'brushing-supervisor')
-  const brushers = employees.filter((employee) => employee.role === 'brusher')
-  if (supervisors.length === 0 || brushers.length === 0 || dryingRecords.length === 0) {
-    return { brushingStockMovements: [], brushingDailyRecords: [] }
-  }
-
-  const grouped = dryingRecords.reduce((map, record) => {
-    const brushingDate = new Date(record.weighedDate)
-    brushingDate.setDate(brushingDate.getDate() + 1)
-    const date = brushingDate.toISOString().slice(0, 10)
-    const sourceStockCode = buildStockCode(record.batchNumber, record.machine, 'UBR')
-    const batchNumber = normalizeBatchNumber(record.batchNumber)
-    const key = `${date}__${sourceStockCode}`
-    if (!map[key]) {
-      map[key] = {
-        date,
-        batchNumber,
-        sourceStockCode,
-        machine: record.machine,
-        ubrAvailableKg: 0,
-      }
-    }
-    map[key].ubrAvailableKg += record.totalDriedKg
-    return map
-  }, {})
-
-  const sortedGroups = Object.values(grouped).sort((a, b) =>
-    a.date === b.date ? a.batchNumber.localeCompare(b.batchNumber) : a.date.localeCompare(b.date),
-  )
-
-  const brushingStockMovements = []
-  const brushingDailyRecords = []
-
-  sortedGroups.forEach((group, index) => {
-    const issueKg = Number((group.ubrAvailableKg * (0.84 + (index % 3) * 0.03)).toFixed(1))
-    const returnKg = index % 2 === 0 ? Number((issueKg * 0.07).toFixed(1)) : 0
-    const ubrUsedKg = Number((issueKg - returnKg).toFixed(1))
-    const brsKg = Number((ubrUsedKg * (0.77 + (index % 4) * 0.015)).toFixed(1))
-    const towKg = Number((ubrUsedKg * (0.16 + (index % 3) * 0.01)).toFixed(1))
-    const dustLossKg = Number((ubrUsedKg - (brsKg + towKg)).toFixed(1))
-    const efficiency = ubrUsedKg > 0 ? Number((brsKg / ubrUsedKg).toFixed(3)) : 0
-
-    const supervisorA = supervisors[index % supervisors.length]
-    const supervisorB = supervisors[(index + 1) % supervisors.length]
-    const supervisorIds =
-      supervisors.length > 1 && index % 3 === 0 ? [supervisorA.id, supervisorB.id] : [supervisorA.id]
-    const supervisorNames = supervisorIds.map(
-      (id) => employees.find((employee) => employee.id === id)?.name ?? id,
-    )
-
-    const brusherCount = Math.min(5, Math.max(2, 2 + (index % 4)))
-    const brusherIds = Array.from({ length: brusherCount }, (_, workerIndex) => {
-      const brusher = brushers[(index + workerIndex) % brushers.length]
-      return brusher.id
-    })
-    const brusherNames = brusherIds.map(
-      (id) => employees.find((employee) => employee.id === id)?.name ?? id,
-    )
-
-    brushingStockMovements.push({
-      id: `BRM-SEED-${index + 1}-ISSUE`,
-      date: group.date,
-      batchNumber: group.batchNumber,
-      sourceStockCode: group.sourceStockCode,
-      machine: group.machine,
-      type: 'issue',
-      quantityKg: issueKg,
-      recordedById: supervisorA.id,
-      recordedByName: supervisorA.name,
-    })
-    if (returnKg > 0) {
-      brushingStockMovements.push({
-        id: `BRM-SEED-${index + 1}-RETURN`,
-        date: group.date,
-        batchNumber: group.batchNumber,
-        sourceStockCode: group.sourceStockCode,
-        machine: group.machine,
-        type: 'return',
-        quantityKg: returnKg,
-        recordedById: supervisorA.id,
-        recordedByName: supervisorA.name,
-      })
-    }
-
-    brushingDailyRecords.push({
-      id: `BRD-SEED-${index + 1}`,
-      date: group.date,
-      batchNumber: group.batchNumber,
-      sourceStockCode: group.sourceStockCode,
-      machine: group.machine,
-      supervisorIds,
-      supervisorNames,
-      brusherIds,
-      brusherNames,
-      ubrUsedKg,
-      brsKg,
-      towKg,
-      efficiency,
-      dustLossKg,
-    })
-  })
-
-  return {
-    brushingStockMovements: brushingStockMovements.sort((a, b) => b.date.localeCompare(a.date)),
-    brushingDailyRecords: brushingDailyRecords.sort((a, b) => b.date.localeCompare(a.date)),
-  }
-}
-
-function buildSeedBalingRecords(brushingDailyRecords, employees) {
-  const supervisors = employees.filter((employee) => employee.role === 'baling-supervisor')
-  const balers = employees.filter((employee) => employee.role === 'baler')
-  if (supervisors.length === 0 || balers.length < 2 || brushingDailyRecords.length === 0) {
-    return []
-  }
-  const serialBySeries = {}
-  return brushingDailyRecords.slice(0, 12).flatMap((record, index) => {
-    const sourceStockCode = `${String(record.sourceStockCode ?? '').replace(/-UBR$/, '')}-BRS`
-    const baleWeightKg = 100
-    const targetBales = Math.max(1, Math.floor(record.brsKg / baleWeightKg))
-    const supervisor = supervisors[index % supervisors.length]
-    const balerIds = [balers[index % balers.length].id, balers[(index + 1) % balers.length].id]
-    const balerNames = balerIds.map((id) => employees.find((employee) => employee.id === id)?.name ?? id)
-    return Array.from({ length: targetBales }, (_, baleIndex) => {
-      const seriesCode = buildBaleSeriesCode(sourceStockCode, baleWeightKg)
-      serialBySeries[seriesCode] = (serialBySeries[seriesCode] ?? 0) + 1
-      return {
-        id: `BAL-SEED-${index + 1}-${baleIndex + 1}`,
-        date: record.date,
-        batchNumber: normalizeBatchNumber(record.batchNumber),
-        machine: getMachineFromStockCode(sourceStockCode),
-        sourceStockCode,
-        baleWeightKg,
-        baleSeriesCode: seriesCode,
-        baleCode: buildBaleCode(sourceStockCode, baleWeightKg, serialBySeries[seriesCode]),
-        supervisorIds: [supervisor.id],
-        supervisorNames: [supervisor.name],
-        balerIds,
-        balerNames,
-      }
-    })
-  })
-}
-
-function buildSeedSilageRecords(dryingRecords, employees) {
-  const supervisors = employees.filter((employee) => employee.role === 'silage-supervisor')
-  const operators = employees.filter((employee) => employee.role === 'silage-operator')
-  if (supervisors.length === 0 || dryingRecords.length === 0) {
-    return []
-  }
-
-  const groupedByDateAndBatch = dryingRecords.reduce((map, record) => {
-    const date = record.weighedDate
-    const batchNumber = normalizeBatchNumber(record.batchNumber)
-    const key = `${date}__${batchNumber}`
-    if (!map[key]) {
-      map[key] = { date, batchNumber, driedFibreKg: 0 }
-    }
-    map[key].driedFibreKg += record.totalDriedKg
-    return map
-  }, {})
-
-  const serialByDateBatchMass = {}
-  const seededRecords = []
-
-  Object.values(groupedByDateAndBatch)
-    .sort((a, b) => (a.date === b.date ? a.batchNumber.localeCompare(b.batchNumber) : a.date.localeCompare(b.date)))
-    .forEach((group, index) => {
-      const targetSilageKg = group.driedFibreKg * 10
-      const useTwoBagSizes = index % 4 === 0
-      const supervisor = supervisors[index % supervisors.length]
-      const operatorIds = operators.map((operator) => operator.id)
-      const operatorNames = operators.map((operator) => operator.name)
-
-      const bagPlans = useTwoBagSizes
-        ? [
-            {
-              massKg: 75,
-              count: Math.max(1, Math.floor((targetSilageKg * 0.7) / 75)),
-            },
-            {
-              massKg: 50,
-              count: Math.max(
-                1,
-                Math.round(
-                  Math.max(50, targetSilageKg - Math.floor((targetSilageKg * 0.7) / 75) * 75) / 50,
-                ),
-              ),
-            },
-          ]
-        : [
-            {
-              massKg: 75,
-              count: Math.max(1, Math.round(targetSilageKg / 75)),
-            },
-          ]
-
-      bagPlans.forEach((plan) => {
-        const serialKey = `${group.date}__${group.batchNumber}__${Math.round(plan.massKg)}`
-        if (!serialByDateBatchMass[serialKey]) {
-          serialByDateBatchMass[serialKey] = 0
-        }
-        for (let serial = 0; serial < plan.count; serial += 1) {
-          serialByDateBatchMass[serialKey] += 1
-          seededRecords.push({
-            id: `SLG-SEED-${index + 1}-${Math.round(plan.massKg)}-${serialByDateBatchMass[serialKey]}`,
-            date: group.date,
-            batchNumber: group.batchNumber,
-            massKg: Number(plan.massKg.toFixed(1)),
-            bagCode: buildSilageBagCode(
-              group.batchNumber,
-              group.date,
-              plan.massKg,
-              serialByDateBatchMass[serialKey],
-            ),
-            supervisorId: supervisor.id,
-            supervisorName: supervisor.name,
-            operatorIds,
-            operatorNames,
-          })
-        }
-      })
-    })
-
-  return seededRecords.sort((a, b) => b.date.localeCompare(a.date))
 }
 
 function HomePage({ employees, records, clockedInIds }) {
@@ -8490,90 +7958,93 @@ function hydrateAppState(data, setters) {
   if (!data) {
     return
   }
-  if (Array.isArray(data.employees)) {
-    const employees = employeeRecordsNeedSeedMerge(data.employees)
-      ? mergeEmployeesWithSeed(data.employees, mananasiStaffEmployees)
-      : data.employees
-    setters.setEmployees(employees)
+  const sanitized = sanitizePersistedAppState(data)
+  if (Array.isArray(sanitized.employees)) {
+    setters.setEmployees(
+      sanitized.employees.length > 0 ? sanitized.employees : [...mananasiStaffEmployees],
+    )
   }
-  if (Array.isArray(data.customers)) setters.setCustomers(data.customers)
-  if (typeof data.activeBatchNumber === 'string') setters.setActiveBatchNumber(data.activeBatchNumber)
-  if (Array.isArray(data.clockedInIds)) setters.setClockedInIds(data.clockedInIds)
-  if (Array.isArray(data.records)) setters.setRecords(data.records)
-  if (data.compensationRules) {
+  if (Array.isArray(sanitized.customers)) setters.setCustomers(sanitized.customers)
+  if (typeof sanitized.activeBatchNumber === 'string') {
+    setters.setActiveBatchNumber(sanitized.activeBatchNumber)
+  }
+  if (Array.isArray(sanitized.clockedInIds)) setters.setClockedInIds(sanitized.clockedInIds)
+  if (Array.isArray(sanitized.records)) setters.setRecords(sanitized.records)
+  if (sanitized.compensationRules) {
     setters.setCompensationRules({
-      incentiveThresholdKg: data.compensationRules.incentiveThresholdKg ?? 250,
-      incentiveRateKesPerKg: data.compensationRules.incentiveRateKesPerKg ?? 1,
+      incentiveThresholdKg: sanitized.compensationRules.incentiveThresholdKg ?? 250,
+      incentiveRateKesPerKg: sanitized.compensationRules.incentiveRateKesPerKg ?? 1,
     })
   }
-  if (data.pagePermissionOverrides) setters.setPagePermissionOverrides(data.pagePermissionOverrides)
-  if (data.dataEntryPermissionOverrides) {
-    setters.setDataEntryPermissionOverrides(data.dataEntryPermissionOverrides)
+  if (sanitized.pagePermissionOverrides) {
+    setters.setPagePermissionOverrides(sanitized.pagePermissionOverrides)
   }
-  if (Array.isArray(data.haulageTrips)) setters.setHaulageTrips(data.haulageTrips)
-  if (data.mileageByDate) setters.setMileageByDate(data.mileageByDate)
-  if (Array.isArray(data.fuelEntries)) setters.setFuelEntries(data.fuelEntries)
-  if (Array.isArray(data.maintenanceEntries)) setters.setMaintenanceEntries(data.maintenanceEntries)
-  if (Array.isArray(data.decorticationAssignments)) {
-    setters.setDecorticationAssignments(data.decorticationAssignments)
+  if (sanitized.dataEntryPermissionOverrides) {
+    setters.setDataEntryPermissionOverrides(sanitized.dataEntryPermissionOverrides)
   }
-  if (Array.isArray(data.decorticationRecords)) setters.setDecorticationRecords(data.decorticationRecords)
-  if (Array.isArray(data.dryingRecords)) setters.setDryingRecords(data.dryingRecords)
-  if (Array.isArray(data.brushingStockMovements)) {
-    setters.setBrushingStockMovements(data.brushingStockMovements)
+  if (Array.isArray(sanitized.haulageTrips)) setters.setHaulageTrips(sanitized.haulageTrips)
+  if (sanitized.mileageByDate) setters.setMileageByDate(sanitized.mileageByDate)
+  if (Array.isArray(sanitized.fuelEntries)) setters.setFuelEntries(sanitized.fuelEntries)
+  if (Array.isArray(sanitized.maintenanceEntries)) {
+    setters.setMaintenanceEntries(sanitized.maintenanceEntries)
   }
-  if (Array.isArray(data.brushingDailyRecords)) {
-    setters.setBrushingDailyRecords(data.brushingDailyRecords)
+  if (Array.isArray(sanitized.decorticationAssignments)) {
+    setters.setDecorticationAssignments(sanitized.decorticationAssignments)
   }
-  if (Array.isArray(data.balingRecords)) setters.setBalingRecords(data.balingRecords)
-  if (Array.isArray(data.silageRecords)) setters.setSilageRecords(data.silageRecords)
-  if (Array.isArray(data.invoiceDocuments)) setters.setInvoiceDocuments(data.invoiceDocuments)
-  if (data.payrollAdjustments) setters.setPayrollAdjustments(data.payrollAdjustments)
-  if (data.salaryPayrollAdjustments) setters.setSalaryPayrollAdjustments(data.salaryPayrollAdjustments)
-  if (data.payrollApprovals) setters.setPayrollApprovals(data.payrollApprovals)
+  if (Array.isArray(sanitized.decorticationRecords)) {
+    setters.setDecorticationRecords(sanitized.decorticationRecords)
+  }
+  if (Array.isArray(sanitized.dryingRecords)) setters.setDryingRecords(sanitized.dryingRecords)
+  if (Array.isArray(sanitized.brushingStockMovements)) {
+    setters.setBrushingStockMovements(sanitized.brushingStockMovements)
+  }
+  if (Array.isArray(sanitized.brushingDailyRecords)) {
+    setters.setBrushingDailyRecords(sanitized.brushingDailyRecords)
+  }
+  if (Array.isArray(sanitized.balingRecords)) setters.setBalingRecords(sanitized.balingRecords)
+  if (Array.isArray(sanitized.silageRecords)) setters.setSilageRecords(sanitized.silageRecords)
+  if (Array.isArray(sanitized.invoiceDocuments)) {
+    setters.setInvoiceDocuments(sanitized.invoiceDocuments)
+  }
+  if (sanitized.payrollAdjustments) setters.setPayrollAdjustments(sanitized.payrollAdjustments)
+  if (sanitized.salaryPayrollAdjustments) {
+    setters.setSalaryPayrollAdjustments(sanitized.salaryPayrollAdjustments)
+  }
+  if (sanitized.payrollApprovals) setters.setPayrollApprovals(sanitized.payrollApprovals)
 }
 
 function App() {
   const { ready, initialData, persist, syncError, syncing, lastSavedAt } = useBackendSync()
   const hydratedRef = useRef(false)
+  const today = new Date().toISOString().slice(0, 10)
   const [employees, setEmployees] = useState(() => [...mananasiStaffEmployees])
-  const [customers, setCustomers] = useState(initialCustomers)
-  const [activeBatchNumber, setActiveBatchNumber] = useState('2025-006')
-  const [clockedInIds, setClockedInIds] = useState(() => [...initialDemoClockedInIds])
-  const [records, setRecords] = useState(() =>
-    buildSeedRecords(
-      seedHarvesters,
-      seedHarvestSupervisors,
-      defaultCompensationRules,
-      '2025-006',
-    ),
-  )
-  const recordDates = records.map((record) => record.harvestedOn).sort()
-  const defaultFrom = recordDates[0] ?? new Date().toISOString().slice(0, 10)
-  const defaultTo = recordDates[recordDates.length - 1] ?? new Date().toISOString().slice(0, 10)
-  const [harvestingDateFrom, setHarvestingDateFrom] = useState(defaultFrom)
-  const [harvestingDateTo, setHarvestingDateTo] = useState(defaultTo)
+  const [customers, setCustomers] = useState([])
+  const [activeBatchNumber, setActiveBatchNumber] = useState('')
+  const [clockedInIds, setClockedInIds] = useState([])
+  const [records, setRecords] = useState([])
+  const [harvestingDateFrom, setHarvestingDateFrom] = useState(today)
+  const [harvestingDateTo, setHarvestingDateTo] = useState(today)
   const [harvestingBatchFilter, setHarvestingBatchFilter] = useState('all')
-  const [haulageDateFrom, setHaulageDateFrom] = useState(defaultFrom)
-  const [haulageDateTo, setHaulageDateTo] = useState(defaultTo)
+  const [haulageDateFrom, setHaulageDateFrom] = useState(today)
+  const [haulageDateTo, setHaulageDateTo] = useState(today)
   const [haulageBatchFilter, setHaulageBatchFilter] = useState('all')
-  const [decorticationDateFrom, setDecorticationDateFrom] = useState(defaultFrom)
-  const [decorticationDateTo, setDecorticationDateTo] = useState(defaultTo)
+  const [decorticationDateFrom, setDecorticationDateFrom] = useState(today)
+  const [decorticationDateTo, setDecorticationDateTo] = useState(today)
   const [decorticationBatchFilter, setDecorticationBatchFilter] = useState('all')
-  const [dryingDateFrom, setDryingDateFrom] = useState(defaultFrom)
-  const [dryingDateTo, setDryingDateTo] = useState(defaultTo)
+  const [dryingDateFrom, setDryingDateFrom] = useState(today)
+  const [dryingDateTo, setDryingDateTo] = useState(today)
   const [dryingBatchFilter, setDryingBatchFilter] = useState('all')
-  const [brushingDateFrom, setBrushingDateFrom] = useState(defaultFrom)
-  const [brushingDateTo, setBrushingDateTo] = useState(defaultTo)
+  const [brushingDateFrom, setBrushingDateFrom] = useState(today)
+  const [brushingDateTo, setBrushingDateTo] = useState(today)
   const [brushingBatchFilter, setBrushingBatchFilter] = useState('all')
-  const [balingDateFrom, setBalingDateFrom] = useState(defaultFrom)
-  const [balingDateTo, setBalingDateTo] = useState(defaultTo)
+  const [balingDateFrom, setBalingDateFrom] = useState(today)
+  const [balingDateTo, setBalingDateTo] = useState(today)
   const [balingBatchFilter, setBalingBatchFilter] = useState('all')
-  const [silageDateFrom, setSilageDateFrom] = useState(defaultFrom)
-  const [silageDateTo, setSilageDateTo] = useState(defaultTo)
+  const [silageDateFrom, setSilageDateFrom] = useState(today)
+  const [silageDateTo, setSilageDateTo] = useState(today)
   const [silageBatchFilter, setSilageBatchFilter] = useState('all')
-  const [stockDateFrom, setStockDateFrom] = useState(defaultFrom)
-  const [stockDateTo, setStockDateTo] = useState(defaultTo)
+  const [stockDateFrom, setStockDateFrom] = useState(today)
+  const [stockDateTo, setStockDateTo] = useState(today)
   const [stockBatchFilter, setStockBatchFilter] = useState('all')
   const [compensationRules, setCompensationRules] = useState(defaultCompensationRules)
   const [authLeadershipId, setAuthLeadershipId] = useState(() =>
@@ -8587,138 +8058,19 @@ function App() {
   const [payrollAdjustments, setPayrollAdjustments] = useState({})
   const [salaryPayrollAdjustments, setSalaryPayrollAdjustments] = useState({})
   const [payrollApprovals, setPayrollApprovals] = useState({})
-  const [haulageTrips, setHaulageTrips] = useState(() =>
-    buildSeedHaulageTrips(
-      buildSeedRecords(
-        seedHarvesters,
-        seedHarvestSupervisors,
-        defaultCompensationRules,
-        '2025-006',
-      ),
-      mananasiStaffEmployees,
-    ),
-  )
+  const [haulageTrips, setHaulageTrips] = useState([])
   const [mileageByDate, setMileageByDate] = useState({})
-  const [fuelEntries, setFuelEntries] = useState(() =>
-    buildSeedFuelAndMaintenance(
-      buildSeedHaulageTrips(
-        buildSeedRecords(
-          seedHarvesters,
-          seedHarvestSupervisors,
-          defaultCompensationRules,
-          '2025-006',
-        ),
-        mananasiStaffEmployees,
-      ),
-    ).fuelEntries,
-  )
-  const [maintenanceEntries, setMaintenanceEntries] = useState(() =>
-    buildSeedFuelAndMaintenance(
-      buildSeedHaulageTrips(
-        buildSeedRecords(
-          seedHarvesters,
-          seedHarvestSupervisors,
-          defaultCompensationRules,
-          '2025-006',
-        ),
-        mananasiStaffEmployees,
-      ),
-    ).maintenanceEntries,
-  )
-  const [decorticationAssignments, setDecorticationAssignments] = useState(() =>
-    buildDecorticationAssignmentsFromRecords(
-      buildSeedDecorticationRecords(
-        buildSeedHaulageTrips(
-          buildSeedRecords(
-            seedHarvesters,
-            seedHarvestSupervisors,
-            defaultCompensationRules,
-            '2025-006',
-          ),
-          mananasiStaffEmployees,
-        ),
-        mananasiStaffEmployees,
-      ),
-    ),
-  )
-  const [decorticationRecords, setDecorticationRecords] = useState(() =>
-    buildSeedDecorticationRecords(
-      buildSeedHaulageTrips(
-        buildSeedRecords(
-          seedHarvesters,
-          seedHarvestSupervisors,
-          defaultCompensationRules,
-          '2025-006',
-        ),
-        mananasiStaffEmployees,
-      ),
-      mananasiStaffEmployees,
-    ),
-  )
-  const [dryingRecords, setDryingRecords] = useState(() =>
-    buildSeedDryingRecords(
-      buildSeedDecorticationRecords(
-        buildSeedHaulageTrips(
-          buildSeedRecords(
-            seedHarvesters,
-            seedHarvestSupervisors,
-            defaultCompensationRules,
-            '2025-006',
-          ),
-          mananasiStaffEmployees,
-        ),
-        mananasiStaffEmployees,
-      ),
-      mananasiStaffEmployees,
-    ),
-  )
-  const seededBrushingData = useMemo(
-    () => buildSeedBrushingData(dryingRecords, mananasiStaffEmployees),
-    [dryingRecords],
-  )
-  const [brushingStockMovements, setBrushingStockMovements] = useState(
-    seededBrushingData.brushingStockMovements,
-  )
-  const [brushingDailyRecords, setBrushingDailyRecords] = useState(
-    seededBrushingData.brushingDailyRecords,
-  )
-  const [balingRecords, setBalingRecords] = useState(() =>
-    buildSeedBalingRecords(seededBrushingData.brushingDailyRecords, mananasiStaffEmployees),
-  )
-  const [silageRecords, setSilageRecords] = useState(() =>
-    buildSeedSilageRecords(dryingRecords, mananasiStaffEmployees),
-  )
+  const [fuelEntries, setFuelEntries] = useState([])
+  const [maintenanceEntries, setMaintenanceEntries] = useState([])
+  const [decorticationAssignments, setDecorticationAssignments] = useState([])
+  const [decorticationRecords, setDecorticationRecords] = useState([])
+  const [dryingRecords, setDryingRecords] = useState([])
+  const [brushingStockMovements, setBrushingStockMovements] = useState([])
+  const [brushingDailyRecords, setBrushingDailyRecords] = useState([])
+  const [balingRecords, setBalingRecords] = useState([])
+  const [silageRecords, setSilageRecords] = useState([])
   const [attendanceEvents, setAttendanceEvents] = useState([])
-  const [invoiceDocuments, setInvoiceDocuments] = useState([
-    {
-      id: 'INV-SEED-1087',
-      documentType: 'invoice',
-      documentNumber: '1087',
-      invoiceDate: '2026-03-27',
-      origin: 'Kenya',
-      currency: 'USD',
-      customerName: 'Ita Francia Linen Knitting Company Limited',
-      customerAddress:
-        '4th floor 3th building, 26th Zhenxing Road, Chancheng District, Foshan City, China',
-      customerRegistration: '91440605L082304604',
-      items: [
-        {
-          product: 'PALF',
-          description: 'Brushed Pineapple Leaf Fibre',
-          quantityKg: 8400,
-          rate: 3.06,
-          amount: 25704,
-        },
-      ],
-      totalAmount: 25704,
-      hsCode: '53050090',
-      paymentTerms: '30% deposit, balance upon arrival at port',
-      shippingTerms: 'CIF Nansha',
-      status: 'confirmed',
-      createdAt: '2026-03-27T10:00:00.000Z',
-      sourceProformaId: null,
-    },
-  ])
+  const [invoiceDocuments, setInvoiceDocuments] = useState([])
 
   const currentUser = employees.find((employee) => employee.id === authLeadershipId) ?? null
 
@@ -8755,32 +8107,33 @@ function App() {
   }, [ready, initialData])
 
   const persistedSnapshot = useMemo(
-    () => ({
-      version: 1,
-      employees,
-      customers,
-      activeBatchNumber,
-      clockedInIds,
-      records,
-      compensationRules,
-      pagePermissionOverrides,
-      dataEntryPermissionOverrides,
-      haulageTrips,
-      mileageByDate,
-      fuelEntries,
-      maintenanceEntries,
-      decorticationAssignments,
-      decorticationRecords,
-      dryingRecords,
-      brushingStockMovements,
-      brushingDailyRecords,
-      balingRecords,
-      silageRecords,
-      invoiceDocuments,
-      payrollAdjustments,
-      salaryPayrollAdjustments,
-      payrollApprovals,
-    }),
+    () =>
+      sanitizePersistedAppState({
+        version: 1,
+        employees,
+        customers,
+        activeBatchNumber,
+        clockedInIds,
+        records,
+        compensationRules,
+        pagePermissionOverrides,
+        dataEntryPermissionOverrides,
+        haulageTrips,
+        mileageByDate,
+        fuelEntries,
+        maintenanceEntries,
+        decorticationAssignments,
+        decorticationRecords,
+        dryingRecords,
+        brushingStockMovements,
+        brushingDailyRecords,
+        balingRecords,
+        silageRecords,
+        invoiceDocuments,
+        payrollAdjustments,
+        salaryPayrollAdjustments,
+        payrollApprovals,
+      }),
     [
       employees,
       customers,
@@ -9121,8 +8474,8 @@ function App() {
       bundleWeights: weights,
       kg,
       harvestedOn: new Date().toISOString().slice(0, 10),
-      clockInTime: '7:15',
-      clockOutTime: '4:45',
+      clockInTime: '',
+      clockOutTime: '',
       supervisorDailyWageKes: supervisor ? getEmployeeDailyWageKes(supervisor) : 0,
       batchNumber: normalizeBatchNumber(activeBatchNumber),
       ...wage,
