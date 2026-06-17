@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { getPool } from '../db.js'
 import { recordAttendanceEvent } from '../services/attendanceService.js'
+import { ensureAutoClockOutsPersisted } from '../services/attendanceAutoClockOut.js'
 
 const router = Router()
 
@@ -14,6 +15,7 @@ router.post('/events', async (req, res) => {
       deviceId,
       sourceEventId,
     })
+    await ensureAutoClockOutsPersisted()
     res.status(result.duplicate ? 200 : 201).json(result)
   } catch (error) {
     const message = error.message ?? 'Failed to record attendance event'
@@ -25,6 +27,7 @@ router.post('/events', async (req, res) => {
 
 router.get('/events', async (req, res) => {
   try {
+    await ensureAutoClockOutsPersisted()
     const limit = Math.min(Number(req.query.limit ?? 100), 5000)
     const fromDate = req.query.from ? String(req.query.from) : null
     const toDate = req.query.to ? String(req.query.to) : null

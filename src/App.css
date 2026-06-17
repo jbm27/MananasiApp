@@ -918,6 +918,18 @@ th {
   border-color: #dc2626;
 }
 
+.payroll-attendance-table {
+  min-width: 720px;
+}
+
+.payroll-attendance-row--absent {
+  background: #fef2f2;
+}
+
+.payroll-attendance-row--under-hours {
+  background: #fffbeb;
+}
+
 .payroll-section-approval {
   display: flex;
   flex-wrap: wrap;

@@ -1,4 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
+import {
+  AUTO_CLOCK_OUT_HOURS,
+  MINIMUM_WORK_HOURS_PER_DAY,
+  buildAttendanceExceptionReport,
+  getAttendanceExceptionLabel,
+  withAutoClockOutEvents,
+} from './attendanceProcessing.js'
 import { getContractTypeLabel } from './employeePay.js'
 import { fetchAttendanceEventsForPeriod } from './api/client.js'
 import {
@@ -151,6 +158,7 @@ export default function PayrollPage({
   const [showAdvances, setShowAdvances] = useState(true)
   const [showWages, setShowWages] = useState(false)
   const [showSalaries, setShowSalaries] = useState(false)
+  const [showAttendanceExceptions, setShowAttendanceExceptions] = useState(false)
   const [attendanceEvents, setAttendanceEvents] = useState([])
   const [attendanceLoading, setAttendanceLoading] = useState(false)
   const [attendanceError, setAttendanceError] = useState('')
@@ -266,6 +274,18 @@ export default function PayrollPage({
       harvestRecords,
     })
   }, [employees, selectedPeriod, salaryPayrollAdjustments, attendanceEvents, harvestRecords])
+
+  const normalizedAttendanceEvents = useMemo(
+    () => withAutoClockOutEvents(attendanceEvents),
+    [attendanceEvents],
+  )
+
+  const attendanceExceptionLines = useMemo(() => {
+    if (!selectedPeriod) {
+      return []
+    }
+    return buildAttendanceExceptionReport(employees, selectedPeriod, normalizedAttendanceEvents)
+  }, [employees, selectedPeriod, normalizedAttendanceEvents])
 
   function handleAdvanceChange(line, rawValue) {
     if (!selectedPeriod || !canModifyAdvances) {
@@ -912,6 +932,64 @@ export default function PayrollPage({
           pay. NSSF = Tier 1 (540) + Tier 2 (min((gross pay − 9,000) × 5%, 5,940)). Pension = 5%.
           AHL = 1.5%. SHA = 2.75%. PAYE = tax − tax relief (default KES 2,400 personal relief; set to
           0 if not applicable). Net pay = gross pay − total deductions − advance − Sacco − welfare.
+        </div>
+      </PayrollSection>
+
+      <PayrollSection
+        title="Attendance exceptions"
+        isOpen={showAttendanceExceptions}
+        onToggle={() => setShowAttendanceExceptions((prev) => !prev)}
+      >
+        <p className="payroll-advance-intro">
+          Monday–Saturday workdays in the selected pay period. Employees appear here if they did
+          not clock in, or worked fewer than {MINIMUM_WORK_HOURS_PER_DAY} hours on a day. Open shifts
+          are treated as clocked out automatically after {AUTO_CLOCK_OUT_HOURS} hours.
+        </p>
+
+        <div className="table-wrap payroll-table-wrap">
+          <table className="payroll-table payroll-attendance-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Name</th>
+                <th>Department</th>
+                <th>Issue</th>
+                <th>Hours worked</th>
+              </tr>
+            </thead>
+            <tbody>
+              {attendanceExceptionLines.length === 0 && (
+                <tr>
+                  <td colSpan="5">
+                    No attendance exceptions for this period. Every employee clocked in and worked
+                    at least {MINIMUM_WORK_HOURS_PER_DAY} hours on each Monday–Saturday workday.
+                  </td>
+                </tr>
+              )}
+              {attendanceExceptionLines.map((line) => (
+                <tr
+                  key={`${line.employeeId}-${line.date}-${line.issue}`}
+                  className={
+                    line.issue === 'no_clock_in'
+                      ? 'payroll-attendance-row--absent'
+                      : 'payroll-attendance-row--under-hours'
+                  }
+                >
+                  <td>{formatDisplayDate(line.date)}</td>
+                  <td>{line.name}</td>
+                  <td>{line.department || '—'}</td>
+                  <td>{getAttendanceExceptionLabel(line.issue)}</td>
+                  <td>{line.issue === 'no_clock_in' ? '—' : line.hoursWorked.toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="rules-box">
+          <strong>Attendance:</strong> Hours are calculated from clock-in and clock-out events in
+          Kenya time. If someone forgets to clock out, the system assumes a clock-out{' '}
+          {AUTO_CLOCK_OUT_HOURS} hours after clock-in when calculating hours for this report.
         </div>
       </PayrollSection>
     </section>

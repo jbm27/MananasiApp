@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { getAppState, saveAppState } from '../stateStore.js'
 import { migrateLeadershipPasswordsFromMainState } from '../services/leadershipAuthStore.js'
+import { ensureAutoClockOutsPersisted } from '../services/attendanceAutoClockOut.js'
 
 const router = Router()
 
@@ -15,6 +16,7 @@ function stripSensitiveStateFields(data) {
 router.get('/', async (_req, res) => {
   try {
     await migrateLeadershipPasswordsFromMainState()
+    await ensureAutoClockOutsPersisted()
     const state = await getAppState()
     if (!state) {
       return res.status(404).json({ error: 'No saved app state yet' })
