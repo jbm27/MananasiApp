@@ -669,6 +669,80 @@ function printBaleLabelsPdf(records, filename) {
   return records.length
 }
 
+function getSilageBagSerialFromCode(bagCode) {
+  const parts = String(bagCode ?? '').split('-')
+  if (parts.length < 2) {
+    return 0
+  }
+  const serial = Number(parts[parts.length - 2])
+  return Number.isNaN(serial) ? 0 : serial
+}
+
+function getSilageBagSeriesCode(record) {
+  return `${normalizeBatchNumber(record.batchNumber)}-${String(record.bagCode).split('-')[2]}-${Math.round(record.massKg)}-SLG`
+}
+
+function printSilageLabelsPdf(records, filename) {
+  if (!Array.isArray(records) || records.length === 0) {
+    return 0
+  }
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+  const pageWidth = pdf.internal.pageSize.getWidth()
+  const pageHeight = pdf.internal.pageSize.getHeight()
+  const marginX = 10
+  const marginY = 10
+  const gapX = 6
+  const gapY = 6
+  const columns = 2
+  const labelWidth = (pageWidth - marginX * 2 - gapX) / columns
+  const labelHeight = 52
+  const rowsPerPage = Math.floor((pageHeight - marginY * 2 + gapY) / (labelHeight + gapY))
+  const maxPerPage = rowsPerPage * columns
+
+  records.forEach((record, index) => {
+    if (index > 0 && index % maxPerPage === 0) {
+      pdf.addPage()
+    }
+    const pageIndex = index % maxPerPage
+    const row = Math.floor(pageIndex / columns)
+    const col = pageIndex % columns
+    const labelX = marginX + col * (labelWidth + gapX)
+    const labelY = marginY + row * (labelHeight + gapY)
+
+    pdf.setDrawColor(0)
+    pdf.setLineWidth(0.6)
+    pdf.rect(labelX, labelY, labelWidth, labelHeight)
+
+    const bits = buildBarcodeBits(record.bagCode)
+    const barcodeAreaWidth = labelWidth - 12
+    const barcodeAreaHeight = 24
+    const barWidth = barcodeAreaWidth / bits.length
+    const barcodeStartX = labelX + 6
+    const barcodeStartY = labelY + 10
+
+    pdf.setFillColor(0, 0, 0)
+    bits.split('').forEach((bit, bitIndex) => {
+      if (bit === '1') {
+        pdf.rect(
+          barcodeStartX + bitIndex * barWidth,
+          barcodeStartY,
+          Math.max(0.2, barWidth),
+          barcodeAreaHeight,
+          'F',
+        )
+      }
+    })
+
+    pdf.setTextColor(0, 0, 0)
+    pdf.setFont('helvetica', 'bold')
+    pdf.setFontSize(11)
+    pdf.text(record.bagCode, labelX + labelWidth / 2, labelY + 42, { align: 'center' })
+  })
+
+  pdf.save(filename)
+  return records.length
+}
+
 function buildDecorticationAssignmentsFromRecords(decorticationRecords) {
   const assignmentMap = {}
   decorticationRecords.forEach((record) => {
@@ -6723,61 +6797,11 @@ function SilageProductionPage({
       setSilageLabelStatus('Select at least one silage bag before printing labels.')
       return
     }
-    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-    const pageWidth = pdf.internal.pageSize.getWidth()
-    const pageHeight = pdf.internal.pageSize.getHeight()
-    const marginX = 10
-    const marginY = 10
-    const gapX = 6
-    const gapY = 6
-    const columns = 2
-    const labelWidth = (pageWidth - marginX * 2 - gapX) / columns
-    const labelHeight = 52
-    const rowsPerPage = Math.floor((pageHeight - marginY * 2 + gapY) / (labelHeight + gapY))
-    const maxPerPage = rowsPerPage * columns
-
-    selectedRecords.forEach((record, index) => {
-      if (index > 0 && index % maxPerPage === 0) {
-        pdf.addPage()
-      }
-      const pageIndex = index % maxPerPage
-      const row = Math.floor(pageIndex / columns)
-      const col = pageIndex % columns
-      const labelX = marginX + col * (labelWidth + gapX)
-      const labelY = marginY + row * (labelHeight + gapY)
-
-      pdf.setDrawColor(0)
-      pdf.setLineWidth(0.6)
-      pdf.rect(labelX, labelY, labelWidth, labelHeight)
-
-      const bits = buildBarcodeBits(record.bagCode)
-      const barcodeAreaWidth = labelWidth - 12
-      const barcodeAreaHeight = 24
-      const barWidth = barcodeAreaWidth / bits.length
-      const barcodeStartX = labelX + 6
-      const barcodeStartY = labelY + 10
-
-      pdf.setFillColor(0, 0, 0)
-      bits.split('').forEach((bit, bitIndex) => {
-        if (bit === '1') {
-          pdf.rect(
-            barcodeStartX + bitIndex * barWidth,
-            barcodeStartY,
-            Math.max(0.2, barWidth),
-            barcodeAreaHeight,
-            'F',
-          )
-        }
-      })
-
-      pdf.setTextColor(0, 0, 0)
-      pdf.setFont('helvetica', 'bold')
-      pdf.setFontSize(11)
-      pdf.text(record.bagCode, labelX + labelWidth / 2, labelY + 42, { align: 'center' })
-    })
-
-    pdf.save(`silage-labels-${new Date().toISOString().slice(0, 10)}.pdf`)
-    setSilageLabelStatus(`${selectedRecords.length} silage label(s) sent to print.`)
+    const count = printSilageLabelsPdf(
+      selectedRecords,
+      `silage-labels-${new Date().toISOString().slice(0, 10)}.pdf`,
+    )
+    setSilageLabelStatus(`${count} silage label(s) sent to print.`)
   }
 
   return (
@@ -7007,6 +7031,8 @@ function StockPage({
   const [showSilageInventory, setShowSilageInventory] = useState(false)
   const [baleLabelRanges, setBaleLabelRanges] = useState({})
   const [baleLabelStatus, setBaleLabelStatus] = useState('')
+  const [silageLabelRanges, setSilageLabelRanges] = useState({})
+  const [silageLabelStatus, setSilageLabelStatus] = useState('')
   const showAbsoluteStock = selectedBatchFilter === 'absolute'
   const filteredDryingRecords =
     showAbsoluteStock
@@ -7206,7 +7232,7 @@ function StockPage({
 
   const silageInventoryRows = Object.values(
     filteredSilageRecords.reduce((map, item) => {
-      const bagSeriesCode = `${normalizeBatchNumber(item.batchNumber)}-${String(item.bagCode).split('-')[2]}-${Math.round(item.massKg)}-SLG`
+      const bagSeriesCode = getSilageBagSeriesCode(item)
       if (!map[bagSeriesCode]) {
         map[bagSeriesCode] = {
           bagSeriesCode,
@@ -7220,6 +7246,46 @@ function StockPage({
       return map
     }, {}),
   ).sort((a, b) => b.bagCount - a.bagCount)
+
+  function updateSilageLabelRange(bagSeriesCode, field, value) {
+    setSilageLabelRanges((prev) => ({
+      ...prev,
+      [bagSeriesCode]: {
+        ...(prev[bagSeriesCode] ?? {}),
+        [field]: value,
+      },
+    }))
+  }
+
+  function handlePrintSilageSeriesLabels(bagSeriesCode) {
+    const range = silageLabelRanges[bagSeriesCode] ?? {}
+    const start = Number(range.start)
+    const end = Number(range.end)
+    if (Number.isNaN(start) || Number.isNaN(end) || start < 1 || end < start) {
+      setSilageLabelStatus(
+        'Enter a valid start and end bag number (start must be less than or equal to end).',
+      )
+      return
+    }
+
+    const records = filteredSilageRecords
+      .filter((record) => getSilageBagSeriesCode(record) === bagSeriesCode)
+      .filter((record) => {
+        const serial = getSilageBagSerialFromCode(record.bagCode)
+        return serial >= start && serial <= end
+      })
+      .sort((a, b) => getSilageBagSerialFromCode(a.bagCode) - getSilageBagSerialFromCode(b.bagCode))
+
+    if (records.length === 0) {
+      setSilageLabelStatus(`No silage bags found in ${bagSeriesCode} for numbers ${start} to ${end}.`)
+      return
+    }
+
+    printSilageLabelsPdf(records, `silage-labels-${bagSeriesCode}-${start}-${end}.pdf`)
+    setSilageLabelStatus(
+      `Generated ${records.length} label(s) for ${bagSeriesCode} (bags ${start} to ${end}).`,
+    )
+  }
 
   return (
     <section className="panel">
@@ -7428,6 +7494,10 @@ function StockPage({
         isOpen={showSilageInventory}
         onToggle={() => setShowSilageInventory((prev) => !prev)}
       >
+        <p className="inline-hint">
+          Enter the first and last bag number in a series to print labels only for that range (for
+          example, 88 and 92 to replace the last five bag labels).
+        </p>
         <div className="table-wrap">
           <table>
             <thead>
@@ -7437,6 +7507,9 @@ function StockPage({
                 <th>Date Code</th>
                 <th>Bag Mass (kg)</th>
                 <th>Quantity of Bags</th>
+                <th>Start bag #</th>
+                <th>End bag #</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -7447,16 +7520,51 @@ function StockPage({
                   <td>{row.bagDateCode}</td>
                   <td>{row.bagMassKg}</td>
                   <td>{row.bagCount}</td>
+                  <td>
+                    <input
+                      type="number"
+                      min="1"
+                      className="table-inline-input"
+                      value={silageLabelRanges[row.bagSeriesCode]?.start ?? ''}
+                      onChange={(event) =>
+                        updateSilageLabelRange(row.bagSeriesCode, 'start', event.target.value)
+                      }
+                      placeholder="1"
+                      aria-label={`Start bag number for ${row.bagSeriesCode}`}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      min="1"
+                      className="table-inline-input"
+                      value={silageLabelRanges[row.bagSeriesCode]?.end ?? ''}
+                      onChange={(event) =>
+                        updateSilageLabelRange(row.bagSeriesCode, 'end', event.target.value)
+                      }
+                      placeholder={String(row.bagCount)}
+                      aria-label={`End bag number for ${row.bagSeriesCode}`}
+                    />
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      onClick={() => handlePrintSilageSeriesLabels(row.bagSeriesCode)}
+                    >
+                      Print labels
+                    </button>
+                  </td>
                 </tr>
               ))}
               {silageInventoryRows.length === 0 && (
                 <tr>
-                  <td colSpan="5">No silage inventory records for the current filter.</td>
+                  <td colSpan="8">No silage inventory records for the current filter.</td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
+        {silageLabelStatus ? <p className="inline-hint">{silageLabelStatus}</p> : null}
       </CollapsibleSection>
 
     </section>
@@ -7473,6 +7581,19 @@ function getHaulageTripWeightKg(trip) {
   return 0
 }
 
+function renumberHaulageTripsForDate(trips, date) {
+  const sameDate = trips
+    .filter((trip) => trip.date === date)
+    .sort(
+      (a, b) =>
+        a.tripNumber - b.tripNumber || String(a.id ?? '').localeCompare(String(b.id ?? '')),
+    )
+  const orderMap = new Map(sameDate.map((trip, index) => [trip.id, index + 1]))
+  return trips.map((trip) =>
+    trip.date === date ? { ...trip, tripNumber: orderMap.get(trip.id) ?? trip.tripNumber } : trip,
+  )
+}
+
 function HaulagePage({
   currentUser,
   currentUserDataEntryPermissions,
@@ -7480,6 +7601,7 @@ function HaulagePage({
   clockedInIds,
   haulageTrips,
   onCreateTrip,
+  onUpdateTrip,
   mileageByDate,
   onSetMileageForDate,
   fuelEntries,
@@ -7507,7 +7629,16 @@ function HaulagePage({
   const [tripDate, setTripDate] = useState(dateTo)
   const [tripBatch, setTripBatch] = useState(availableBatches[0] ?? '')
   const [weighbridgeWeightKg, setWeighbridgeWeightKg] = useState('')
+  const [selectedDriverId, setSelectedDriverId] = useState('')
   const [selectedLoaderIds, setSelectedLoaderIds] = useState([])
+  const [tripEntryStatus, setTripEntryStatus] = useState('')
+  const [editingTripId, setEditingTripId] = useState('')
+  const [editTripDate, setEditTripDate] = useState('')
+  const [editTripBatch, setEditTripBatch] = useState('')
+  const [editDriverId, setEditDriverId] = useState('')
+  const [editWeighbridgeWeightKg, setEditWeighbridgeWeightKg] = useState('')
+  const [editLoaderIds, setEditLoaderIds] = useState([])
+  const [tripEditStatus, setTripEditStatus] = useState('')
   const [mileageDate, setMileageDate] = useState(dateTo)
   const [mileageKm, setMileageKm] = useState('')
   const [fuelDate, setFuelDate] = useState(dateTo)
@@ -7520,6 +7651,28 @@ function HaulagePage({
   const clockedInLoaders = employees.filter(
     (employee) => employee.role === 'loader' && clockedInIds.includes(employee.id),
   )
+  const truckDrivers = useMemo(
+    () =>
+      employees
+        .filter((employee) => employee.role === 'truck-driver')
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [employees],
+  )
+  const allLoaders = useMemo(
+    () =>
+      employees
+        .filter((employee) => employee.role === 'loader')
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [employees],
+  )
+
+  useEffect(() => {
+    if (selectedDriverId || truckDrivers.length === 0) {
+      return
+    }
+    const clockedInDriver = truckDrivers.find((driver) => clockedInIds.includes(driver.id))
+    setSelectedDriverId(clockedInDriver?.id ?? truckDrivers[0].id)
+  }, [selectedDriverId, truckDrivers, clockedInIds])
   const filteredTrips =
     selectedBatchFilter === 'all'
       ? haulageTrips.filter((trip) => trip.date >= dateFrom && trip.date <= dateTo)
@@ -7581,21 +7734,80 @@ function HaulagePage({
     )
   }
 
+  function handleEditLoaderToggle(loaderId) {
+    setEditLoaderIds((prev) =>
+      prev.includes(loaderId) ? prev.filter((id) => id !== loaderId) : [...prev, loaderId],
+    )
+  }
+
+  function startEditingTrip(trip) {
+    setEditingTripId(trip.id)
+    setEditTripDate(trip.date)
+    setEditTripBatch(trip.batchNumber)
+    setEditDriverId(trip.driverId)
+    setEditWeighbridgeWeightKg(String(getHaulageTripWeightKg(trip)))
+    setEditLoaderIds([...(trip.loaderIds ?? [])])
+    setTripEditStatus('')
+  }
+
+  function cancelEditingTrip() {
+    setEditingTripId('')
+    setTripEditStatus('')
+  }
+
+  function handleSaveTripEdit(event) {
+    event.preventDefault()
+    if (!canCreateTrip || !editingTripId) {
+      return
+    }
+    const bridge = Number(editWeighbridgeWeightKg)
+    const driver = employees.find((employee) => employee.id === editDriverId)
+    if (!editTripDate || !editTripBatch || !editDriverId || !driver) {
+      setTripEditStatus('Select a trip date, batch, and driver.')
+      return
+    }
+    if (Number.isNaN(bridge) || bridge <= 0) {
+      setTripEditStatus('Enter a valid weighbridge weight.')
+      return
+    }
+    onUpdateTrip(editingTripId, {
+      date: editTripDate,
+      batchNumber: editTripBatch,
+      weighbridgeWeightKg: bridge,
+      driverId: editDriverId,
+      loaderIds: editLoaderIds,
+    })
+    setTripEditStatus('Trip updated.')
+    setEditingTripId('')
+  }
+
   function handleCreateTrip(event) {
     event.preventDefault()
     const bridge = Number(weighbridgeWeightKg)
-    if (!canCreateTrip || !currentUser || !clockedInIds.includes(currentUser.id)) {
+    const driver = employees.find((employee) => employee.id === selectedDriverId)
+    if (!canCreateTrip) {
       return
     }
-    if (!tripDate || !tripBatch || Number.isNaN(bridge) || bridge <= 0) {
+    if (!tripDate || !tripBatch || !selectedDriverId || !driver) {
+      setTripEntryStatus('Select a trip date, batch, and driver.')
+      return
+    }
+    if (!clockedInIds.includes(selectedDriverId)) {
+      setTripEntryStatus('The selected driver must be clocked in at the scanner.')
+      return
+    }
+    if (Number.isNaN(bridge) || bridge <= 0) {
+      setTripEntryStatus('Enter a valid weighbridge weight.')
       return
     }
     onCreateTrip({
       date: tripDate,
       batchNumber: tripBatch,
       weighbridgeWeightKg: bridge,
-      driverId: currentUser.id,
-      driverName: currentUser.name,
+      driverId: driver.id,
+      driverName: driver.name,
+      recordedById: currentUser?.id ?? '',
+      recordedByName: currentUser?.name ?? '',
       loaderIds: selectedLoaderIds,
       loaderNames: selectedLoaderIds
         .map((id) => employees.find((employee) => employee.id === id)?.name)
@@ -7603,6 +7815,7 @@ function HaulagePage({
     })
     setWeighbridgeWeightKg('')
     setSelectedLoaderIds([])
+    setTripEntryStatus('Trip saved.')
   }
 
   function handleMileageSubmit(event) {
@@ -7755,6 +7968,21 @@ function HaulagePage({
             </select>
           </label>
           <label>
+            Driver
+            <select
+              value={selectedDriverId}
+              onChange={(event) => setSelectedDriverId(event.target.value)}
+            >
+              <option value="">Select driver</option>
+              {truckDrivers.map((driver) => (
+                <option key={driver.id} value={driver.id}>
+                  {driver.name}
+                  {clockedInIds.includes(driver.id) ? ' (clocked in)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
             Weighbridge weight (kg)
             <input
               type="number"
@@ -7778,15 +8006,17 @@ function HaulagePage({
               ))}
             </div>
           </label>
-          <button type="submit" disabled={!canCreateTrip || !clockedInIds.includes(currentUser?.id ?? '')}>
+          <button type="submit" disabled={!canCreateTrip}>
             Save Trip
           </button>
         </form>
-        {(!canCreateTrip || !clockedInIds.includes(currentUser?.id ?? '')) && (
-          <div className="placeholder">
-            You must be clocked in and have haulage trip entry permission to create trips.
-          </div>
+        {!canCreateTrip && (
+          <div className="placeholder">You need haulage trip entry permission to create trips.</div>
         )}
+        {canCreateTrip && truckDrivers.length === 0 && (
+          <div className="placeholder">No truck drivers are registered in the employee list.</div>
+        )}
+        {tripEntryStatus ? <p className="inline-hint">{tripEntryStatus}</p> : null}
       </CollapsibleSection>
 
       <CollapsibleSection
@@ -7986,19 +8216,108 @@ function HaulagePage({
                 <th>Number of Loaders</th>
                 <th>Weighbridge weight (kg)</th>
                 <th>Trip Distance (km)</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
             {sortedTripsWithDistance.map((trip) => (
-                <tr key={trip.id}>
-                  <td>{formatDisplayDate(trip.date)}</td>
-                  <td>{trip.tripNumber}</td>
-                  <td>{trip.batchNumber}</td>
-                  <td>{trip.driverName}</td>
-                  <td>{trip.loaderIds.length}</td>
-                  <td>{getHaulageTripWeightKg(trip).toLocaleString()}</td>
-                  <td>{trip.tripDistanceKm.toLocaleString()}</td>
-                </tr>
+                <Fragment key={trip.id}>
+                  <tr>
+                    <td>{formatDisplayDate(trip.date)}</td>
+                    <td>{trip.tripNumber}</td>
+                    <td>{trip.batchNumber}</td>
+                    <td>{trip.driverName}</td>
+                    <td>{trip.loaderIds.length}</td>
+                    <td>{getHaulageTripWeightKg(trip).toLocaleString()}</td>
+                    <td>{trip.tripDistanceKm.toLocaleString()}</td>
+                    <td>
+                      {editingTripId === trip.id ? (
+                        <span>Editing below</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => startEditingTrip(trip)}
+                          disabled={!canCreateTrip}
+                        >
+                          Edit trip
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                  {editingTripId === trip.id && (
+                    <tr>
+                      <td colSpan="8">
+                        <form className="form-grid record-edit-form" onSubmit={handleSaveTripEdit}>
+                          <h4>Edit trip</h4>
+                          <label>
+                            Trip date
+                            <input
+                              type="date"
+                              value={editTripDate}
+                              onChange={(event) => setEditTripDate(event.target.value)}
+                            />
+                          </label>
+                          <label>
+                            Batch
+                            <select
+                              value={editTripBatch}
+                              onChange={(event) => setEditTripBatch(event.target.value)}
+                            >
+                              {availableBatches.map((batch) => (
+                                <option key={batch} value={batch}>
+                                  {batch}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            Driver
+                            <select
+                              value={editDriverId}
+                              onChange={(event) => setEditDriverId(event.target.value)}
+                            >
+                              <option value="">Select driver</option>
+                              {truckDrivers.map((driver) => (
+                                <option key={driver.id} value={driver.id}>
+                                  {driver.name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            Weighbridge weight (kg)
+                            <input
+                              type="number"
+                              min="1"
+                              value={editWeighbridgeWeightKg}
+                              onChange={(event) => setEditWeighbridgeWeightKg(event.target.value)}
+                            />
+                          </label>
+                          <label>
+                            Loaders
+                            <div className="checklist">
+                              {allLoaders.map((loader) => (
+                                <label key={loader.id} className="check-item">
+                                  <span>{loader.name}</span>
+                                  <input
+                                    type="checkbox"
+                                    checked={editLoaderIds.includes(loader.id)}
+                                    onChange={() => handleEditLoaderToggle(loader.id)}
+                                  />
+                                </label>
+                              ))}
+                            </div>
+                          </label>
+                          <button type="submit">Save changes</button>
+                          <button type="button" className="button-quiet" onClick={cancelEditingTrip}>
+                            Cancel
+                          </button>
+                        </form>
+                        {tripEditStatus ? <p className="inline-hint">{tripEditStatus}</p> : null}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -8732,10 +9051,46 @@ function App() {
     const nextTrip = {
       id: `TRIP-${Date.now()}`,
       ...input,
+      batchNumber: normalizeBatchNumber(input.batchNumber),
       tripNumber: sameDateTrips.length + 1,
       tripDistanceKm: 45,
     }
     setHaulageTrips((prev) => [nextTrip, ...prev])
+  }
+
+  function handleUpdateHaulageTrip(tripId, updates) {
+    setHaulageTrips((prev) => {
+      const existing = prev.find((trip) => trip.id === tripId)
+      if (!existing) {
+        return prev
+      }
+
+      const driver = employees.find((employee) => employee.id === updates.driverId)
+      let next = prev.map((trip) => {
+        if (trip.id !== tripId) {
+          return trip
+        }
+        return {
+          ...trip,
+          date: updates.date,
+          batchNumber: normalizeBatchNumber(updates.batchNumber),
+          weighbridgeWeightKg: updates.weighbridgeWeightKg,
+          driverId: updates.driverId,
+          driverName: driver?.name ?? trip.driverName,
+          loaderIds: updates.loaderIds,
+          loaderNames: updates.loaderIds
+            .map((id) => employees.find((employee) => employee.id === id)?.name)
+            .filter(Boolean),
+        }
+      })
+
+      if (existing.date !== updates.date) {
+        next = renumberHaulageTripsForDate(next, existing.date)
+        next = renumberHaulageTripsForDate(next, updates.date)
+      }
+
+      return next
+    })
   }
 
   function handleSetMileageForDate(date, mileage) {
@@ -9197,6 +9552,7 @@ function App() {
                 clockedInIds={clockedInIds}
                 haulageTrips={haulageTrips}
                 onCreateTrip={handleCreateHaulageTrip}
+                onUpdateTrip={handleUpdateHaulageTrip}
                 mileageByDate={mileageByDate}
                 onSetMileageForDate={handleSetMileageForDate}
                 fuelEntries={fuelEntries}
