@@ -7366,6 +7366,16 @@ function StockPage({
   )
 }
 
+function getHaulageTripWeightKg(trip) {
+  if (typeof trip?.weighbridgeWeightKg === 'number' && trip.weighbridgeWeightKg > 0) {
+    return trip.weighbridgeWeightKg
+  }
+  if (typeof trip?.officialWeightKg === 'number' && trip.officialWeightKg > 0) {
+    return trip.officialWeightKg
+  }
+  return 0
+}
+
 function HaulagePage({
   currentUser,
   currentUserDataEntryPermissions,
@@ -7399,7 +7409,6 @@ function HaulagePage({
   const [showTripRecords, setShowTripRecords] = useState(false)
   const [tripDate, setTripDate] = useState(dateTo)
   const [tripBatch, setTripBatch] = useState(availableBatches[0] ?? '')
-  const [officialWeightKg, setOfficialWeightKg] = useState('')
   const [weighbridgeWeightKg, setWeighbridgeWeightKg] = useState('')
   const [selectedLoaderIds, setSelectedLoaderIds] = useState([])
   const [mileageDate, setMileageDate] = useState(dateTo)
@@ -7445,10 +7454,13 @@ function HaulagePage({
   const sortedMaintenanceEntries = [...filteredMaintenanceEntries].sort((a, b) =>
     b.date.localeCompare(a.date),
   )
-  const totalOfficialWeight = sortedTripsWithDistance.reduce((sum, trip) => sum + trip.officialWeightKg, 0)
+  const totalTripWeight = sortedTripsWithDistance.reduce(
+    (sum, trip) => sum + getHaulageTripWeightKg(trip),
+    0,
+  )
   const totalDistance = sortedTripsWithDistance.reduce((sum, trip) => sum + trip.tripDistanceKm, 0)
   const avgWeightPerTrip =
-    sortedTripsWithDistance.length > 0 ? Math.round(totalOfficialWeight / sortedTripsWithDistance.length) : 0
+    sortedTripsWithDistance.length > 0 ? Math.round(totalTripWeight / sortedTripsWithDistance.length) : 0
   const avgLoadersPerTrip =
     sortedTripsWithDistance.length > 0
       ? Number(
@@ -7474,19 +7486,17 @@ function HaulagePage({
 
   function handleCreateTrip(event) {
     event.preventDefault()
-    const official = Number(officialWeightKg)
     const bridge = Number(weighbridgeWeightKg)
     if (!canCreateTrip || !currentUser || !clockedInIds.includes(currentUser.id)) {
       return
     }
-    if (!tripDate || !tripBatch || Number.isNaN(official) || official <= 0) {
+    if (!tripDate || !tripBatch || Number.isNaN(bridge) || bridge <= 0) {
       return
     }
     onCreateTrip({
       date: tripDate,
       batchNumber: tripBatch,
-      officialWeightKg: official,
-      weighbridgeWeightKg: Number.isNaN(bridge) ? null : bridge,
+      weighbridgeWeightKg: bridge,
       driverId: currentUser.id,
       driverName: currentUser.name,
       loaderIds: selectedLoaderIds,
@@ -7494,7 +7504,6 @@ function HaulagePage({
         .map((id) => employees.find((employee) => employee.id === id)?.name)
         .filter(Boolean),
     })
-    setOfficialWeightKg('')
     setWeighbridgeWeightKg('')
     setSelectedLoaderIds([])
   }
@@ -7548,8 +7557,7 @@ function HaulagePage({
     <section className="panel">
       <h2>Haulage</h2>
       <p>
-        Capture trip-level loaded leaf mass from supervisor records, sanity check with weighbridge
-        mass, and track distance per day.
+        Record haulage trips using weighbridge weight, assign loaders, and track distance per day.
       </p>
 
       <h3>Trip Filters</h3>
@@ -7595,7 +7603,7 @@ function HaulagePage({
         </article>
         <article className="card">
           <h3>Total Leaf Mass</h3>
-          <p>{totalOfficialWeight.toLocaleString()} kg</p>
+          <p>{totalTripWeight.toLocaleString()} kg</p>
         </article>
         <article className="card">
           <h3>Average Mass per Trip</h3>
@@ -7650,19 +7658,10 @@ function HaulagePage({
             </select>
           </label>
           <label>
-            Official Weight (kg)
+            Weighbridge weight (kg)
             <input
               type="number"
               min="1"
-              value={officialWeightKg}
-              onChange={(event) => setOfficialWeightKg(event.target.value)}
-            />
-          </label>
-          <label>
-            Weighbridge Weight (kg) - sanity check
-            <input
-              type="number"
-              min="0"
               value={weighbridgeWeightKg}
               onChange={(event) => setWeighbridgeWeightKg(event.target.value)}
             />
@@ -7888,8 +7887,7 @@ function HaulagePage({
                 <th>Batch</th>
                 <th>Driver</th>
                 <th>Number of Loaders</th>
-                <th>Weight of Leaves (kg)</th>
-                <th>Weighbridge (kg)</th>
+                <th>Weighbridge weight (kg)</th>
                 <th>Trip Distance (km)</th>
               </tr>
             </thead>
@@ -7901,8 +7899,7 @@ function HaulagePage({
                   <td>{trip.batchNumber}</td>
                   <td>{trip.driverName}</td>
                   <td>{trip.loaderIds.length}</td>
-                  <td>{trip.officialWeightKg.toLocaleString()}</td>
-                  <td>{trip.weighbridgeWeightKg ?? 'NA'}</td>
+                  <td>{getHaulageTripWeightKg(trip).toLocaleString()}</td>
                   <td>{trip.tripDistanceKm.toLocaleString()}</td>
                 </tr>
               ))}
