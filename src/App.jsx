@@ -598,7 +598,34 @@ function getInvoiceDescriptionFromProductCode(productCode) {
 }
 
 const FIRST_INVOICE_NUMBER = 1096
-const FIRST_PROFORMA_SEQUENCE = 1088
+
+function isInvoiceDocumentEditable(document) {
+  return document?.status === 'draft'
+}
+
+function getInvoiceDocumentStatusLabel(document) {
+  if (document?.status === 'converted') {
+    return 'Converted to invoice'
+  }
+  if (document?.status === 'draft') {
+    return 'Draft'
+  }
+  if (document?.status === 'finalized' || document?.status === 'confirmed') {
+    return 'Finalized'
+  }
+  return document?.status ?? 'Unknown'
+}
+
+function mapDocumentItemsToLineItems(items) {
+  return items.map((item, index) => ({
+    id: `LINE-${Date.now()}-${index + 1}`,
+    product: item.product,
+    customDescription: item.product === 'CUS' ? item.description : '',
+    quantityKg: String(item.quantityKg),
+    rate: String(item.rate),
+    vatEnabled: Boolean(item.vatEnabled),
+  }))
+}
 
 const INVOICE_BANK_DETAILS_BY_CURRENCY = {
   KES: {
@@ -876,12 +903,28 @@ function CustomersPage({ customers, onAddCustomer }) {
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [companyRegistration, setCompanyRegistration] = useState('')
+  const [submitStatus, setSubmitStatus] = useState('')
 
   function handleSubmit(event) {
     event.preventDefault()
-    if (!name.trim() || !addressLine1.trim() || !city.trim() || !country.trim()) {
+    const missingFields = []
+    if (!name.trim()) {
+      missingFields.push('Customer Name')
+    }
+    if (!addressLine1.trim()) {
+      missingFields.push('Customer Address Line 1')
+    }
+    if (!city.trim()) {
+      missingFields.push('City')
+    }
+    if (!country.trim()) {
+      missingFields.push('Country')
+    }
+    if (missingFields.length > 0) {
+      setSubmitStatus(`Please fill in the required fields: ${missingFields.join(', ')}.`)
       return
     }
+    const addedName = name.trim()
     onAddCustomer({
       name: name.trim(),
       addressLine1: addressLine1.trim(),
@@ -902,6 +945,7 @@ function CustomersPage({ customers, onAddCustomer }) {
     setEmail('')
     setPhone('')
     setCompanyRegistration('')
+    setSubmitStatus(`Customer "${addedName}" added successfully.`)
   }
 
   return (
@@ -912,32 +956,48 @@ function CustomersPage({ customers, onAddCustomer }) {
       <CollapsibleSection title="Add Customer" isOpen onToggle={() => {}}>
         <form className="stacked-form" onSubmit={handleSubmit}>
           <label>
-            Customer Name
-            <input value={name} onChange={(event) => setName(event.target.value)} />
+            Customer Name (required)
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              required
+            />
           </label>
           <label>
-            Customer Address Line 1
-            <input value={addressLine1} onChange={(event) => setAddressLine1(event.target.value)} />
+            Customer Address Line 1 (required)
+            <input
+              value={addressLine1}
+              onChange={(event) => setAddressLine1(event.target.value)}
+              required
+            />
           </label>
           <label>
             Customer Address Line 2
             <input value={addressLine2} onChange={(event) => setAddressLine2(event.target.value)} />
           </label>
           <label>
-            City
-            <input value={city} onChange={(event) => setCity(event.target.value)} />
+            City (required)
+            <input
+              value={city}
+              onChange={(event) => setCity(event.target.value)}
+              required
+            />
           </label>
           <label>
             Post code
             <input value={postCode} onChange={(event) => setPostCode(event.target.value)} />
           </label>
           <label>
-            Country
-            <input value={country} onChange={(event) => setCountry(event.target.value)} />
+            Country (required)
+            <input
+              value={country}
+              onChange={(event) => setCountry(event.target.value)}
+              required
+            />
           </label>
           <label>
             Email address
-            <input value={email} onChange={(event) => setEmail(event.target.value)} />
+            <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
           </label>
           <label>
             Phone
@@ -952,6 +1012,11 @@ function CustomersPage({ customers, onAddCustomer }) {
           </label>
           <button type="submit">Add Customer</button>
         </form>
+        {submitStatus ? <div className="placeholder">{submitStatus}</div> : null}
+        <div className="placeholder">
+          Required: customer name, address line 1, city, and country. Email, phone, post code, address
+          line 2, and company registration are optional.
+        </div>
       </CollapsibleSection>
 
       <h3>Customer Register</h3>
@@ -1000,6 +1065,8 @@ function InvoicingPage({
   customers,
   invoiceDocuments,
   onCreateDocument,
+  onUpdateDocument,
+  onFinalizeDocument,
   onConvertToInvoice,
 }) {
   const [documentType, setDocumentType] = useState('proforma')
@@ -1013,6 +1080,8 @@ function InvoicingPage({
   const [paymentTerms, setPaymentTerms] = useState('30% deposit, balance upon arrival at port')
   const [shippingTerms, setShippingTerms] = useState('CIF Nansha')
   const [selectedDocumentId, setSelectedDocumentId] = useState('')
+  const [editingDocumentId, setEditingDocumentId] = useState('')
+  const [formStatus, setFormStatus] = useState('')
 
   const sortedDocuments = [...invoiceDocuments].sort((a, b) =>
     a.createdAt === b.createdAt
@@ -1102,33 +1171,49 @@ function InvoicingPage({
     )
   }
 
-  function handleCreateDocument(event) {
-    event.preventDefault()
-    const hasInvalidLine = computedLineItems.some((item) => {
-      const quantityValue = Number(item.quantityKg)
-      const rateValue = Number(item.rate)
-      return (
-        !item.product.trim() ||
-        !item.description.trim() ||
-        Number.isNaN(quantityValue) ||
-        Number.isNaN(rateValue) ||
-        quantityValue <= 0 ||
-        rateValue <= 0
-      )
-    })
-    if (
-      !selectedCustomer ||
-      !invoiceDate ||
-      computedLineItems.length === 0 ||
-      hasInvalidLine
-    ) {
+  function resetCreateForm() {
+    setEditingDocumentId('')
+    setDocumentType('proforma')
+    setInvoiceDate(new Date().toISOString().slice(0, 10))
+    setOrigin('Kenya')
+    setCurrency('USD')
+    setSelectedCustomerId(customers[0]?.id ?? '')
+    setLineItems([])
+    setHsCode('53050090')
+    setPaymentTerms('30% deposit, balance upon arrival at port')
+    setShippingTerms('CIF Nansha')
+    setFormStatus('')
+  }
+
+  function startEditingDocument(document) {
+    if (!isInvoiceDocumentEditable(document)) {
+      setFormStatus('Only draft documents can be edited.')
       return
     }
-    const nextDocument = onCreateDocument({
+    const matchedCustomer =
+      customers.find((customer) => customer.id === document.customerId) ??
+      customers.find((customer) => customer.name === document.customerName)
+    setEditingDocumentId(document.id)
+    setDocumentType(document.documentType)
+    setInvoiceDate(document.invoiceDate)
+    setOrigin(document.origin)
+    setCurrency(document.currency ?? 'USD')
+    setSelectedCustomerId(matchedCustomer?.id ?? '')
+    setLineItems(mapDocumentItemsToLineItems(document.items))
+    setHsCode(document.hsCode)
+    setPaymentTerms(document.paymentTerms)
+    setShippingTerms(document.shippingTerms)
+    setFormStatus(`Editing ${document.documentType === 'proforma' ? 'proforma' : 'invoice'} ${document.documentNumber}.`)
+    setSelectedDocumentId(document.id)
+  }
+
+  function buildDocumentInput() {
+    return {
       documentType,
       invoiceDate,
       origin,
       currency,
+      customerId: selectedCustomer?.id ?? '',
       customerName: selectedCustomer.name,
       customerAddress: selectedCustomerAddress,
       customerRegistration: selectedCustomer.companyRegistration,
@@ -1146,8 +1231,69 @@ function InvoicingPage({
       hsCode: hsCode.trim(),
       paymentTerms: paymentTerms.trim(),
       shippingTerms: shippingTerms.trim(),
+    }
+  }
+
+  function handleCreateDocument(event) {
+    event.preventDefault()
+    const hasInvalidLine = computedLineItems.some((item) => {
+      const quantityValue = Number(item.quantityKg)
+      const rateValue = Number(item.rate)
+      return (
+        !item.product.trim() ||
+        !item.description.trim() ||
+        Number.isNaN(quantityValue) ||
+        Number.isNaN(rateValue) ||
+        quantityValue <= 0 ||
+        rateValue <= 0
+      )
     })
+    if (!selectedCustomer) {
+      setFormStatus('Select a customer before saving the document.')
+      return
+    }
+    if (!invoiceDate || computedLineItems.length === 0 || hasInvalidLine) {
+      setFormStatus('Complete all product lines with valid quantity and price before saving.')
+      return
+    }
+    if (editingDocumentId) {
+      const updated = onUpdateDocument(editingDocumentId, buildDocumentInput())
+      if (!updated) {
+        setFormStatus('This document could not be updated. Only draft documents can be edited.')
+        return
+      }
+      setSelectedDocumentId(updated.id)
+      setEditingDocumentId('')
+      setFormStatus(`${updated.documentType === 'proforma' ? 'Proforma' : 'Invoice'} ${updated.documentNumber} updated.`)
+      return
+    }
+    const nextDocument = onCreateDocument(buildDocumentInput())
     setSelectedDocumentId(nextDocument.id)
+    setFormStatus(
+      `${nextDocument.documentType === 'proforma' ? 'Proforma' : 'Invoice'} ${nextDocument.documentNumber} created as draft.`,
+    )
+  }
+
+  function handleFinalizeDocument(documentId) {
+    const result = onFinalizeDocument(documentId)
+    if (!result.ok) {
+      setFormStatus(result.message)
+      return
+    }
+    if (editingDocumentId === documentId) {
+      resetCreateForm()
+    }
+    setFormStatus(result.message)
+  }
+
+  function handleConvertDocument(documentId) {
+    const result = onConvertToInvoice(documentId)
+    if (!result.ok) {
+      setFormStatus(result.message)
+      return
+    }
+    setSelectedDocumentId(result.document.id)
+    setFormStatus(result.message)
   }
 
   async function handlePrintDocumentPdf() {
@@ -1348,11 +1494,19 @@ function InvoicingPage({
         confirmed.
       </p>
 
-      <CollapsibleSection title="Create Document" isOpen onToggle={() => {}}>
+      <CollapsibleSection
+        title={editingDocumentId ? 'Edit Document' : 'Create Document'}
+        isOpen
+        onToggle={() => {}}
+      >
         <form className="form-grid" onSubmit={handleCreateDocument}>
           <label>
             Document Type
-            <select value={documentType} onChange={(event) => setDocumentType(event.target.value)}>
+            <select
+              value={documentType}
+              onChange={(event) => setDocumentType(event.target.value)}
+              disabled={Boolean(editingDocumentId)}
+            >
               <option value="proforma">Proforma Invoice</option>
               <option value="invoice">Invoice</option>
             </select>
@@ -1404,9 +1558,22 @@ function InvoicingPage({
             <input value={shippingTerms} onChange={(event) => setShippingTerms(event.target.value)} />
           </label>
           <button type="submit">
-            Create {documentType === 'proforma' ? 'Proforma Invoice' : 'Invoice'}
+            {editingDocumentId
+              ? 'Save Changes'
+              : `Create ${documentType === 'proforma' ? 'Proforma Invoice' : 'Invoice'}`}
           </button>
+          {editingDocumentId ? (
+            <button type="button" className="secondary-button" onClick={resetCreateForm}>
+              Cancel Edit
+            </button>
+          ) : null}
         </form>
+        {formStatus ? <div className="placeholder">{formStatus}</div> : null}
+        {!editingDocumentId ? (
+          <div className="placeholder">
+            New documents are saved as drafts. Use Edit to change them, then Finalize when ready.
+          </div>
+        ) : null}
         <button type="button" onClick={handleAddProductLine}>
           Add Product
         </button>
@@ -1549,16 +1716,26 @@ function InvoicingPage({
                 <td>
                   {doc.currency} {doc.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </td>
-                <td>{doc.status}</td>
+                <td>{getInvoiceDocumentStatusLabel(doc)}</td>
                 <td>
                   <button type="button" onClick={() => setSelectedDocumentId(doc.id)}>
                     View
                   </button>
-                  {doc.documentType === 'proforma' && (
-                    <button type="button" onClick={() => onConvertToInvoice(doc.id)}>
-                      Convert
+                  {isInvoiceDocumentEditable(doc) ? (
+                    <button type="button" onClick={() => startEditingDocument(doc)}>
+                      Edit
                     </button>
-                  )}
+                  ) : null}
+                  {isInvoiceDocumentEditable(doc) ? (
+                    <button type="button" onClick={() => handleFinalizeDocument(doc.id)}>
+                      Finalize
+                    </button>
+                  ) : null}
+                  {doc.documentType === 'proforma' && doc.status !== 'converted' ? (
+                    <button type="button" onClick={() => handleConvertDocument(doc.id)}>
+                      Convert to Invoice
+                    </button>
+                  ) : null}
                 </td>
               </tr>
             ))}
@@ -1577,6 +1754,21 @@ function InvoicingPage({
             <button type="button" onClick={handlePrintDocumentPdf}>
               Print Document
             </button>
+            {isInvoiceDocumentEditable(selectedDocument) ? (
+              <button type="button" onClick={() => startEditingDocument(selectedDocument)}>
+                Edit
+              </button>
+            ) : null}
+            {isInvoiceDocumentEditable(selectedDocument) ? (
+              <button type="button" onClick={() => handleFinalizeDocument(selectedDocument.id)}>
+                Finalize
+              </button>
+            ) : null}
+            {selectedDocument.documentType === 'proforma' && selectedDocument.status !== 'converted' ? (
+              <button type="button" onClick={() => handleConvertDocument(selectedDocument.id)}>
+                Convert to Invoice
+              </button>
+            ) : null}
           </div>
           <article className="invoice-sheet">
             <header className="invoice-top">
@@ -9363,45 +9555,119 @@ function App() {
       .filter((value) => !Number.isNaN(value))
     const nextSequence =
       existingNumbers.length > 0
-        ? Math.max(...existingNumbers) + 1
-        : isProforma
-          ? FIRST_PROFORMA_SEQUENCE
-          : FIRST_INVOICE_NUMBER
+        ? Math.max(FIRST_INVOICE_NUMBER, Math.max(...existingNumbers) + 1)
+        : FIRST_INVOICE_NUMBER
     const documentNumber = isProforma ? `${prefix}-${nextSequence}` : String(nextSequence)
     const nextDocument = {
       id: `${prefix}-${Date.now()}`,
       ...input,
       documentNumber,
       totalAmount: Number(input.items.reduce((sum, item) => sum + item.amount, 0).toFixed(2)),
-      status: isProforma ? 'draft' : 'confirmed',
+      status: 'draft',
       createdAt: new Date().toISOString(),
       sourceProformaId: null,
+      finalizedAt: null,
     }
     setInvoiceDocuments((prev) => [nextDocument, ...prev])
     return nextDocument
   }
 
+  function handleUpdateInvoiceDocument(documentId, input) {
+    let updatedDocument = null
+    setInvoiceDocuments((prev) =>
+      prev.map((document) => {
+        if (document.id !== documentId) {
+          return document
+        }
+        if (!isInvoiceDocumentEditable(document)) {
+          return document
+        }
+        updatedDocument = {
+          ...document,
+          ...input,
+          documentType: document.documentType,
+          documentNumber: document.documentNumber,
+          status: document.status,
+          createdAt: document.createdAt,
+          sourceProformaId: document.sourceProformaId,
+          totalAmount: Number(input.items.reduce((sum, item) => sum + item.amount, 0).toFixed(2)),
+        }
+        return updatedDocument
+      }),
+    )
+    return updatedDocument
+  }
+
+  function handleFinalizeInvoiceDocument(documentId) {
+    const document = invoiceDocuments.find((item) => item.id === documentId)
+    if (!document) {
+      return { ok: false, message: 'Document could not be found.' }
+    }
+    if (!isInvoiceDocumentEditable(document)) {
+      return { ok: false, message: 'Only draft documents can be finalized.' }
+    }
+    setInvoiceDocuments((prev) =>
+      prev.map((item) =>
+        item.id === documentId
+          ? {
+              ...item,
+              status: 'finalized',
+              finalizedAt: new Date().toISOString(),
+            }
+          : item,
+      ),
+    )
+    const label = document.documentType === 'proforma' ? 'Proforma' : 'Invoice'
+    return {
+      ok: true,
+      message: `${label} ${document.documentNumber} finalized. It can no longer be edited.`,
+    }
+  }
+
   function handleConvertProformaToInvoice(documentId) {
     const source = invoiceDocuments.find((item) => item.id === documentId)
     if (!source || source.documentType !== 'proforma') {
-      return
+      return { ok: false, message: 'Only proforma invoices can be converted.' }
+    }
+    if (source.status === 'converted') {
+      return { ok: false, message: 'This proforma has already been converted to an invoice.' }
     }
     const existingNumbers = invoiceDocuments
       .filter((item) => item.documentType === 'invoice')
       .map((item) => Number(String(item.documentNumber).replace(/[^\d]/g, '')))
       .filter((value) => !Number.isNaN(value))
     const nextSequence =
-      existingNumbers.length > 0 ? Math.max(...existingNumbers) + 1 : FIRST_INVOICE_NUMBER
+      existingNumbers.length > 0
+        ? Math.max(FIRST_INVOICE_NUMBER, Math.max(...existingNumbers) + 1)
+        : FIRST_INVOICE_NUMBER
     const converted = {
       ...source,
       id: `INV-${Date.now()}`,
       documentType: 'invoice',
       documentNumber: String(nextSequence),
-      status: 'confirmed',
+      status: 'draft',
       createdAt: new Date().toISOString(),
       sourceProformaId: source.id,
+      finalizedAt: null,
     }
-    setInvoiceDocuments((prev) => [converted, ...prev])
+    setInvoiceDocuments((prev) => [
+      converted,
+      ...prev.map((item) =>
+        item.id === documentId
+          ? {
+              ...item,
+              status: 'converted',
+              convertedInvoiceId: converted.id,
+              finalizedAt: item.finalizedAt ?? new Date().toISOString(),
+            }
+          : item,
+      ),
+    ])
+    return {
+      ok: true,
+      message: `Invoice ${converted.documentNumber} created from proforma ${source.documentNumber}. Review and finalize it when ready.`,
+      document: converted,
+    }
   }
 
   function handleCreateDecorticationAssignment(input) {
@@ -9802,6 +10068,8 @@ function App() {
                 customers={customers}
                 invoiceDocuments={invoiceDocuments}
                 onCreateDocument={handleCreateInvoiceDocument}
+                onUpdateDocument={handleUpdateInvoiceDocument}
+                onFinalizeDocument={handleFinalizeInvoiceDocument}
                 onConvertToInvoice={handleConvertProformaToInvoice}
               />
             }
