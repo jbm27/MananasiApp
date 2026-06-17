@@ -603,6 +603,72 @@ function buildBarcodeBits(value) {
   return bits
 }
 
+function getBaleSerialFromCode(baleCode) {
+  const serial = Number(String(baleCode ?? '').split('-').slice(-1)[0])
+  return Number.isNaN(serial) ? 0 : serial
+}
+
+function printBaleLabelsPdf(records, filename) {
+  if (!Array.isArray(records) || records.length === 0) {
+    return 0
+  }
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+  const pageWidth = pdf.internal.pageSize.getWidth()
+  const pageHeight = pdf.internal.pageSize.getHeight()
+  const marginX = 10
+  const marginY = 10
+  const gapX = 6
+  const gapY = 6
+  const columns = 2
+  const labelWidth = (pageWidth - marginX * 2 - gapX) / columns
+  const labelHeight = 52
+  const rowsPerPage = Math.floor((pageHeight - marginY * 2 + gapY) / (labelHeight + gapY))
+  const maxPerPage = rowsPerPage * columns
+
+  records.forEach((record, index) => {
+    if (index > 0 && index % maxPerPage === 0) {
+      pdf.addPage()
+    }
+    const pageIndex = index % maxPerPage
+    const row = Math.floor(pageIndex / columns)
+    const col = pageIndex % columns
+    const labelX = marginX + col * (labelWidth + gapX)
+    const labelY = marginY + row * (labelHeight + gapY)
+
+    pdf.setDrawColor(0)
+    pdf.setLineWidth(0.6)
+    pdf.rect(labelX, labelY, labelWidth, labelHeight)
+
+    const bits = buildBarcodeBits(record.baleCode)
+    const barcodeAreaWidth = labelWidth - 12
+    const barcodeAreaHeight = 24
+    const barWidth = barcodeAreaWidth / bits.length
+    const barcodeStartX = labelX + 6
+    const barcodeStartY = labelY + 10
+
+    pdf.setFillColor(0, 0, 0)
+    bits.split('').forEach((bit, bitIndex) => {
+      if (bit === '1') {
+        pdf.rect(
+          barcodeStartX + bitIndex * barWidth,
+          barcodeStartY,
+          Math.max(0.2, barWidth),
+          barcodeAreaHeight,
+          'F',
+        )
+      }
+    })
+
+    pdf.setTextColor(0, 0, 0)
+    pdf.setFont('helvetica', 'bold')
+    pdf.setFontSize(11)
+    pdf.text(record.baleCode, labelX + labelWidth / 2, labelY + 42, { align: 'center' })
+  })
+
+  pdf.save(filename)
+  return records.length
+}
+
 function buildDecorticationAssignmentsFromRecords(decorticationRecords) {
   const assignmentMap = {}
   decorticationRecords.forEach((record) => {
@@ -6233,60 +6299,7 @@ function BalingPage({
       setEntryStatus('Select at least one bale before printing labels.')
       return
     }
-    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-    const pageWidth = pdf.internal.pageSize.getWidth()
-    const pageHeight = pdf.internal.pageSize.getHeight()
-    const marginX = 10
-    const marginY = 10
-    const gapX = 6
-    const gapY = 6
-    const columns = 2
-    const labelWidth = (pageWidth - marginX * 2 - gapX) / columns
-    const labelHeight = 52
-    const rowsPerPage = Math.floor((pageHeight - marginY * 2 + gapY) / (labelHeight + gapY))
-    const maxPerPage = rowsPerPage * columns
-
-    selectedRecords.forEach((record, index) => {
-      if (index > 0 && index % maxPerPage === 0) {
-        pdf.addPage()
-      }
-      const pageIndex = index % maxPerPage
-      const row = Math.floor(pageIndex / columns)
-      const col = pageIndex % columns
-      const labelX = marginX + col * (labelWidth + gapX)
-      const labelY = marginY + row * (labelHeight + gapY)
-
-      pdf.setDrawColor(0)
-      pdf.setLineWidth(0.6)
-      pdf.rect(labelX, labelY, labelWidth, labelHeight)
-
-      const bits = buildBarcodeBits(record.baleCode)
-      const barcodeAreaWidth = labelWidth - 12
-      const barcodeAreaHeight = 24
-      const barWidth = barcodeAreaWidth / bits.length
-      const barcodeStartX = labelX + 6
-      const barcodeStartY = labelY + 10
-
-      pdf.setFillColor(0, 0, 0)
-      bits.split('').forEach((bit, bitIndex) => {
-        if (bit === '1') {
-          pdf.rect(
-            barcodeStartX + bitIndex * barWidth,
-            barcodeStartY,
-            Math.max(0.2, barWidth),
-            barcodeAreaHeight,
-            'F',
-          )
-        }
-      })
-
-      pdf.setTextColor(0, 0, 0)
-      pdf.setFont('helvetica', 'bold')
-      pdf.setFontSize(11)
-      pdf.text(record.baleCode, labelX + labelWidth / 2, labelY + 42, { align: 'center' })
-    })
-
-    pdf.save(`bale-labels-${new Date().toISOString().slice(0, 10)}.pdf`)
+    printBaleLabelsPdf(selectedRecords, `bale-labels-${new Date().toISOString().slice(0, 10)}.pdf`)
   }
 
   return (
@@ -6992,6 +7005,8 @@ function StockPage({
   const [showStockInwardMovements, setShowStockInwardMovements] = useState(false)
   const [showBaleInventory, setShowBaleInventory] = useState(false)
   const [showSilageInventory, setShowSilageInventory] = useState(false)
+  const [baleLabelRanges, setBaleLabelRanges] = useState({})
+  const [baleLabelStatus, setBaleLabelStatus] = useState('')
   const showAbsoluteStock = selectedBatchFilter === 'absolute'
   const filteredDryingRecords =
     showAbsoluteStock
@@ -7147,6 +7162,48 @@ function StockPage({
       return map
     }, {}),
   ).sort((a, b) => b.baleCount - a.baleCount)
+
+  function updateBaleLabelRange(baleSeriesCode, field, value) {
+    setBaleLabelRanges((prev) => ({
+      ...prev,
+      [baleSeriesCode]: {
+        ...(prev[baleSeriesCode] ?? {}),
+        [field]: value,
+      },
+    }))
+  }
+
+  function handlePrintBaleSeriesLabels(baleSeriesCode) {
+    const range = baleLabelRanges[baleSeriesCode] ?? {}
+    const start = Number(range.start)
+    const end = Number(range.end)
+    if (Number.isNaN(start) || Number.isNaN(end) || start < 1 || end < start) {
+      setBaleLabelStatus('Enter a valid start and end bale number (start must be less than or equal to end).')
+      return
+    }
+
+    const records = filteredBalingRecords
+      .filter((record) => record.baleSeriesCode === baleSeriesCode)
+      .filter((record) => {
+        const serial = getBaleSerialFromCode(record.baleCode)
+        return serial >= start && serial <= end
+      })
+      .sort((a, b) => getBaleSerialFromCode(a.baleCode) - getBaleSerialFromCode(b.baleCode))
+
+    if (records.length === 0) {
+      setBaleLabelStatus(`No bales found in ${baleSeriesCode} for numbers ${start} to ${end}.`)
+      return
+    }
+
+    printBaleLabelsPdf(
+      records,
+      `bale-labels-${baleSeriesCode}-${start}-${end}.pdf`,
+    )
+    setBaleLabelStatus(
+      `Generated ${records.length} label(s) for ${baleSeriesCode} (bales ${start} to ${end}).`,
+    )
+  }
+
   const silageInventoryRows = Object.values(
     filteredSilageRecords.reduce((map, item) => {
       const bagSeriesCode = `${normalizeBatchNumber(item.batchNumber)}-${String(item.bagCode).split('-')[2]}-${Math.round(item.massKg)}-SLG`
@@ -7296,6 +7353,10 @@ function StockPage({
         isOpen={showBaleInventory}
         onToggle={() => setShowBaleInventory((prev) => !prev)}
       >
+        <p className="inline-hint">
+          Enter the first and last bale number in a series to print labels only for that range (for
+          example, 96 and 100 to replace the last five labels).
+        </p>
         <div className="table-wrap">
           <table>
             <thead>
@@ -7305,6 +7366,9 @@ function StockPage({
                 <th>Source Stock Code</th>
                 <th>Bale Weight (kg)</th>
                 <th>Quantity of Bales</th>
+                <th>Start bale #</th>
+                <th>End bale #</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -7315,16 +7379,48 @@ function StockPage({
                   <td>{row.sourceStockCode}</td>
                   <td>{row.baleWeightKg}</td>
                   <td>{row.baleCount}</td>
+                  <td>
+                    <input
+                      type="number"
+                      min="1"
+                      className="table-inline-input"
+                      value={baleLabelRanges[row.baleSeriesCode]?.start ?? ''}
+                      onChange={(event) =>
+                        updateBaleLabelRange(row.baleSeriesCode, 'start', event.target.value)
+                      }
+                      placeholder="1"
+                      aria-label={`Start bale number for ${row.baleSeriesCode}`}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      min="1"
+                      className="table-inline-input"
+                      value={baleLabelRanges[row.baleSeriesCode]?.end ?? ''}
+                      onChange={(event) =>
+                        updateBaleLabelRange(row.baleSeriesCode, 'end', event.target.value)
+                      }
+                      placeholder={String(row.baleCount)}
+                      aria-label={`End bale number for ${row.baleSeriesCode}`}
+                    />
+                  </td>
+                  <td>
+                    <button type="button" onClick={() => handlePrintBaleSeriesLabels(row.baleSeriesCode)}>
+                      Print labels
+                    </button>
+                  </td>
                 </tr>
               ))}
               {baleInventoryRows.length === 0 && (
                 <tr>
-                  <td colSpan="5">No bale inventory records for the current filter.</td>
+                  <td colSpan="8">No bale inventory records for the current filter.</td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
+        {baleLabelStatus ? <p className="inline-hint">{baleLabelStatus}</p> : null}
       </CollapsibleSection>
 
       <CollapsibleSection

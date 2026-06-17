@@ -934,6 +934,11 @@ th {
   background: #eff6ff;
 }
 
+.table-inline-input {
+  width: 5.5rem;
+  padding: 0.35rem 0.5rem;
+}
+
 .payroll-section-approval {
   display: flex;
   flex-wrap: wrap;
