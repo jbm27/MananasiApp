@@ -6230,7 +6230,6 @@ function BalingPage({
   availableBatches,
 }) {
   const [showBaleEntry, setShowBaleEntry] = useState(false)
-  const [showBaleRecords, setShowBaleRecords] = useState(false)
   const [showAttendanceSummary, setShowAttendanceSummary] = useState(false)
   const [balingDate, setBalingDate] = useState(dateTo)
   const [sourceStockCode, setSourceStockCode] = useState('')
@@ -6240,7 +6239,6 @@ function BalingPage({
   const [entryStatus, setEntryStatus] = useState('')
   const [lastCreatedBaleCode, setLastCreatedBaleCode] = useState('')
   const [attendanceViewingEmployeeId, setAttendanceViewingEmployeeId] = useState('')
-  const [selectedBaleIds, setSelectedBaleIds] = useState([])
 
   const canManageBaling = currentUserDataEntryPermissions.has('baling-entry')
   const canViewBaling = canManageBaling || currentUser?.role === 'baler'
@@ -6255,24 +6253,11 @@ function BalingPage({
       : availableLooseStockOptions.filter(
           (item) => normalizeBatchNumber(item.batchNumber) === selectedBatchFilter,
         )
-  const availableBaleSeriesFilters = useMemo(
-    () => Array.from(new Set(balingRecords.map((record) => record.baleSeriesCode))).sort(),
-    [balingRecords],
-  )
-  const filterOptions = useMemo(
-    () => [...new Set([...availableBatches, ...availableBaleSeriesFilters])].sort(),
-    [availableBatches, availableBaleSeriesFilters],
-  )
-
   const filteredRecords =
     selectedBatchFilter === 'all'
       ? balingRecords.filter((record) => record.date >= dateFrom && record.date <= dateTo)
-      : balingRecords.filter((record) =>
-          selectedBatchFilter.includes('-BRS-') ||
-          selectedBatchFilter.includes('-TOW-') ||
-          selectedBatchFilter.includes('-UBR-')
-            ? record.baleSeriesCode === selectedBatchFilter
-            : normalizeBatchNumber(record.batchNumber) === selectedBatchFilter,
+      : balingRecords.filter(
+          (record) => normalizeBatchNumber(record.batchNumber) === selectedBatchFilter,
         )
   const sortedRecords = [...filteredRecords].sort((a, b) =>
     a.date === b.date ? b.baleCode.localeCompare(a.baleCode) : b.date.localeCompare(a.date),
@@ -6358,30 +6343,14 @@ function BalingPage({
     onCreateBales(nextRecords)
     setLastCreatedBaleCode(nextRecords[nextRecords.length - 1]?.baleCode ?? '')
     setEntryStatus(`${nextRecords.length} bale(s) created successfully by ${currentUser.name}.`)
-    setShowBaleRecords(true)
-  }
-
-  function handleToggleBaleSelection(baleId) {
-    setSelectedBaleIds((prev) =>
-      prev.includes(baleId) ? prev.filter((id) => id !== baleId) : [...prev, baleId],
-    )
-  }
-
-  function handlePrintSelectedLabels() {
-    const selectedRecords = sortedRecords.filter((record) => selectedBaleIds.includes(record.id))
-    if (selectedRecords.length === 0) {
-      setEntryStatus('Select at least one bale before printing labels.')
-      return
-    }
-    printBaleLabelsPdf(selectedRecords, `bale-labels-${new Date().toISOString().slice(0, 10)}.pdf`)
   }
 
   return (
     <section className="panel">
       <h2>Baling</h2>
       <p>
-        Convert brushed fibre stock into coded bales with barcode-ready bale labels and attendance
-        tracking for baling teams.
+        Convert loose fibre stock into coded bales. Print bale labels from the Stock page under Bale
+        Inventory.
       </p>
 
       <div className="form-grid">
@@ -6392,9 +6361,9 @@ function BalingPage({
             onChange={(event) => onSelectedBatchFilterChange(event.target.value)}
           >
             <option value="all">Date filtered records</option>
-            {filterOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
+            {availableBatches.map((batch) => (
+              <option key={batch} value={batch}>
+                {batch}
               </option>
             ))}
           </select>
@@ -6506,61 +6475,6 @@ function BalingPage({
       </CollapsibleSection>
 
       <CollapsibleSection
-        title="Bale Records"
-        isOpen={showBaleRecords}
-        onToggle={() => setShowBaleRecords((prev) => !prev)}
-        canExpand={canViewBaling}
-        deniedMessage="Only Admin, Production Manager, Baling Supervisor, or Baler can open this section."
-      >
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Batch</th>
-                <th>Source Stock Code</th>
-                <th>Bale Code</th>
-                <th>Weight (kg)</th>
-                <th>Supervisors</th>
-                <th>Balers</th>
-                <th>
-                  <button type="button" onClick={handlePrintSelectedLabels} disabled={selectedBaleIds.length === 0}>
-                    Print Labels
-                  </button>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedRecords.map((record) => (
-                <tr key={record.id}>
-                  <td>{formatDisplayDate(record.date)}</td>
-                  <td>{normalizeBatchNumber(record.batchNumber)}</td>
-                  <td>{record.sourceStockCode}</td>
-                  <td>{record.baleCode}</td>
-                  <td>{record.baleWeightKg}</td>
-                  <td>{record.supervisorIds.length}</td>
-                  <td>{record.balerIds.length}</td>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={selectedBaleIds.includes(record.id)}
-                      onChange={() => handleToggleBaleSelection(record.id)}
-                      aria-label={`Select ${record.baleCode}`}
-                    />
-                  </td>
-                </tr>
-              ))}
-              {sortedRecords.length === 0 && (
-                <tr>
-                  <td colSpan="8">No baling records found for the current filter.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </CollapsibleSection>
-
-      <CollapsibleSection
         title="Employee Attendance Summary"
         isOpen={showAttendanceSummary}
         onToggle={() => setShowAttendanceSummary((prev) => !prev)}
@@ -6664,14 +6578,11 @@ function SilageProductionPage({
 }) {
   const [showCreateStock, setShowCreateStock] = useState(false)
   const [showAttendanceRecords, setShowAttendanceRecords] = useState(false)
-  const [showBagRecords, setShowBagRecords] = useState(false)
   const [entryStatus, setEntryStatus] = useState('')
-  const [silageLabelStatus, setSilageLabelStatus] = useState('')
   const [silageDate, setSilageDate] = useState(dateTo)
   const [batchNumber, setBatchNumber] = useState(availableBatches[0] ?? '')
   const [bagMassKg, setBagMassKg] = useState('75')
   const [bagCount, setBagCount] = useState('')
-  const [selectedSilageBagIds, setSelectedSilageBagIds] = useState([])
 
   const canManageSilage = currentUserDataEntryPermissions.has('silage-entry')
 
@@ -6778,38 +6689,17 @@ function SilageProductionPage({
     })
     onCreateSilageStock(nextRecords)
     setEntryStatus(
-      `${nextRecords.length} silage bag label(s) created successfully. Add another entry if a second bag size was produced today.`,
+      `${nextRecords.length} silage bag(s) created successfully. Print labels from Stock → Silage Inventory.`,
     )
     setBagCount('')
-  }
-
-  function handleToggleSilageLabelSelection(silageRecordId) {
-    setSelectedSilageBagIds((prev) =>
-      prev.includes(silageRecordId)
-        ? prev.filter((id) => id !== silageRecordId)
-        : [...prev, silageRecordId],
-    )
-  }
-
-  function handlePrintSelectedSilageLabels() {
-    const selectedRecords = sortedRecords.filter((record) => selectedSilageBagIds.includes(record.id))
-    if (selectedRecords.length === 0) {
-      setSilageLabelStatus('Select at least one silage bag before printing labels.')
-      return
-    }
-    const count = printSilageLabelsPdf(
-      selectedRecords,
-      `silage-labels-${new Date().toISOString().slice(0, 10)}.pdf`,
-    )
-    setSilageLabelStatus(`${count} silage label(s) sent to print.`)
   }
 
   return (
     <section className="panel">
       <h2>Silage Production</h2>
       <p>
-        Register silage bagging output after dewatering and sun-drying. Bag codes follow format:
-        Batch-Date-Mass-BagNumber-SLG (e.g. 2025-006-042926-75-001-SLG).
+        Register silage bagging output after dewatering and sun-drying. Print bag labels from the
+        Stock page under Silage Inventory.
       </p>
 
       <div className="form-grid">
@@ -6960,52 +6850,6 @@ function SilageProductionPage({
             </tbody>
           </table>
         </div>
-      </CollapsibleSection>
-
-      <CollapsibleSection
-        title="Silage Bag Records"
-        isOpen={showBagRecords}
-        onToggle={() => setShowBagRecords((prev) => !prev)}
-      >
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Select</th>
-                <th>Date</th>
-                <th>Bag Code</th>
-                <th>Batch</th>
-                <th>Mass (kg)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedRecords.map((record) => (
-                <tr key={record.id}>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={selectedSilageBagIds.includes(record.id)}
-                      onChange={() => handleToggleSilageLabelSelection(record.id)}
-                    />
-                  </td>
-                  <td>{formatDisplayDate(record.date)}</td>
-                  <td>{record.bagCode}</td>
-                  <td>{record.batchNumber}</td>
-                  <td>{record.massKg}</td>
-                </tr>
-              ))}
-              {sortedRecords.length === 0 && (
-                <tr>
-                  <td colSpan="5">No silage bag records for the current filter.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        <button type="button" onClick={handlePrintSelectedSilageLabels}>
-          Print Selected Silage Labels
-        </button>
-        {silageLabelStatus && <div className="placeholder">{silageLabelStatus}</div>}
       </CollapsibleSection>
     </section>
   )
