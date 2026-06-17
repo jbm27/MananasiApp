@@ -5375,6 +5375,7 @@ function DryingPage({
   dryingAssignments,
   dryingRecords,
   onAddDryingRecord,
+  onUpdateDryingRecord,
   onCancelDryingRecord,
   onSaveDryingTeamAssignment,
   dateFrom,
@@ -5393,6 +5394,7 @@ function DryingPage({
   const [currentBundleWeight, setCurrentBundleWeight] = useState('')
   const [pendingBundleWeights, setPendingBundleWeights] = useState([])
   const [entryStatus, setEntryStatus] = useState('')
+  const [editingRecordId, setEditingRecordId] = useState('')
   const [attendanceViewingEmployeeId, setAttendanceViewingEmployeeId] = useState('')
   const [teamAssignmentDate, setTeamAssignmentDate] = useState(dateTo)
   const [selectedTeamDryerIds, setSelectedTeamDryerIds] = useState([])
@@ -5441,8 +5443,13 @@ function DryingPage({
     return map
   }, {})
   const availableShiftOptions = decorticationRecords
-    .filter((record) => !dryingRecordByDecorticationId[record.id])
+    .filter(
+      (record) =>
+        !dryingRecordByDecorticationId[record.id] ||
+        dryingRecordByDecorticationId[record.id]?.id === editingRecordId,
+    )
     .sort((a, b) => (a.date === b.date ? b.shiftNumber - a.shiftNumber : b.date.localeCompare(a.date)))
+  const editingRecord = dryingRecords.find((record) => record.id === editingRecordId) ?? null
 
   const employeeAttendance = Object.values(
     (() => {
@@ -5528,6 +5535,37 @@ function DryingPage({
     setTeamAssignmentStatus('Drying team assignment saved. Attendance summary updated.')
   }
 
+  function resetEntryForm(message = '') {
+    setEditingRecordId('')
+    setSelectedDecorticationRecordId('')
+    setWeighedDate(dateTo)
+    setCurrentBundleWeight('')
+    setPendingBundleWeights([])
+    setEntryStatus(message)
+  }
+
+  function startEditingRecord(record) {
+    if (!canManageDrying) {
+      return
+    }
+    setEditingRecordId(record.id)
+    setSelectedDecorticationRecordId(record.decorticationRecordId)
+    setWeighedDate(record.weighedDate)
+    setPendingBundleWeights([...record.bundleWeights])
+    setCurrentBundleWeight('')
+    setEntryStatus(
+      `Editing drying record for ${formatDisplayDate(record.weighedDate)} (${record.machine}, shift ${record.shiftNumber}).`,
+    )
+    setShowDryingEntry(true)
+  }
+
+  function handleBundleWeightKeyDown(event) {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      handleAddBundleWeight()
+    }
+  }
+
   function handleAddBundleWeight() {
     const weight = Number(currentBundleWeight)
     if (Number.isNaN(weight) || weight <= 0) {
@@ -5545,10 +5583,7 @@ function DryingPage({
   }
 
   function handleCancelInProgressEntry() {
-    setSelectedDecorticationRecordId('')
-    setCurrentBundleWeight('')
-    setPendingBundleWeights([])
-    setEntryStatus('Entry cleared. You can start again.')
+    resetEntryForm('Entry cleared. You can start again.')
   }
 
   function handleCancelSavedRecord(record) {
@@ -5564,6 +5599,9 @@ function DryingPage({
     const result = onCancelDryingRecord(record.id)
     setEntryStatus(result.message)
     if (result.ok) {
+      if (editingRecordId === record.id) {
+        resetEntryForm()
+      }
       setShowDryingEntry(true)
     }
   }
@@ -5583,7 +5621,10 @@ function DryingPage({
       setEntryStatus('Selected decortication shift could not be found.')
       return
     }
-    if (dryingRecordByDecorticationId[selectedDecorticationRecordId]) {
+    if (
+      !editingRecordId &&
+      dryingRecordByDecorticationId[selectedDecorticationRecordId]
+    ) {
       setEntryStatus('This decorticator shift already has drying output recorded.')
       return
     }
@@ -5601,6 +5642,21 @@ function DryingPage({
       0,
       Math.floor((new Date(weighedDate).getTime() - new Date(sourceRecord.date).getTime()) / (1000 * 60 * 60 * 24)),
     )
+    if (editingRecordId) {
+      const result = onUpdateDryingRecord(editingRecordId, {
+        weighedDate,
+        bundleWeights,
+        totalDriedKg: total,
+        dryingTimeDays,
+        decorticationDate: sourceRecord.date,
+      })
+      setEntryStatus(result.message)
+      if (result.ok) {
+        resetEntryForm()
+        setShowDryingRecords(true)
+      }
+      return
+    }
     onAddDryingRecord({
       decorticationRecordId: sourceRecord.id,
       decorticationDate: sourceRecord.date,
@@ -5614,10 +5670,7 @@ function DryingPage({
       dryerId: currentUser?.id ?? 'SYSTEM',
       dryerName: currentUser?.name ?? 'System',
     })
-    setSelectedDecorticationRecordId('')
-    setCurrentBundleWeight('')
-    setPendingBundleWeights([])
-    setEntryStatus('Drying output saved and synced to Decortication.')
+    resetEntryForm('Drying output saved and synced to Decortication.')
     setShowDryingRecords(true)
   }
 
@@ -5684,7 +5737,7 @@ function DryingPage({
       </div>
 
       <CollapsibleSection
-        title="Record Drying Output"
+        title={editingRecordId ? 'Edit Drying Record' : 'Record Drying Output'}
         isOpen={showDryingEntry}
         onToggle={() => setShowDryingEntry((prev) => !prev)}
         canExpand={canManageDrying}
@@ -5696,7 +5749,7 @@ function DryingPage({
             <select
               value={selectedDecorticationRecordId}
               onChange={(event) => setSelectedDecorticationRecordId(event.target.value)}
-              disabled={!canSubmitDryingEntry}
+              disabled={!canSubmitDryingEntry || Boolean(editingRecordId)}
             >
               <option value="">Select shift</option>
               {availableShiftOptions.map((record) => (
@@ -5724,6 +5777,7 @@ function DryingPage({
               step="0.1"
               value={currentBundleWeight}
               onChange={(event) => setCurrentBundleWeight(event.target.value)}
+              onKeyDown={handleBundleWeightKeyDown}
               placeholder="10.0"
               disabled={!canSubmitDryingEntry}
             />
@@ -5739,7 +5793,7 @@ function DryingPage({
             Undo Last Bundle
           </button>
           <button type="submit" disabled={!canSubmitDryingEntry}>
-            Complete
+            {editingRecordId ? 'Save Changes' : 'Complete'}
           </button>
           <button
             type="button"
@@ -5747,9 +5801,13 @@ function DryingPage({
             onClick={handleCancelInProgressEntry}
             disabled={!canSubmitDryingEntry}
           >
-            Cancel Entry
+            {editingRecordId ? 'Cancel Edit' : 'Cancel Entry'}
           </button>
         </form>
+        <div className="placeholder">
+          Press <strong>Enter</strong> in the bundle weight field to add another bundle. Use{' '}
+          <strong>Complete</strong> when all bundles are entered.
+        </div>
         <div className="placeholder">
           Bundles added: {pendingBundleWeights.length}
           {pendingBundleWeights.length > 0
@@ -5761,9 +5819,15 @@ function DryingPage({
         </div>
         <div className="placeholder">
           Use <strong>Cancel Entry</strong> to clear a mistake before completing. After saving, use{' '}
-          <strong>Cancel Record</strong> in the table below to remove the entry and weigh the shift
-          again.
+          <strong>Edit</strong> to change bundle weights or weighing date, or <strong>Cancel Record</strong>{' '}
+          to remove the entry and weigh the shift again.
         </div>
+        {editingRecord ? (
+          <div className="placeholder">
+            Editing record for {formatDisplayDate(editingRecord.weighedDate)} | {editingRecord.machine} |
+            Shift {editingRecord.shiftNumber}
+          </div>
+        ) : null}
         {!canSubmitDryingEntry && (
           <div className="placeholder">
             A Dryer must be clocked in to record drying output. Managers and Admin can always record.
@@ -5809,6 +5873,13 @@ function DryingPage({
                   <td>{record.dryingTimeDays}</td>
                   {canManageDrying ? (
                     <td>
+                      <button
+                        type="button"
+                        className="action-link action-link-button"
+                        onClick={() => startEditingRecord(record)}
+                      >
+                        Edit
+                      </button>
                       <button
                         type="button"
                         className="action-link action-link-button cancel-record-button"
@@ -9501,6 +9572,47 @@ function App() {
     setDryingRecords((prev) => [{ id: `DRY-${Date.now()}`, ...input }, ...prev])
   }
 
+  function handleUpdateDryingRecord(recordId, input) {
+    const record = dryingRecords.find((item) => item.id === recordId)
+    if (!record) {
+      return { ok: false, message: 'Drying record could not be found.' }
+    }
+    const sourceStockCode = buildStockCode(record.batchNumber, record.machine, 'UBR')
+    const hasBrushingActivity =
+      brushingStockMovements.some((item) => item.sourceStockCode === sourceStockCode) ||
+      brushingDailyRecords.some((item) => item.sourceStockCode === sourceStockCode)
+    if (hasBrushingActivity) {
+      return {
+        ok: false,
+        message:
+          'This drying record cannot be edited because brushing stock has already been recorded for this batch and machine.',
+      }
+    }
+    const decorticationDate = input.decorticationDate ?? record.decorticationDate
+    const dryingTimeDays = Math.max(
+      0,
+      Math.floor(
+        (new Date(input.weighedDate).getTime() - new Date(decorticationDate).getTime()) /
+          (1000 * 60 * 60 * 24),
+      ),
+    )
+    setDryingRecords((prev) =>
+      prev.map((item) =>
+        item.id === recordId
+          ? {
+              ...item,
+              weighedDate: input.weighedDate,
+              decorticationDate,
+              bundleWeights: input.bundleWeights,
+              totalDriedKg: input.totalDriedKg,
+              dryingTimeDays,
+            }
+          : item,
+      ),
+    )
+    return { ok: true, message: 'Drying record updated and synced to Decortication.' }
+  }
+
   function handleCancelDryingRecord(recordId) {
     const record = dryingRecords.find((item) => item.id === recordId)
     if (!record) {
@@ -9985,6 +10097,7 @@ function App() {
                 dryingAssignments={dryingAssignments}
                 dryingRecords={dryingRecords}
                 onAddDryingRecord={handleAddDryingRecord}
+                onUpdateDryingRecord={handleUpdateDryingRecord}
                 onCancelDryingRecord={handleCancelDryingRecord}
                 onSaveDryingTeamAssignment={handleSaveDryingTeamAssignment}
                 dateFrom={dryingDateFrom}
