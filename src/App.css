@@ -922,6 +922,10 @@ th {
   min-width: 720px;
 }
 
+.payroll-attendance-row--orphan-clock-out {
+  background: #fef2f2;
+}
+
 .payroll-attendance-row--under-hours {
   background: #fffbeb;
 }

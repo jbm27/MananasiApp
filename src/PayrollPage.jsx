@@ -4,7 +4,6 @@ import {
   MINIMUM_WORK_HOURS_PER_DAY,
   buildAttendanceExceptionReport,
   getAttendanceExceptionLabel,
-  withAutoClockOutEvents,
 } from './attendanceProcessing.js'
 import { getContractTypeLabel } from './employeePay.js'
 import { fetchAttendanceEventsForPeriod } from './api/client.js'
@@ -275,17 +274,12 @@ export default function PayrollPage({
     })
   }, [employees, selectedPeriod, salaryPayrollAdjustments, attendanceEvents, harvestRecords])
 
-  const normalizedAttendanceEvents = useMemo(
-    () => withAutoClockOutEvents(attendanceEvents),
-    [attendanceEvents],
-  )
-
   const attendanceExceptionLines = useMemo(() => {
     if (!selectedPeriod) {
       return []
     }
-    return buildAttendanceExceptionReport(employees, selectedPeriod, normalizedAttendanceEvents)
-  }, [employees, selectedPeriod, normalizedAttendanceEvents])
+    return buildAttendanceExceptionReport(employees, selectedPeriod, attendanceEvents)
+  }, [employees, selectedPeriod, attendanceEvents])
 
   function handleAdvanceChange(line, rawValue) {
     if (!selectedPeriod || !canModifyAdvances) {
@@ -941,10 +935,10 @@ export default function PayrollPage({
         onToggle={() => setShowAttendanceExceptions((prev) => !prev)}
       >
         <p className="payroll-advance-intro">
-          Monday–Saturday workdays in the selected pay period. Employees appear here only for
-          abnormal attendance: worked fewer than {MINIMUM_WORK_HOURS_PER_DAY} hours on a day they
-          clocked in, or forgot to clock out (system auto clock-out after {AUTO_CLOCK_OUT_HOURS}{' '}
-          hours).
+          Monday–Saturday workdays in the selected pay period. Only abnormal attendance is listed:
+          clock-out without a same-day clock-in (scanner left in the wrong mode), worked fewer than{' '}
+          {MINIMUM_WORK_HOURS_PER_DAY} hours after clocking in, or forgot to clock out (system auto
+          clock-out after {AUTO_CLOCK_OUT_HOURS} hours). Days with no scanner activity are omitted.
         </p>
 
         <div className="table-wrap payroll-table-wrap">
@@ -968,9 +962,11 @@ export default function PayrollPage({
                 <tr
                   key={`${line.employeeId}-${line.date}-${line.issue}`}
                   className={
-                    line.issue === 'auto_clock_out'
-                      ? 'payroll-attendance-row--auto-clock-out'
-                      : 'payroll-attendance-row--under-hours'
+                    line.issue === 'clock_out_without_clock_in'
+                      ? 'payroll-attendance-row--orphan-clock-out'
+                      : line.issue === 'auto_clock_out'
+                        ? 'payroll-attendance-row--auto-clock-out'
+                        : 'payroll-attendance-row--under-hours'
                   }
                 >
                   <td>{formatDisplayDate(line.date)}</td>
@@ -987,8 +983,8 @@ export default function PayrollPage({
         <div className="rules-box">
           <strong>Attendance:</strong> Hours are calculated from clock-in and clock-out events in
           Kenya time. Missing clock-outs are assumed at {AUTO_CLOCK_OUT_HOURS} hours after
-          clock-in for hour calculations and are flagged here as exceptions. Days with no clock-in
-          are not listed.
+          clock-in for hour calculations and are flagged here as exceptions. Employees with no
+          scanner events on a day are not listed.
         </div>
       </PayrollSection>
     </section>
