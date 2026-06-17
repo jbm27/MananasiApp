@@ -1,7 +1,8 @@
 import { getPool } from '../db.js'
 import { recordAttendanceEvent } from './attendanceService.js'
-import { AUTO_CLOCK_OUT_HOURS } from '../../src/attendanceProcessing.js'
 
+/** Must match AUTO_CLOCK_OUT_HOURS in src/attendanceProcessing.js */
+const AUTO_CLOCK_OUT_HOURS = 12
 const AUTO_CLOCK_OUT_MS = AUTO_CLOCK_OUT_HOURS * 60 * 60 * 1000
 
 export async function ensureAutoClockOutsPersisted(referenceNow = new Date()) {
