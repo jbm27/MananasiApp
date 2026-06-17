@@ -22,7 +22,7 @@ export function sha256Hex(message) {
 }
 
 function isLeadershipTeamMember(employee) {
-  if (!employee) {
+  if (!employee || employee.role === 'inactive') {
     return false
   }
   if (leadershipTeamEmployeeIds.has(employee.id)) {

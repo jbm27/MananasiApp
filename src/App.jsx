@@ -393,6 +393,9 @@ function getDefaultDataEntryPermissionsForRole(role) {
   if (role === 'silage-supervisor') {
     return ['silage-entry']
   }
+  if (role === 'inactive') {
+    return []
+  }
   return []
 }
 
@@ -446,6 +449,7 @@ function formatDisplayDate(isoDate) {
 const employeeRoleOptions = [
   { value: 'harvester', label: 'Harvester' },
   { value: 'general-staff', label: 'General / Office Staff' },
+  { value: 'inactive', label: 'Inactive' },
   { value: 'harvesting-supervisor', label: 'Harvesting Supervisor' },
   { value: 'harvesting-manager', label: 'Harvesting Manager' },
   { value: 'production-manager', label: 'Production Manager' },
@@ -470,6 +474,7 @@ function getEmployeeRoleLabel(role) {
 function getEmployeePermissionSummary(role) {
   if (role === 'admin') return 'Can manage employees and compensation settings'
   if (role === 'general-staff') return 'Directory profile only; no operational modules'
+  if (role === 'inactive') return 'No longer active; kept on file only with no app access'
   if (role === 'harvesting-manager') {
     return 'Can manage employees, active batch number, payroll profile fields, and harvest data entry'
   }
@@ -1643,6 +1648,9 @@ function readValidAuthLeadershipId(employeeSource) {
 }
 
 function isLeadershipTeamMember(employee) {
+  if (!employee || employee.role === 'inactive') {
+    return false
+  }
   if (leadershipTeamEmployeeIds.has(employee.id)) {
     return true
   }
