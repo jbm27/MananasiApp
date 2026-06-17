@@ -2447,6 +2447,7 @@ function EmployeeRecordPage({
   records,
   haulageTrips,
   decorticationAssignments,
+  dryingAssignments,
   dryingRecords,
   brushingStockMovements,
   brushingDailyRecords,
@@ -2474,6 +2475,7 @@ function EmployeeRecordPage({
     ...records.map((item) => item.harvestedOn),
     ...haulageTrips.map((item) => item.date),
     ...decorticationAssignments.map((item) => item.date),
+    ...dryingAssignments.map((item) => item.date),
     ...dryingRecords.map((item) => item.weighedDate),
     ...brushingStockMovements.map((item) => item.date),
     ...brushingDailyRecords.map((item) => item.date),
@@ -2507,9 +2509,24 @@ function EmployeeRecordPage({
   const decorticationAsOperator = decorticationAssignments.filter((item) =>
     item.operatorIds?.includes(employee.id) && isWithinRange(item.date),
   )
-  const dryingAsDryer = dryingRecords.filter(
+  const dryingTeamAssignments = dryingAssignments.filter(
+    (item) => item.dryerIds?.includes(employee.id) && isWithinRange(item.date),
+  )
+  const dryingWeighRecords = dryingRecords.filter(
     (item) => item.dryerId === employee.id && isWithinRange(item.weighedDate),
   )
+  const dryingAsDryer = [
+    ...dryingTeamAssignments.map((item) => ({
+      id: `team-${item.id}`,
+      date: item.date,
+      batchNumber: 'Team assignment',
+    })),
+    ...dryingWeighRecords,
+  ]
+  const dryingAttendanceDays =
+    dryingTeamAssignments.length > 0
+      ? dryingTeamAssignments.length
+      : new Set(dryingWeighRecords.map((item) => item.weighedDate)).size
   const brushingStockAsRecorder = brushingStockMovements.filter(
     (item) => item.recordedById === employee.id && isWithinRange(item.date),
   )
@@ -2536,7 +2553,9 @@ function EmployeeRecordPage({
   const totalBaledKg = balingAsBaler.reduce((sum, item) => sum + (item.baleWeightKg ?? 0), 0)
   const totalSilageKg = silageAsOperator.reduce((sum, item) => sum + (item.massKg ?? 0), 0)
   const totalDecorticationShifts =
-    decorticationAsSupervisor.length + decorticationAsOperator.length + dryingAsDryer.length
+    decorticationAsSupervisor.length +
+    decorticationAsOperator.length +
+    dryingAttendanceDays
   const roleRows = [
     { key: 'harvest-harvester', area: 'Harvesting', role: 'Harvester', records: harvestAsHarvester.length },
     { key: 'harvest-recorder', area: 'Harvesting', role: 'Supervisor / Recorder', records: harvestAsRecorder.length },
@@ -2544,7 +2563,7 @@ function EmployeeRecordPage({
     { key: 'haulage-loader', area: 'Haulage', role: 'Loader', records: haulageAsLoader.length },
     { key: 'decortication-supervisor', area: 'Decortication', role: 'Supervisor', records: decorticationAsSupervisor.length },
     { key: 'decortication-operator', area: 'Decortication', role: 'Operator', records: decorticationAsOperator.length },
-    { key: 'drying-dryer', area: 'Drying', role: 'Dryer', records: dryingAsDryer.length },
+    { key: 'drying-dryer', area: 'Drying', role: 'Dryer', records: dryingAttendanceDays },
     { key: 'brushing-stock-recorder', area: 'Brushing', role: 'Stock recorder', records: brushingStockAsRecorder.length },
     { key: 'brushing-supervisor', area: 'Brushing', role: 'Supervisor', records: brushingAsSupervisor.length },
     { key: 'brushing-brusher', area: 'Brushing', role: 'Brusher', records: brushingAsBrusher.length },
@@ -5085,9 +5104,11 @@ function DryingPage({
   employees,
   clockedInIds,
   decorticationRecords,
+  dryingAssignments,
   dryingRecords,
   onAddDryingRecord,
   onCancelDryingRecord,
+  onSaveDryingTeamAssignment,
   dateFrom,
   dateTo,
   onDateFromChange,
@@ -5105,11 +5126,28 @@ function DryingPage({
   const [pendingBundleWeights, setPendingBundleWeights] = useState([])
   const [entryStatus, setEntryStatus] = useState('')
   const [attendanceViewingEmployeeId, setAttendanceViewingEmployeeId] = useState('')
+  const [teamAssignmentDate, setTeamAssignmentDate] = useState(dateTo)
+  const [selectedTeamDryerIds, setSelectedTeamDryerIds] = useState([])
+  const [teamAssignmentStatus, setTeamAssignmentStatus] = useState('')
 
   const canManageDrying = currentUserDataEntryPermissions.has('drying-entry')
   const canViewDrying =
     canManageDrying || currentUser?.role === 'decortication-supervisor'
   const canSubmitDryingEntry = canManageDrying
+  const canAssignDryingTeam = canManageDrying
+
+  const filteredDryingAssignments = dryingAssignments.filter(
+    (assignment) => assignment.date >= dateFrom && assignment.date <= dateTo,
+  )
+  const teamAssignmentOptions = [...filteredDryingAssignments]
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .map((assignment) => assignment.date)
+    .filter((date, index, dates) => dates.indexOf(date) === index)
+
+  useEffect(() => {
+    const existing = dryingAssignments.find((assignment) => assignment.date === teamAssignmentDate)
+    setSelectedTeamDryerIds(existing?.dryerIds ?? [])
+  }, [teamAssignmentDate, dryingAssignments])
 
   const filteredDryingRecords =
     selectedBatchFilter === 'all'
@@ -5139,29 +5177,48 @@ function DryingPage({
     .sort((a, b) => (a.date === b.date ? b.shiftNumber - a.shiftNumber : b.date.localeCompare(a.date)))
 
   const employeeAttendance = Object.values(
-    filteredDryingRecords.reduce((map, record) => {
-      if (!map[record.dryerId]) {
-        map[record.dryerId] = {
-          id: record.dryerId,
-          name: record.dryerName,
-          role: 'Dryer',
-          days: new Set(),
-          shifts: 0,
+    (() => {
+      const map = {}
+      filteredDryingAssignments.forEach((assignment) => {
+        assignment.dryerIds.forEach((dryerId, index) => {
+          if (!map[dryerId]) {
+            map[dryerId] = {
+              id: dryerId,
+              name:
+                assignment.dryerNames?.[index] ??
+                employees.find((employee) => employee.id === dryerId)?.name ??
+                'Unknown',
+              role: 'Dryer',
+              assignedDays: new Set(),
+              shifts: 0,
+            }
+          }
+          map[dryerId].assignedDays.add(assignment.date)
+        })
+      })
+      filteredDryingRecords.forEach((record) => {
+        if (!map[record.dryerId]) {
+          map[record.dryerId] = {
+            id: record.dryerId,
+            name: record.dryerName,
+            role: 'Dryer',
+            assignedDays: new Set(),
+            shifts: 0,
+          }
         }
-      }
-      map[record.dryerId].days.add(record.weighedDate)
-      map[record.dryerId].shifts += 1
+        map[record.dryerId].shifts += 1
+      })
       return map
-    }, {}),
+    })(),
   )
     .map((item) => ({
       id: item.id,
       name: item.name,
       role: item.role,
-      daysWorked: item.days.size,
+      daysWorked: item.assignedDays.size,
       shiftsHandled: item.shifts,
     }))
-    .sort((a, b) => b.daysWorked - a.daysWorked)
+    .sort((a, b) => b.daysWorked - a.daysWorked || b.shiftsHandled - a.shiftsHandled)
 
   const activeDryers = employees.filter(
     (employee) => employee.role === 'dryer' && clockedInIds.includes(employee.id),
@@ -5169,6 +5226,39 @@ function DryingPage({
   const selectedAttendanceEmployee = employeeAttendance.find(
     (item) => item.id === attendanceViewingEmployeeId,
   )
+
+  function handleTeamDryerToggle(dryerId) {
+    setSelectedTeamDryerIds((prev) =>
+      prev.includes(dryerId) ? prev.filter((id) => id !== dryerId) : [...prev, dryerId],
+    )
+  }
+
+  function handleSaveTeamAssignment(event) {
+    event.preventDefault()
+    if (!canAssignDryingTeam) {
+      setTeamAssignmentStatus('You do not have permission to assign the drying team.')
+      return
+    }
+    if (!teamAssignmentDate) {
+      setTeamAssignmentStatus('Select a team date.')
+      return
+    }
+    if (selectedTeamDryerIds.length === 0) {
+      setTeamAssignmentStatus('Select at least one clocked-in dryer for the team.')
+      return
+    }
+    const dryerNames = selectedTeamDryerIds
+      .map((id) => employees.find((employee) => employee.id === id)?.name)
+      .filter(Boolean)
+    onSaveDryingTeamAssignment({
+      date: teamAssignmentDate,
+      dryerIds: selectedTeamDryerIds,
+      dryerNames,
+      assignedById: currentUser?.id ?? '',
+      assignedByName: currentUser?.name ?? '',
+    })
+    setTeamAssignmentStatus('Drying team assignment saved. Attendance summary updated.')
+  }
 
   function handleAddBundleWeight() {
     const weight = Number(currentBundleWeight)
@@ -5479,6 +5569,61 @@ function DryingPage({
         canExpand={canViewDrying}
         deniedMessage="Only Admin, Production Manager, Decortication Supervisor, or Dryer can open this section."
       >
+        {canAssignDryingTeam ? (
+          <form className="form-grid" onSubmit={handleSaveTeamAssignment}>
+            <label>
+              Load saved team assignment
+              <select
+                value={teamAssignmentOptions.includes(teamAssignmentDate) ? teamAssignmentDate : ''}
+                onChange={(event) => {
+                  if (event.target.value) {
+                    setTeamAssignmentDate(event.target.value)
+                  }
+                }}
+              >
+                <option value="">Select saved assignment...</option>
+                {teamAssignmentOptions.map((date) => (
+                  <option key={date} value={date}>
+                    {formatDisplayDate(date)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Team date
+              <input
+                type="date"
+                value={teamAssignmentDate}
+                onChange={(event) => setTeamAssignmentDate(event.target.value)}
+              />
+            </label>
+            <label>
+              Dryers on team (clocked in)
+              <div className="checklist">
+                {activeDryers.map((dryer) => (
+                  <label key={dryer.id} className="check-item">
+                    <span>{dryer.name}</span>
+                    <input
+                      type="checkbox"
+                      checked={selectedTeamDryerIds.includes(dryer.id)}
+                      onChange={() => handleTeamDryerToggle(dryer.id)}
+                    />
+                  </label>
+                ))}
+              </div>
+            </label>
+            <button type="submit" disabled={!canAssignDryingTeam}>
+              Save Team Assignment
+            </button>
+          </form>
+        ) : null}
+        {canAssignDryingTeam ? (
+          <div className="placeholder">
+            At the start of each day, assign the drying team from clocked-in dryers. Days worked in
+            the summary below come from these team assignments.
+          </div>
+        ) : null}
+        {teamAssignmentStatus ? <div className="placeholder">{teamAssignmentStatus}</div> : null}
         <div className="placeholder">
           Clocked-in Dryers today: {activeDryers.length > 0 ? activeDryers.map((item) => item.name).join(', ') : 'None'}
         </div>
@@ -5515,6 +5660,17 @@ function DryingPage({
                   {attendanceViewingEmployeeId === row.id && (
                     <tr>
                       <td colSpan="5">
+                        {filteredDryingAssignments.some((assignment) =>
+                          assignment.dryerIds.includes(row.id),
+                        ) ? (
+                          <div className="placeholder">
+                            Team days:{' '}
+                            {filteredDryingAssignments
+                              .filter((assignment) => assignment.dryerIds.includes(row.id))
+                              .map((assignment) => formatDisplayDate(assignment.date))
+                              .join(', ')}
+                          </div>
+                        ) : null}
                         <div className="table-wrap">
                           <table>
                             <thead>
@@ -5544,9 +5700,9 @@ function DryingPage({
                                     <td>{record.dryingTimeDays}</td>
                                   </tr>
                                 ))}
-                              {selectedAttendanceEmployee && selectedAttendanceEmployee.id === row.id && !sortedDryingRecords.some((record) => record.dryerId === row.id) && (
+                              {selectedAttendanceEmployee && selectedAttendanceEmployee.id === row.id && !sortedDryingRecords.some((record) => record.dryerId === row.id) && !filteredDryingAssignments.some((assignment) => assignment.dryerIds.includes(row.id)) && (
                                 <tr>
-                                  <td colSpan="8">No drying attendance records found for this employee in the current filter.</td>
+                                  <td colSpan="8">No team assignments or drying records found for this employee in the current filter.</td>
                                 </tr>
                               )}
                             </tbody>
@@ -5559,7 +5715,7 @@ function DryingPage({
               ))}
               {employeeAttendance.length === 0 && (
                 <tr>
-                  <td colSpan="5">No drying attendance records for this date range.</td>
+                  <td colSpan="5">No drying team assignments or attendance records for this date range.</td>
                 </tr>
               )}
             </tbody>
@@ -8390,6 +8546,9 @@ function hydrateAppState(data, setters) {
     setters.setDecorticationRecords(sanitized.decorticationRecords)
   }
   if (Array.isArray(sanitized.dryingRecords)) setters.setDryingRecords(sanitized.dryingRecords)
+  if (Array.isArray(sanitized.dryingAssignments)) {
+    setters.setDryingAssignments(sanitized.dryingAssignments)
+  }
   if (Array.isArray(sanitized.brushingStockMovements)) {
     setters.setBrushingStockMovements(sanitized.brushingStockMovements)
   }
@@ -8457,6 +8616,7 @@ function App() {
   const [maintenanceEntries, setMaintenanceEntries] = useState([])
   const [decorticationAssignments, setDecorticationAssignments] = useState([])
   const [decorticationRecords, setDecorticationRecords] = useState([])
+  const [dryingAssignments, setDryingAssignments] = useState([])
   const [dryingRecords, setDryingRecords] = useState([])
   const [brushingStockMovements, setBrushingStockMovements] = useState([])
   const [brushingDailyRecords, setBrushingDailyRecords] = useState([])
@@ -8486,6 +8646,7 @@ function App() {
       setMaintenanceEntries,
       setDecorticationAssignments,
       setDecorticationRecords,
+      setDryingAssignments,
       setDryingRecords,
       setBrushingStockMovements,
       setBrushingDailyRecords,
@@ -8518,6 +8679,7 @@ function App() {
         maintenanceEntries,
         decorticationAssignments,
         decorticationRecords,
+        dryingAssignments,
         dryingRecords,
         brushingStockMovements,
         brushingDailyRecords,
@@ -8544,6 +8706,7 @@ function App() {
       maintenanceEntries,
       decorticationAssignments,
       decorticationRecords,
+      dryingAssignments,
       dryingRecords,
       brushingStockMovements,
       brushingDailyRecords,
@@ -9183,6 +9346,23 @@ function App() {
     setDecorticationRecords((prev) => [record, ...prev])
   }
 
+  function handleSaveDryingTeamAssignment(input) {
+    setDryingAssignments((prev) => {
+      const withoutDate = prev.filter((item) => item.date !== input.date)
+      return [
+        {
+          id: `DRY-ASG-${input.date}`,
+          date: input.date,
+          dryerIds: input.dryerIds,
+          dryerNames: input.dryerNames,
+          assignedById: input.assignedById,
+          assignedByName: input.assignedByName,
+        },
+        ...withoutDate,
+      ]
+    })
+  }
+
   if (!ready) {
     return (
       <div className="login-layout">
@@ -9315,6 +9495,7 @@ function App() {
                 records={records}
                 haulageTrips={haulageTrips}
                 decorticationAssignments={decorticationAssignments}
+                dryingAssignments={dryingAssignments}
                 dryingRecords={dryingRecords}
                 brushingStockMovements={brushingStockMovements}
                 brushingDailyRecords={brushingDailyRecords}
@@ -9453,9 +9634,11 @@ function App() {
                 employees={employees}
                 clockedInIds={clockedInIds}
                 decorticationRecords={decorticationRecords}
+                dryingAssignments={dryingAssignments}
                 dryingRecords={dryingRecords}
                 onAddDryingRecord={handleAddDryingRecord}
                 onCancelDryingRecord={handleCancelDryingRecord}
+                onSaveDryingTeamAssignment={handleSaveDryingTeamAssignment}
                 dateFrom={dryingDateFrom}
                 dateTo={dryingDateTo}
                 onDateFromChange={setDryingDateFrom}
