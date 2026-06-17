@@ -35,6 +35,7 @@ import {
   parseEmployeeProfileFromForm,
 } from './employeeFields.js'
 import { sanitizePersistedAppState } from './appStateSanitize.js'
+import { mergeOpeningStockRecords } from './openingStockSeed.js'
 
 const RECENT_CLOCK_EVENTS_LIMIT = 10
 import { useBackendSync } from './hooks/useBackendSync.js'
@@ -8080,7 +8081,7 @@ function hydrateAppState(data, setters) {
   if (!data) {
     return
   }
-  const sanitized = sanitizePersistedAppState(data)
+  const sanitized = mergeOpeningStockRecords(sanitizePersistedAppState(data))
   if (Array.isArray(sanitized.employees)) {
     setters.setEmployees(
       sanitized.employees.length > 0 ? sanitized.employees : [...mananasiStaffEmployees],
@@ -8233,7 +8234,8 @@ function App() {
 
   const persistedSnapshot = useMemo(
     () =>
-      sanitizePersistedAppState({
+      sanitizePersistedAppState(
+        mergeOpeningStockRecords({
         version: 1,
         employees,
         customers,
@@ -8258,7 +8260,8 @@ function App() {
         payrollAdjustments,
         salaryPayrollAdjustments,
         payrollApprovals,
-      }),
+        }),
+      ),
     [
       employees,
       customers,
