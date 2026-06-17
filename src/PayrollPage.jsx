@@ -941,9 +941,10 @@ export default function PayrollPage({
         onToggle={() => setShowAttendanceExceptions((prev) => !prev)}
       >
         <p className="payroll-advance-intro">
-          Monday–Saturday workdays in the selected pay period. Employees appear here if they did
-          not clock in, or worked fewer than {MINIMUM_WORK_HOURS_PER_DAY} hours on a day. Open shifts
-          are treated as clocked out automatically after {AUTO_CLOCK_OUT_HOURS} hours.
+          Monday–Saturday workdays in the selected pay period. Employees appear here only for
+          abnormal attendance: worked fewer than {MINIMUM_WORK_HOURS_PER_DAY} hours on a day they
+          clocked in, or forgot to clock out (system auto clock-out after {AUTO_CLOCK_OUT_HOURS}{' '}
+          hours).
         </p>
 
         <div className="table-wrap payroll-table-wrap">
@@ -960,18 +961,15 @@ export default function PayrollPage({
             <tbody>
               {attendanceExceptionLines.length === 0 && (
                 <tr>
-                  <td colSpan="5">
-                    No attendance exceptions for this period. Every employee clocked in and worked
-                    at least {MINIMUM_WORK_HOURS_PER_DAY} hours on each Monday–Saturday workday.
-                  </td>
+                  <td colSpan="5">No attendance exceptions for this period.</td>
                 </tr>
               )}
               {attendanceExceptionLines.map((line) => (
                 <tr
                   key={`${line.employeeId}-${line.date}-${line.issue}`}
                   className={
-                    line.issue === 'no_clock_in'
-                      ? 'payroll-attendance-row--absent'
+                    line.issue === 'auto_clock_out'
+                      ? 'payroll-attendance-row--auto-clock-out'
                       : 'payroll-attendance-row--under-hours'
                   }
                 >
@@ -979,7 +977,7 @@ export default function PayrollPage({
                   <td>{line.name}</td>
                   <td>{line.department || '—'}</td>
                   <td>{getAttendanceExceptionLabel(line.issue)}</td>
-                  <td>{line.issue === 'no_clock_in' ? '—' : line.hoursWorked.toFixed(2)}</td>
+                  <td>{line.hoursWorked.toFixed(2)}</td>
                 </tr>
               ))}
             </tbody>
@@ -988,8 +986,9 @@ export default function PayrollPage({
 
         <div className="rules-box">
           <strong>Attendance:</strong> Hours are calculated from clock-in and clock-out events in
-          Kenya time. If someone forgets to clock out, the system assumes a clock-out{' '}
-          {AUTO_CLOCK_OUT_HOURS} hours after clock-in when calculating hours for this report.
+          Kenya time. Missing clock-outs are assumed at {AUTO_CLOCK_OUT_HOURS} hours after
+          clock-in for hour calculations and are flagged here as exceptions. Days with no clock-in
+          are not listed.
         </div>
       </PayrollSection>
     </section>

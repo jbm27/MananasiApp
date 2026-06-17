@@ -922,12 +922,12 @@ th {
   min-width: 720px;
 }
 
-.payroll-attendance-row--absent {
-  background: #fef2f2;
-}
-
 .payroll-attendance-row--under-hours {
   background: #fffbeb;
+}
+
+.payroll-attendance-row--auto-clock-out {
+  background: #eff6ff;
 }
 
 .payroll-section-approval {
