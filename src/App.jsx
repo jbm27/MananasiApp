@@ -152,6 +152,8 @@ const DATA_ENTRY_PERMISSION_IDS = [
   'brushing-entry',
   'baling-entry',
   'silage-entry',
+  'employee-role-seasonal',
+  'employee-role-all',
 ]
 
 const DATA_ENTRY_PERMISSION_LABELS = {
@@ -165,6 +167,8 @@ const DATA_ENTRY_PERMISSION_LABELS = {
   'brushing-entry': 'Brushing stock and outputs entry',
   'baling-entry': 'Baling creation',
   'silage-entry': 'Silage bag creation',
+  'employee-role-seasonal': 'Edit roles for seasonal and supplementary employees',
+  'employee-role-all': 'Edit roles for all employees (including permanent)',
 }
 
 /** Policy defaults from organisation roles; James (admin) always receives full access in code. */
@@ -361,7 +365,7 @@ function getDefaultDataEntryPermissionsForRole(role) {
     return [...DATA_ENTRY_PERMISSION_IDS]
   }
   if (role === 'harvesting-manager') {
-    return ['harvesting-entry', 'harvesting-batch', 'haulage-mileage']
+    return ['harvesting-entry', 'harvesting-batch', 'haulage-mileage', 'employee-role-all']
   }
   if (role === 'harvesting-supervisor') {
     return ['harvesting-entry']
@@ -420,6 +424,35 @@ function getEffectiveDataEntryPermissions(employeeId, overrides, employees) {
     return new Set(DATA_ENTRY_PERMISSION_IDS)
   }
   return new Set(getBaseDataEntryPermissionsForEditor(employeeId, overrides, employees))
+}
+
+function isSeasonalOrSupplementaryEmployee(employee) {
+  return (
+    employee?.contractType === 'seasonal' || employee?.contractType === 'supplementary'
+  )
+}
+
+function canEditEmployeeRoleForEmployee(dataEntryPermissions, employee) {
+  if (!employee || !dataEntryPermissions) {
+    return false
+  }
+  if (dataEntryPermissions.has('employee-role-all')) {
+    return true
+  }
+  if (
+    dataEntryPermissions.has('employee-role-seasonal') &&
+    isSeasonalOrSupplementaryEmployee(employee)
+  ) {
+    return true
+  }
+  return false
+}
+
+function formatDecorticationEfficiencyPercent(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return '—'
+  }
+  return `${Number(value).toFixed(2)}%`
 }
 
 function GatedRoutes({ allowedPages, children }) {
@@ -2421,6 +2454,7 @@ function AddEmployeePage({
 function EmployeesPage({
   employees,
   currentUser,
+  currentUserDataEntryPermissions,
   harvestingDateFrom,
   harvestingDateTo,
   clockedInIds,
@@ -2432,6 +2466,9 @@ function EmployeesPage({
   const navigate = useNavigate()
   const canManageEmployees =
     currentUser?.role === 'admin' || currentUser?.role === 'harvesting-manager'
+  const canEditAnyEmployeeRole =
+    currentUserDataEntryPermissions.has('employee-role-all') ||
+    currentUserDataEntryPermissions.has('employee-role-seasonal')
   const [showRecentEvents, setShowRecentEvents] = useState(false)
   const [employeeSearch, setEmployeeSearch] = useState('')
   const clockedInCount = clockedInIds.length
@@ -2486,7 +2523,8 @@ function EmployeesPage({
   }, [employees, employeeSearchQuery])
 
   function renderEmployeeRow(employee, { alwaysShowRole = false } = {}) {
-    const showRoleColumn = alwaysShowRole || canManageEmployees
+    const canEditRole = canEditEmployeeRoleForEmployee(currentUserDataEntryPermissions, employee)
+    const showRoleColumn = alwaysShowRole || canManageEmployees || canEditAnyEmployeeRole
     return (
       <tr key={employee.id}>
         <td>
@@ -2495,7 +2533,7 @@ function EmployeesPage({
         <td>{employee.name}</td>
         {showRoleColumn ? (
           <td>
-            {canManageEmployees ? (
+            {canEditRole ? (
               <select
                 value={employee.role}
                 onChange={(event) => onUpdateEmployeeRole(employee.id, event.target.value)}
@@ -3536,6 +3574,7 @@ function EmployeeProfileEditor({
 function EmployeeEditPage({
   employees,
   currentUser,
+  currentUserDataEntryPermissions,
   pagePermissionOverrides,
   dataEntryPermissionOverrides,
   onUpdateEmployeeRole,
@@ -3547,7 +3586,7 @@ function EmployeeEditPage({
   const employee = employees.find((item) => item.id === employeeId)
   const canEditEmployeeProfile =
     currentUser?.role === 'admin' || currentUser?.role === 'harvesting-manager'
-  const canEditRole = canEditEmployeeProfile
+  const canEditRole = canEditEmployeeRoleForEmployee(currentUserDataEntryPermissions, employee)
   const canEditRoleAndPermissions = currentUser?.role === 'admin'
   const [permissionsSaveNote, setPermissionsSaveNote] = useState('')
   const [selectedPages, setSelectedPages] = useState(() =>
@@ -3658,7 +3697,11 @@ function EmployeeEditPage({
         <article className="card">
           <h3>Role and page permissions</h3>
           {!canEditRole && (
-            <p className="placeholder">Only Admin or Harvesting Manager can edit employee roles.</p>
+            <p className="placeholder">
+              You do not have permission to edit this employee&apos;s role. Seasonal and
+              supplementary roles need the seasonal role-edit permission; permanent employees need
+              the all-employees role-edit permission.
+            </p>
           )}
           {!canEditRoleAndPermissions && canEditRole && (
             <p className="placeholder">Only Admin can edit page and data-entry permissions.</p>
@@ -4541,7 +4584,7 @@ function getDecorticationMachineEfficiency(record, driedFibreKg = 0) {
   if (leafInputKg <= 0 || driedFibreKg <= 0) {
     return null
   }
-  return Number(((driedFibreKg / leafInputKg) * 100).toFixed(1))
+  return Number(((driedFibreKg / leafInputKg) * 100).toFixed(2))
 }
 
 function DecorticationPage({
@@ -4704,7 +4747,7 @@ function DecorticationPage({
       ? Number(
           (
             efficiencyValues.reduce((sum, value) => sum + value, 0) / efficiencyValues.length
-          ).toFixed(1),
+          ).toFixed(2),
         )
       : 0
   const averageFibrePerMachinePerShift =
@@ -4727,7 +4770,7 @@ function DecorticationPage({
               (
                 machineEfficiencyValues.reduce((sum, value) => sum + value, 0) /
                 machineEfficiencyValues.length
-              ).toFixed(1),
+              ).toFixed(2),
             )
           : null,
     }
@@ -4949,7 +4992,7 @@ function DecorticationPage({
         </article>
         <article className="card">
           <h3>Average Machine Efficiency</h3>
-          <p>{averageMachineEfficiency > 0 ? `${averageMachineEfficiency}%` : '—'}</p>
+          <p>{formatDecorticationEfficiencyPercent(averageMachineEfficiency > 0 ? averageMachineEfficiency : null)}</p>
         </article>
         <article className="card">
           <h3>Total Water</h3>
@@ -5095,7 +5138,7 @@ function DecorticationPage({
                   <td>{item.fibreKg}</td>
                   <td>{item.waterM3}</td>
                   <td>{item.runtimeHours}</td>
-                  <td>{item.efficiency !== null ? `${item.efficiency}%` : '—'}</td>
+                  <td>{formatDecorticationEfficiencyPercent(item.efficiency)}</td>
                 </tr>
               ))}
             </tbody>
@@ -5150,9 +5193,7 @@ function DecorticationPage({
                     <td>
                       {record.runtimeHours > 0 ? record.runtimeHours : 'Pending'}
                     </td>
-                    <td>
-                      {record.machineEfficiency !== null ? `${record.machineEfficiency}%` : '—'}
-                    </td>
+                    <td>{formatDecorticationEfficiencyPercent(record.machineEfficiency)}</td>
                     <td>
                       {editingRecordId === record.id ? (
                         <span>Editing below</span>
@@ -5294,11 +5335,12 @@ function DecorticationPage({
                           {editLeafInputKg && record.driedFibreKg > 0 ? (
                             <div className="placeholder">
                               Machine efficiency:{' '}
-                              {getDecorticationMachineEfficiency(
-                                { leafInputKg: Number(editLeafInputKg) },
-                                record.driedFibreKg,
-                              ) ?? '—'}
-                              %
+                              {formatDecorticationEfficiencyPercent(
+                                getDecorticationMachineEfficiency(
+                                  { leafInputKg: Number(editLeafInputKg) },
+                                  record.driedFibreKg,
+                                ),
+                              )}
                             </div>
                           ) : null}
                           {editStaffingWarnings.length > 0 ? (
@@ -5341,9 +5383,7 @@ function DecorticationPage({
                           </div>
                           <div>
                             Efficiency:{' '}
-                            {record.machineEfficiency !== null
-                              ? `${record.machineEfficiency}%`
-                              : '—'}
+                            {formatDecorticationEfficiencyPercent(record.machineEfficiency)}
                           </div>
                         </div>
                       </td>
@@ -9281,6 +9321,20 @@ function App() {
   }
 
   function handleUpdateEmployeeRole(employeeId, role) {
+    const employee = employees.find((item) => item.id === employeeId)
+    if (!employee) {
+      return
+    }
+    const permissions = currentUser
+      ? getEffectiveDataEntryPermissions(
+          currentUser.id,
+          dataEntryPermissionOverrides,
+          employees,
+        )
+      : new Set()
+    if (!canEditEmployeeRoleForEmployee(permissions, employee)) {
+      return
+    }
     setEmployees((prev) =>
       prev.map((employee) => {
         if (employee.id !== employeeId) {
@@ -10018,6 +10072,7 @@ function App() {
               <EmployeesPage
                 employees={employees}
                 currentUser={currentUser}
+                currentUserDataEntryPermissions={currentUserDataEntryPermissions}
                 harvestingDateFrom={harvestingDateFrom}
                 harvestingDateTo={harvestingDateTo}
                 clockedInIds={clockedInIds}
@@ -10074,6 +10129,7 @@ function App() {
               <EmployeeEditPage
                 employees={employees}
                 currentUser={currentUser}
+                currentUserDataEntryPermissions={currentUserDataEntryPermissions}
                 pagePermissionOverrides={pagePermissionOverrides}
                 dataEntryPermissionOverrides={dataEntryPermissionOverrides}
                 onUpdateEmployeeRole={handleUpdateEmployeeRole}
