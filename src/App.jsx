@@ -597,6 +597,49 @@ function getInvoiceDescriptionFromProductCode(productCode) {
   return 'Custom Item'
 }
 
+const FIRST_INVOICE_NUMBER = 1096
+const FIRST_PROFORMA_SEQUENCE = 1088
+
+const INVOICE_BANK_DETAILS_BY_CURRENCY = {
+  KES: {
+    bankName: 'STANDARD CHARTERED BANK',
+    accountNumber: '0102488985500',
+    currency: 'KES',
+    accountName: 'MANANASI FIBRE LIMITED',
+    swiftCode: 'SCBLKENXXX',
+  },
+  USD: {
+    bankName: 'STANDARD CHARTERED BANK',
+    bankAddress: 'THE HUB, KAREN, NAIROBI',
+    branchCode: '02',
+    accountNumber: '8702488985500',
+    currency: 'USD',
+    accountName: 'MANANASI FIBRE LIMITED',
+  },
+}
+
+function getInvoiceBankDetails(currency) {
+  return currency === 'KES'
+    ? INVOICE_BANK_DETAILS_BY_CURRENCY.KES
+    : INVOICE_BANK_DETAILS_BY_CURRENCY.USD
+}
+
+function InvoiceBankDetailsBlock({ currency }) {
+  const details = getInvoiceBankDetails(currency)
+  return (
+    <div className="invoice-bank-details">
+      <p><strong>Bank details</strong></p>
+      <p>{details.bankName}</p>
+      {details.bankAddress ? <p>{details.bankAddress}</p> : null}
+      {details.branchCode ? <p>Branch code: {details.branchCode}</p> : null}
+      <p>Account number: {details.accountNumber}</p>
+      <p>Currency: {details.currency}</p>
+      <p>Account name: {details.accountName}</p>
+      {details.swiftCode ? <p>SWIFT code: {details.swiftCode}</p> : null}
+    </div>
+  )
+}
+
 function buildBarcodeBits(value) {
   const text = String(value ?? '')
   let bits = '1010'
@@ -1254,6 +1297,7 @@ function InvoicingPage({
     )
 
     const footerY = tableTop + rowH * (tableRows + 1) + 12
+    const bankDetails = getInvoiceBankDetails(selectedDocument.currency)
     pdf.setFont('helvetica', 'normal')
     pdf.setFontSize(9)
     pdf.text('HS Code', left, footerY)
@@ -1262,8 +1306,35 @@ function InvoicingPage({
     pdf.text(selectedDocument.paymentTerms, left + 98, footerY + 13)
     pdf.text('Shipping:', left + 30, footerY + 20)
     pdf.text(selectedDocument.shippingTerms, left + 98, footerY + 20)
-    pdf.text('Authorised by:', left + 30, footerY + 32)
-    pdf.text('James Boyd-Moss (Managing Director)', left + 98, footerY + 32)
+    let bankY = footerY + 29
+    pdf.setFont('helvetica', 'bold')
+    pdf.text('Bank details:', left + 30, bankY)
+    pdf.setFont('helvetica', 'normal')
+    bankY += 6
+    pdf.text(bankDetails.bankName, left + 98, bankY)
+    bankY += 5
+    if (bankDetails.bankAddress) {
+      pdf.text(bankDetails.bankAddress, left + 98, bankY)
+      bankY += 5
+    }
+    if (bankDetails.branchCode) {
+      pdf.text(`Branch code: ${bankDetails.branchCode}`, left + 98, bankY)
+      bankY += 5
+    }
+    pdf.text(`Account number: ${bankDetails.accountNumber}`, left + 98, bankY)
+    bankY += 5
+    pdf.text(`Currency: ${bankDetails.currency}`, left + 98, bankY)
+    bankY += 5
+    pdf.text(`Account name: ${bankDetails.accountName}`, left + 98, bankY)
+    bankY += 5
+    if (bankDetails.swiftCode) {
+      pdf.text(`SWIFT code: ${bankDetails.swiftCode}`, left + 98, bankY)
+      bankY += 5
+    }
+    pdf.setFont('helvetica', 'bold')
+    pdf.text('Authorised by:', left + 30, bankY + 4)
+    pdf.setFont('helvetica', 'normal')
+    pdf.text('James Boyd-Moss (Managing Director)', left + 98, bankY + 4)
 
     const filePrefix = selectedDocument.documentType === 'proforma' ? 'proforma' : 'invoice'
     pdf.save(`${filePrefix}-${selectedDocument.documentNumber}.pdf`)
@@ -1296,7 +1367,10 @@ function InvoicingPage({
           </label>
           <label>
             Currency
-            <input value={currency} onChange={(event) => setCurrency(event.target.value)} />
+            <select value={currency} onChange={(event) => setCurrency(event.target.value)}>
+              <option value="USD">USD</option>
+              <option value="KES">KES (Kenya Shillings)</option>
+            </select>
           </label>
           <label>
             Customer
@@ -1529,6 +1603,7 @@ function InvoicingPage({
                 <p><strong>{selectedDocument.documentType === 'proforma' ? 'Proforma number' : 'Invoice number'}:</strong> {selectedDocument.documentNumber}</p>
                 <p><strong>Date:</strong> {formatDisplayDate(selectedDocument.invoiceDate)}</p>
                 <p><strong>Origin:</strong> {selectedDocument.origin}</p>
+                <p><strong>Currency:</strong> {selectedDocument.currency}</p>
               </div>
             </section>
 
@@ -1579,6 +1654,7 @@ function InvoicingPage({
               <p><strong>HS Code</strong> {selectedDocument.hsCode}</p>
               <p><strong>Payment terms:</strong> {selectedDocument.paymentTerms}</p>
               <p><strong>Shipping:</strong> {selectedDocument.shippingTerms}</p>
+              <InvoiceBankDetailsBlock currency={selectedDocument.currency} />
               <p><strong>Authorised by:</strong> James Boyd-Moss (Managing Director)</p>
             </section>
           </article>
@@ -9285,7 +9361,12 @@ function App() {
       .filter((item) => item.documentType === input.documentType)
       .map((item) => Number(String(item.documentNumber).replace(/[^\d]/g, '')))
       .filter((value) => !Number.isNaN(value))
-    const nextSequence = existingNumbers.length > 0 ? Math.max(...existingNumbers) + 1 : 1088
+    const nextSequence =
+      existingNumbers.length > 0
+        ? Math.max(...existingNumbers) + 1
+        : isProforma
+          ? FIRST_PROFORMA_SEQUENCE
+          : FIRST_INVOICE_NUMBER
     const documentNumber = isProforma ? `${prefix}-${nextSequence}` : String(nextSequence)
     const nextDocument = {
       id: `${prefix}-${Date.now()}`,
@@ -9309,7 +9390,8 @@ function App() {
       .filter((item) => item.documentType === 'invoice')
       .map((item) => Number(String(item.documentNumber).replace(/[^\d]/g, '')))
       .filter((value) => !Number.isNaN(value))
-    const nextSequence = existingNumbers.length > 0 ? Math.max(...existingNumbers) + 1 : 1088
+    const nextSequence =
+      existingNumbers.length > 0 ? Math.max(...existingNumbers) + 1 : FIRST_INVOICE_NUMBER
     const converted = {
       ...source,
       id: `INV-${Date.now()}`,

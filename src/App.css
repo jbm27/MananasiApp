@@ -437,6 +437,14 @@ th {
   border: 1px solid #111827;
 }
 
+.invoice-bank-details {
+  margin-top: 0.5rem;
+}
+
+.invoice-bank-details p {
+  margin: 0.15rem 0;
+}
+
 .invoice-foot-grid {
   margin-top: 1rem;
 }
