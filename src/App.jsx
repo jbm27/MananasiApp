@@ -213,6 +213,17 @@ function readPagePermissionOverrides() {
   }
 }
 
+function writePagePermissionOverrides(overrides) {
+  if (typeof localStorage === 'undefined') {
+    return
+  }
+  try {
+    localStorage.setItem(PAGE_PERMISSIONS_STORAGE_KEY, JSON.stringify(overrides))
+  } catch {
+    // ignore quota / privacy errors
+  }
+}
+
 function readDataEntryPermissionOverrides() {
   if (typeof localStorage === 'undefined') {
     return {}
@@ -230,6 +241,42 @@ function readDataEntryPermissionOverrides() {
   } catch {
     return {}
   }
+}
+
+function writeDataEntryPermissionOverrides(overrides) {
+  if (typeof localStorage === 'undefined') {
+    return
+  }
+  try {
+    localStorage.setItem(DATA_ENTRY_PERMISSIONS_STORAGE_KEY, JSON.stringify(overrides))
+  } catch {
+    // ignore quota / privacy errors
+  }
+}
+
+function getDataEntryPermissionSyncKey(employeeId, overrides, employees) {
+  const override = overrides[employeeId]
+  if (Array.isArray(override)) {
+    return `override:${override.slice().sort().join(',')}`
+  }
+  const employee = employees.find((item) => item.id === employeeId)
+  return `role:${employee?.role ?? ''}`
+}
+
+function getPagePermissionSyncKey(employeeId, overrides, employees) {
+  const override = overrides[employeeId]
+  if (Array.isArray(override)) {
+    return `override:${override.slice().sort().join(',')}`
+  }
+  const employee = employees.find((item) => item.id === employeeId)
+  if (employee?.role === 'admin') {
+    return 'role:admin'
+  }
+  const defaults = DEFAULT_PAGE_ACCESS_BY_EMPLOYEE_ID[employeeId]
+  if (defaults) {
+    return `defaults:${defaults.slice().sort().join(',')}`
+  }
+  return 'role:default-dashboard'
 }
 
 function pathnameToRequiredPageId(pathname) {
@@ -1693,8 +1740,11 @@ function PageAccessAdminSection({
   employees,
   currentUser,
   pagePermissionOverrides,
+  dataEntryPermissionOverrides,
   onSaveEmployeePageAccess,
+  onSaveEmployeeDataEntryPermissions,
   onClearEmployeePageAccessOverride,
+  onClearEmployeeDataEntryPermissionOverride,
 }) {
   const isAdmin = currentUser?.role === 'admin'
   const sortedEmployees = useMemo(
@@ -1703,7 +1753,15 @@ function PageAccessAdminSection({
   )
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(() => sortedEmployees[0]?.id ?? '')
   const [selectedPages, setSelectedPages] = useState(() => new Set(['dashboard']))
+  const [selectedDataEntryPermissions, setSelectedDataEntryPermissions] = useState(() => new Set())
   const [saveNote, setSaveNote] = useState('')
+
+  const pagePermissionSyncKey = selectedEmployeeId
+    ? getPagePermissionSyncKey(selectedEmployeeId, pagePermissionOverrides, employees)
+    : ''
+  const dataEntryPermissionSyncKey = selectedEmployeeId
+    ? getDataEntryPermissionSyncKey(selectedEmployeeId, dataEntryPermissionOverrides, employees)
+    : ''
 
   useEffect(() => {
     if (!sortedEmployees.some((item) => item.id === selectedEmployeeId) && sortedEmployees[0]) {
@@ -1720,7 +1778,22 @@ function PageAccessAdminSection({
       return
     }
     setSelectedPages(new Set(getBasePageListForEditor(selectedEmployeeId, pagePermissionOverrides, employees)))
-  }, [selectedEmployeeId, pagePermissionOverrides, employees])
+  }, [selectedEmployeeId, pagePermissionSyncKey, employees, pagePermissionOverrides])
+
+  useEffect(() => {
+    if (!selectedEmployeeId) {
+      return
+    }
+    setSelectedDataEntryPermissions(
+      new Set(
+        getBaseDataEntryPermissionsForEditor(
+          selectedEmployeeId,
+          dataEntryPermissionOverrides,
+          employees,
+        ),
+      ),
+    )
+  }, [selectedEmployeeId, dataEntryPermissionSyncKey, employees, dataEntryPermissionOverrides])
 
   function togglePage(pageId) {
     if (pageId === 'dashboard') {
@@ -1738,14 +1811,28 @@ function PageAccessAdminSection({
     })
   }
 
+  function toggleDataEntryPermission(permissionId) {
+    setSelectedDataEntryPermissions((prev) => {
+      const next = new Set(prev)
+      if (next.has(permissionId)) {
+        next.delete(permissionId)
+      } else {
+        next.add(permissionId)
+      }
+      return next
+    })
+  }
+
   function handleSaveAccess() {
     onSaveEmployeePageAccess(selectedEmployeeId, [...selectedPages])
-    setSaveNote('Saved page access for this person in this browser.')
+    onSaveEmployeeDataEntryPermissions(selectedEmployeeId, [...selectedDataEntryPermissions])
+    setSaveNote('Saved page and data-entry access. The employee may need to sign out and back in.')
   }
 
   function handleUsePolicyDefaults() {
     onClearEmployeePageAccessOverride(selectedEmployeeId)
-    setSaveNote('Cleared custom access; organisation defaults apply for this person.')
+    onClearEmployeeDataEntryPermissionOverride(selectedEmployeeId)
+    setSaveNote('Cleared custom access; organisation role defaults apply for this person.')
   }
 
   if (!isAdmin) {
@@ -1756,10 +1843,12 @@ function PageAccessAdminSection({
 
   return (
     <section className="page-access-admin">
-      <h3>Page access (administrator)</h3>
+      <h3>Access and permissions (administrator)</h3>
       <p>
-        Choose an employee, tick the areas they may open in the sidebar, then save. Changes are
-        stored on the Railway backend. Administrators always have every page.
+        Choose an employee, tick the pages they may open and the data they may enter, then save.
+        Haulage requires both the <strong>Haulage</strong> page and{' '}
+        <strong>Haulage trip creation</strong> and/or <strong>Haulage mileage, fuel, and maintenance</strong>{' '}
+        data-entry permissions. Changes sync to the server; ask the person to sign out and back in.
       </p>
       <div className="form-grid page-access-admin-toolbar">
         <label>
@@ -1793,9 +1882,22 @@ function PageAccessAdminSection({
           </label>
         ))}
       </fieldset>
+      <fieldset className="page-access-checkboxes">
+        <legend>Data entry permissions</legend>
+        {DATA_ENTRY_PERMISSION_IDS.map((permissionId) => (
+          <label key={permissionId} className="check-item">
+            <input
+              type="checkbox"
+              checked={selectedDataEntryPermissions.has(permissionId)}
+              onChange={() => toggleDataEntryPermission(permissionId)}
+            />
+            <span>{DATA_ENTRY_PERMISSION_LABELS[permissionId] ?? permissionId}</span>
+          </label>
+        ))}
+      </fieldset>
       <div className="page-access-admin-actions">
         <button type="button" onClick={handleSaveAccess}>
-          Save page access
+          Save access and permissions
         </button>
         <button type="button" className="button-quiet" onClick={handleUsePolicyDefaults}>
           Use policy defaults for this person
@@ -1811,8 +1913,11 @@ function AddEmployeePage({
   currentUser,
   onAddEmployee,
   pagePermissionOverrides,
+  dataEntryPermissionOverrides,
   onSaveEmployeePageAccess,
+  onSaveEmployeeDataEntryPermissions,
   onClearEmployeePageAccessOverride,
+  onClearEmployeeDataEntryPermissionOverride,
 }) {
   const navigate = useNavigate()
   const [role, setRole] = useState('harvester')
@@ -1886,8 +1991,11 @@ function AddEmployeePage({
         employees={employees}
         currentUser={currentUser}
         pagePermissionOverrides={pagePermissionOverrides}
+        dataEntryPermissionOverrides={dataEntryPermissionOverrides}
         onSaveEmployeePageAccess={onSaveEmployeePageAccess}
+        onSaveEmployeeDataEntryPermissions={onSaveEmployeeDataEntryPermissions}
         onClearEmployeePageAccessOverride={onClearEmployeePageAccessOverride}
+        onClearEmployeeDataEntryPermissionOverride={onClearEmployeeDataEntryPermissionOverride}
       />
     </section>
   )
@@ -3005,6 +3113,7 @@ function EmployeeEditPage({
     currentUser?.role === 'admin' || currentUser?.role === 'harvesting-manager'
   const canEditRole = canEditEmployeeProfile
   const canEditRoleAndPermissions = currentUser?.role === 'admin'
+  const [permissionsSaveNote, setPermissionsSaveNote] = useState('')
   const [selectedPages, setSelectedPages] = useState(() =>
     employee ? new Set(getBasePageListForEditor(employee.id, pagePermissionOverrides, employees)) : new Set(),
   )
@@ -3016,12 +3125,19 @@ function EmployeeEditPage({
       : new Set(),
   )
 
+  const pagePermissionSyncKey = employee
+    ? getPagePermissionSyncKey(employee.id, pagePermissionOverrides, employees)
+    : ''
+  const dataEntryPermissionSyncKey = employee
+    ? getDataEntryPermissionSyncKey(employee.id, dataEntryPermissionOverrides, employees)
+    : ''
+
   useEffect(() => {
     if (!employee) {
       return
     }
     setSelectedPages(new Set(getBasePageListForEditor(employee.id, pagePermissionOverrides, employees)))
-  }, [employee, pagePermissionOverrides, employees])
+  }, [employee?.id, pagePermissionSyncKey, employees, pagePermissionOverrides])
 
   useEffect(() => {
     if (!employee) {
@@ -3032,7 +3148,7 @@ function EmployeeEditPage({
         getBaseDataEntryPermissionsForEditor(employee.id, dataEntryPermissionOverrides, employees),
       ),
     )
-  }, [employee, dataEntryPermissionOverrides, employees])
+  }, [employee?.id, dataEntryPermissionSyncKey, employees, dataEntryPermissionOverrides])
 
   if (!employee) {
     return (
@@ -3072,6 +3188,9 @@ function EmployeeEditPage({
     if (canEditRoleAndPermissions) {
       onSaveEmployeePageAccess(employee.id, [...selectedPages])
       onSaveEmployeeDataEntryPermissions(employee.id, [...selectedDataEntryPermissions])
+      setPermissionsSaveNote('Saved. Ask this person to sign out and back in to pick up new access.')
+    } else {
+      setPermissionsSaveNote('Role saved.')
     }
   }
 
@@ -3108,6 +3227,11 @@ function EmployeeEditPage({
           {!canEditRoleAndPermissions && canEditRole && (
             <p className="placeholder">Only Admin can edit page and data-entry permissions.</p>
           )}
+          {canEditRoleAndPermissions ? (
+            <p className="inline-hint">
+              Haulage needs the Haulage page plus Haulage trip creation and/or mileage permissions.
+            </p>
+          ) : null}
           <form className="form-grid" onSubmit={handleSaveRoleAndPermissions}>
             <label>
               Role
@@ -3161,6 +3285,7 @@ function EmployeeEditPage({
               </button>
             )}
           </form>
+          {permissionsSaveNote ? <p className="inline-hint">{permissionsSaveNote}</p> : null}
         </article>
         <article className="card">
           <h3>Employee database details</h3>
@@ -7976,11 +8101,16 @@ function hydrateAppState(data, setters) {
       incentiveRateKesPerKg: sanitized.compensationRules.incentiveRateKesPerKg ?? 1,
     })
   }
-  if (sanitized.pagePermissionOverrides) {
+  if (sanitized.pagePermissionOverrides && typeof sanitized.pagePermissionOverrides === 'object') {
     setters.setPagePermissionOverrides(sanitized.pagePermissionOverrides)
+    writePagePermissionOverrides(sanitized.pagePermissionOverrides)
   }
-  if (sanitized.dataEntryPermissionOverrides) {
+  if (
+    sanitized.dataEntryPermissionOverrides &&
+    typeof sanitized.dataEntryPermissionOverrides === 'object'
+  ) {
     setters.setDataEntryPermissionOverrides(sanitized.dataEntryPermissionOverrides)
+    writeDataEntryPermissionOverrides(sanitized.dataEntryPermissionOverrides)
   }
   if (Array.isArray(sanitized.haulageTrips)) setters.setHaulageTrips(sanitized.haulageTrips)
   if (sanitized.mileageByDate) setters.setMileageByDate(sanitized.mileageByDate)
@@ -8050,10 +8180,8 @@ function App() {
   const [authLeadershipId, setAuthLeadershipId] = useState(() =>
     readValidAuthLeadershipId(mananasiStaffEmployees),
   )
-  const [pagePermissionOverrides, setPagePermissionOverrides] = useState(readPagePermissionOverrides)
-  const [dataEntryPermissionOverrides, setDataEntryPermissionOverrides] = useState(
-    readDataEntryPermissionOverrides,
-  )
+  const [pagePermissionOverrides, setPagePermissionOverrides] = useState(() => ({}))
+  const [dataEntryPermissionOverrides, setDataEntryPermissionOverrides] = useState(() => ({}))
   const [attendanceRefreshing, setAttendanceRefreshing] = useState(false)
   const [payrollAdjustments, setPayrollAdjustments] = useState({})
   const [salaryPayrollAdjustments, setSalaryPayrollAdjustments] = useState({})
@@ -8328,7 +8456,11 @@ function App() {
     if (!unique.includes('dashboard')) {
       unique.unshift('dashboard')
     }
-    setPagePermissionOverrides((prev) => ({ ...prev, [employeeId]: unique }))
+    setPagePermissionOverrides((prev) => {
+      const next = { ...prev, [employeeId]: unique }
+      writePagePermissionOverrides(next)
+      return next
+    })
   }
 
   function handleUpdatePayrollAdjustment(periodId, employeeId, adjustment, section = 'wages') {
@@ -8394,13 +8526,27 @@ function App() {
     setPagePermissionOverrides((prev) => {
       const next = { ...prev }
       delete next[employeeId]
+      writePagePermissionOverrides(next)
+      return next
+    })
+  }
+
+  function handleClearEmployeeDataEntryPermissionOverride(employeeId) {
+    setDataEntryPermissionOverrides((prev) => {
+      const next = { ...prev }
+      delete next[employeeId]
+      writeDataEntryPermissionOverrides(next)
       return next
     })
   }
 
   function handleSaveEmployeeDataEntryPermissions(employeeId, permissionIds) {
     const unique = [...new Set(permissionIds)].filter((id) => DATA_ENTRY_PERMISSION_IDS.includes(id))
-    setDataEntryPermissionOverrides((prev) => ({ ...prev, [employeeId]: unique }))
+    setDataEntryPermissionOverrides((prev) => {
+      const next = { ...prev, [employeeId]: unique }
+      writeDataEntryPermissionOverrides(next)
+      return next
+    })
   }
 
   function handleAddCustomer(input) {
@@ -8848,8 +8994,11 @@ function App() {
                 currentUser={currentUser}
                 onAddEmployee={handleAddEmployee}
                 pagePermissionOverrides={pagePermissionOverrides}
+                dataEntryPermissionOverrides={dataEntryPermissionOverrides}
                 onSaveEmployeePageAccess={handleSaveEmployeePageAccess}
+                onSaveEmployeeDataEntryPermissions={handleSaveEmployeeDataEntryPermissions}
                 onClearEmployeePageAccessOverride={handleClearEmployeePageAccessOverride}
+                onClearEmployeeDataEntryPermissionOverride={handleClearEmployeeDataEntryPermissionOverride}
               />
             }
           />
