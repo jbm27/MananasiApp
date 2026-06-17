@@ -4536,17 +4536,12 @@ function getDecorticationStaffingWarnings(supervisorId, operatorCount) {
   return warnings
 }
 
-function getDecorticationRecordFibreKg(record, driedFibreKg = 0) {
-  return record.fibreKg > 0 ? record.fibreKg : driedFibreKg
-}
-
-function getDecorticationMachineEfficiency(record) {
-  const fibreKg = record.fibreKg ?? 0
+function getDecorticationMachineEfficiency(record, driedFibreKg = 0) {
   const leafInputKg = record.leafInputKg ?? 0
-  if (leafInputKg <= 0 || fibreKg <= 0) {
+  if (leafInputKg <= 0 || driedFibreKg <= 0) {
     return null
   }
-  return Number(((fibreKg / leafInputKg) * 100).toFixed(1))
+  return Number(((driedFibreKg / leafInputKg) * 100).toFixed(1))
 }
 
 function DecorticationPage({
@@ -4591,7 +4586,6 @@ function DecorticationPage({
   const [editWaterM3, setEditWaterM3] = useState('')
   const [editRuntimeHours, setEditRuntimeHours] = useState('')
   const [editLeafInputKg, setEditLeafInputKg] = useState('')
-  const [editFibreKg, setEditFibreKg] = useState('')
   const [editStatus, setEditStatus] = useState('')
   const [viewingRecordId, setViewingRecordId] = useState('')
   const [attendanceViewingEmployeeId, setAttendanceViewingEmployeeId] = useState('')
@@ -4616,17 +4610,14 @@ function DecorticationPage({
     map[record.decorticationRecordId] = (map[record.decorticationRecordId] ?? 0) + record.totalDriedKg
     return map
   }, {})
-  const recordsWithDrying = filteredRecords.map((record) => ({
-    ...record,
-    driedFibreKg: Number((dryingByDecorticationRecordId[record.id] ?? 0).toFixed(1)),
-    displayFibreKg: Number(
-      getDecorticationRecordFibreKg(
-        record,
-        dryingByDecorticationRecordId[record.id] ?? 0,
-      ).toFixed(1),
-    ),
-    machineEfficiency: getDecorticationMachineEfficiency(record),
-  }))
+  const recordsWithDrying = filteredRecords.map((record) => {
+    const driedFibreKg = Number((dryingByDecorticationRecordId[record.id] ?? 0).toFixed(1))
+    return {
+      ...record,
+      driedFibreKg,
+      machineEfficiency: getDecorticationMachineEfficiency(record, driedFibreKg),
+    }
+  })
   const sortedDecorticationRecords = [...recordsWithDrying].sort((a, b) =>
     a.date === b.date ? b.shiftNumber - a.shiftNumber : b.date.localeCompare(a.date),
   )
@@ -4700,7 +4691,7 @@ function DecorticationPage({
       daysWorked: item.daysWorked,
     })),
   ].sort((a, b) => b.daysWorked - a.daysWorked)
-  const totalFibreKg = recordsWithDrying.reduce((sum, record) => sum + record.displayFibreKg, 0)
+  const totalFibreKg = recordsWithDrying.reduce((sum, record) => sum + record.driedFibreKg, 0)
   const totalLeafInputKg = recordsWithDrying.reduce((sum, record) => sum + (record.leafInputKg ?? 0), 0)
   const totalWaterM3 = filteredRecords.reduce((sum, record) => sum + record.waterM3, 0)
   const totalRuntimeHours = filteredRecords.reduce((sum, record) => sum + record.runtimeHours, 0)
@@ -4727,7 +4718,7 @@ function DecorticationPage({
       machine: machineCode,
       shifts: records.length,
       leafInputKg: Number(records.reduce((sum, record) => sum + (record.leafInputKg ?? 0), 0).toFixed(1)),
-      fibreKg: Number(records.reduce((sum, record) => sum + record.displayFibreKg, 0).toFixed(1)),
+      fibreKg: Number(records.reduce((sum, record) => sum + record.driedFibreKg, 0).toFixed(1)),
       waterM3: Number(records.reduce((sum, record) => sum + record.waterM3, 0).toFixed(1)),
       runtimeHours: Number(records.reduce((sum, record) => sum + record.runtimeHours, 0).toFixed(1)),
       efficiency:
@@ -4816,7 +4807,6 @@ function DecorticationPage({
     setEditWaterM3(record.waterM3 > 0 ? String(record.waterM3) : '')
     setEditRuntimeHours(record.runtimeHours > 0 ? String(record.runtimeHours) : '')
     setEditLeafInputKg(record.leafInputKg > 0 ? String(record.leafInputKg) : '')
-    setEditFibreKg(record.fibreKg > 0 ? String(record.fibreKg) : '')
     setEditStatus('')
   }
 
@@ -4850,9 +4840,8 @@ function DecorticationPage({
     const water = editWaterM3 === '' ? 0 : Number(editWaterM3)
     const runtime = editRuntimeHours === '' ? 0 : Number(editRuntimeHours)
     const leafInput = editLeafInputKg === '' ? 0 : Number(editLeafInputKg)
-    const fibre = editFibreKg === '' ? 0 : Number(editFibreKg)
-    if ([water, runtime, leafInput, fibre].some((value) => Number.isNaN(value) || value < 0)) {
-      setEditStatus('Leaves, fibre, water, and runtime must be zero or positive numbers.')
+    if ([water, runtime, leafInput].some((value) => Number.isNaN(value) || value < 0)) {
+      setEditStatus('Leaves, water, and runtime must be zero or positive numbers.')
       return
     }
     const supervisor = editSupervisorId
@@ -4875,7 +4864,6 @@ function DecorticationPage({
       operatorIds: editOperatorIds,
       operatorNames,
       leafInputKg: leafInput,
-      fibreKg: fibre,
       waterM3: water,
       runtimeHours: runtime,
     })
@@ -4906,9 +4894,9 @@ function DecorticationPage({
     <section className="panel">
       <h2>Decortication</h2>
       <p>
-        Track machine staffing, leaf input, fibre output, water consumption, runtime, and batch
-        assignment for D2, D3, and D4. Machine efficiency is calculated as fibre produced divided by
-        leaves used.
+        Track machine staffing, leaf input, water consumption, runtime, and batch assignment for D2,
+        D3, and D4. Dried fibre is synced from the Drying page. Machine efficiency is calculated as
+        dried fibre divided by leaves used.
       </p>
 
       <div className="form-grid">
@@ -5092,7 +5080,7 @@ function DecorticationPage({
                 <th>Machine</th>
                 <th>Shifts</th>
                 <th>Leaves (kg)</th>
-                <th>Fibre (kg)</th>
+                <th>Dried Fibre (kg)</th>
                 <th>Water (m3)</th>
                 <th>Runtime (hrs)</th>
                 <th>Efficiency</th>
@@ -5134,7 +5122,7 @@ function DecorticationPage({
                 <th>Supervisor</th>
                 <th>Operators</th>
                 <th>Leaves (kg)</th>
-                <th>Fibre (kg)</th>
+                <th>Dried Fibre (kg)</th>
                 <th>Water (m3)</th>
                 <th>Runtime (hrs)</th>
                 <th>Efficiency</th>
@@ -5154,11 +5142,7 @@ function DecorticationPage({
                     <td>{record.operatorIds.length}</td>
                     <td>{record.leafInputKg > 0 ? record.leafInputKg : 'Pending'}</td>
                     <td>
-                      {record.displayFibreKg > 0 ? (
-                        record.displayFibreKg
-                      ) : (
-                        'Pending'
-                      )}
+                      {record.driedFibreKg > 0 ? record.driedFibreKg : 'Pending'}
                     </td>
                     <td>
                       {record.waterM3 > 0 ? record.waterM3 : 'Pending'}
@@ -5281,17 +5265,10 @@ function DecorticationPage({
                               placeholder="0"
                             />
                           </label>
-                          <label>
-                            Fibre produced (kg)
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.1"
-                              value={editFibreKg}
-                              onChange={(event) => setEditFibreKg(event.target.value)}
-                              placeholder="0"
-                            />
-                          </label>
+                          <div className="placeholder">
+                            Dried fibre (kg):{' '}
+                            {record.driedFibreKg > 0 ? record.driedFibreKg : 'Pending — record on Drying page'}
+                          </div>
                           <label>
                             Water (m3)
                             <input
@@ -5314,13 +5291,13 @@ function DecorticationPage({
                               placeholder="0"
                             />
                           </label>
-                          {editLeafInputKg && editFibreKg ? (
+                          {editLeafInputKg && record.driedFibreKg > 0 ? (
                             <div className="placeholder">
                               Machine efficiency:{' '}
-                              {getDecorticationMachineEfficiency({
-                                leafInputKg: Number(editLeafInputKg),
-                                fibreKg: Number(editFibreKg),
-                              }) ?? '—'}
+                              {getDecorticationMachineEfficiency(
+                                { leafInputKg: Number(editLeafInputKg) },
+                                record.driedFibreKg,
+                              ) ?? '—'}
                               %
                             </div>
                           ) : null}
@@ -5359,7 +5336,8 @@ function DecorticationPage({
                             Leaves: {record.leafInputKg > 0 ? `${record.leafInputKg} kg` : 'Pending'}
                           </div>
                           <div>
-                            Fibre: {record.displayFibreKg > 0 ? `${record.displayFibreKg} kg` : 'Pending'}
+                            Dried fibre:{' '}
+                            {record.driedFibreKg > 0 ? `${record.driedFibreKg} kg` : 'Pending (from Drying)'}
                           </div>
                           <div>
                             Efficiency:{' '}
@@ -5367,9 +5345,6 @@ function DecorticationPage({
                               ? `${record.machineEfficiency}%`
                               : '—'}
                           </div>
-                          {record.driedFibreKg > 0 && record.fibreKg <= 0 ? (
-                            <div>Dried fibre from weighing: {record.driedFibreKg} kg</div>
-                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -6864,6 +6839,8 @@ function BalingPage({
 
   const canManageBaling = currentUserDataEntryPermissions.has('baling-entry')
   const canViewBaling = canManageBaling || currentUser?.role === 'baler'
+  const canSubmitBaleEntry =
+    canManageBaling && (isAppAdmin(currentUser) || clockedInIds.includes(currentUser?.id))
 
   const clockedInBalers = employees.filter(
     (employee) => employee.role === 'baler' && clockedInIds.includes(employee.id),
@@ -6922,7 +6899,7 @@ function BalingPage({
       setEntryStatus('You do not have permission to create bales.')
       return
     }
-    if (!clockedInIds.includes(currentUser.id)) {
+    if (!isAppAdmin(currentUser) && !clockedInIds.includes(currentUser?.id)) {
       setEntryStatus('You must be clocked in before creating bales.')
       return
     }
@@ -7068,9 +7045,9 @@ function BalingPage({
             Entered By (Supervisor)
             <input
               value={
-                currentUser?.role === 'baling-supervisor'
+                canManageBaling
                   ? `${currentUser.name} (${currentUser.id})`
-                  : 'Only Baling Supervisor can create bales'
+                  : 'You do not have permission to create bales'
               }
               disabled
             />
@@ -7090,8 +7067,15 @@ function BalingPage({
               ))}
             </div>
           </label>
-          <button type="submit">Create Bale(s)</button>
+          <button type="submit" disabled={!canSubmitBaleEntry}>
+            Create Bale(s)
+          </button>
         </form>
+        {!canSubmitBaleEntry && canManageBaling && !isAppAdmin(currentUser) ? (
+          <div className="placeholder">
+            You must be clocked in to create bales. Admin can enter bale data without clocking in.
+          </div>
+        ) : null}
         {entryStatus && <div className="placeholder">{entryStatus}</div>}
         {lastCreatedBaleCode && <BaleLabel baleCode={lastCreatedBaleCode} baleWeightKg={Number(baleWeightKg) || 0} />}
       </CollapsibleSection>
@@ -9611,7 +9595,6 @@ function App() {
       operatorIds: updates.operatorIds ?? record.operatorIds,
       operatorNames: updates.operatorNames ?? record.operatorNames,
       leafInputKg: updates.leafInputKg ?? record.leafInputKg,
-      fibreKg: updates.fibreKg ?? record.fibreKg,
       waterM3: updates.waterM3 ?? record.waterM3,
       runtimeHours: updates.runtimeHours ?? record.runtimeHours,
     }
