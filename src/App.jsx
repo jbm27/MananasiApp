@@ -715,67 +715,72 @@ function prepareInvoiceLogoForPdf(sourceImage) {
   ctx.drawImage(sourceImage, 0, 0)
   const imageData = ctx.getImageData(0, 0, width, height)
   const { data } = imageData
+  const fibreRegionStartY = Math.floor(height * 0.62)
   const goldMask = new Uint8Array(width * height)
 
-  for (let pixelIndex = 0; pixelIndex < data.length; pixelIndex += 4) {
-    const r = data[pixelIndex]
-    const g = data[pixelIndex + 1]
-    const b = data[pixelIndex + 2]
-    const alpha = data[pixelIndex + 3]
-    if (alpha < 16) {
-      continue
-    }
+  function isGoldPixel(r, g, b) {
+    return r > 95 && g > 70 && b < 130 && r >= g && g >= b
+  }
 
-    const maxChannel = Math.max(r, g, b)
-    const minChannel = Math.min(r, g, b)
+  function brightenGold(r, g, b) {
+    return [
+      Math.min(255, Math.round(r * 1.1 + 30)),
+      Math.min(255, Math.round(g * 1.05 + 20)),
+      Math.max(0, Math.round(b * 0.5)),
+    ]
+  }
 
-    if (maxChannel < 45) {
-      data[pixelIndex] = 255
-      data[pixelIndex + 1] = 255
-      data[pixelIndex + 2] = 255
-      continue
-    }
-
-    const isGoldTone = r > 95 && g > 70 && b < 130 && r >= g && g >= b
-    if (isGoldTone) {
-      const maskIndex = pixelIndex / 4
-      goldMask[maskIndex] = 1
-      data[pixelIndex] = Math.min(255, Math.round(r * 1.05 + 55))
-      data[pixelIndex + 1] = Math.min(255, Math.round(g * 0.95 + 35))
-      data[pixelIndex + 2] = Math.max(0, Math.round(b * 0.35))
-      continue
-    }
-
-    const isNeutralTone = maxChannel - minChannel < 28 && maxChannel < 190
-    if (isNeutralTone) {
-      data[pixelIndex] = Math.max(0, Math.round(r * 0.35))
-      data[pixelIndex + 1] = Math.max(0, Math.round(g * 0.35))
-      data[pixelIndex + 2] = Math.max(0, Math.round(b * 0.35))
+  for (let y = fibreRegionStartY; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const pixelIndex = (y * width + x) * 4
+      const r = data[pixelIndex]
+      const g = data[pixelIndex + 1]
+      const b = data[pixelIndex + 2]
+      const alpha = data[pixelIndex + 3]
+      if (alpha < 16 || !isGoldPixel(r, g, b)) {
+        continue
+      }
+      goldMask[y * width + x] = 1
+      const [nextR, nextG, nextB] = brightenGold(r, g, b)
+      data[pixelIndex] = nextR
+      data[pixelIndex + 1] = nextG
+      data[pixelIndex + 2] = nextB
     }
   }
 
+  const sourceData = new Uint8ClampedArray(data)
   const boldOffsets = [
     [0, 1],
     [1, 0],
     [0, -1],
     [-1, 0],
+    [1, 1],
+    [-1, 1],
+    [1, -1],
+    [-1, -1],
   ]
   boldOffsets.forEach(([offsetX, offsetY]) => {
-    for (let y = 0; y < height; y += 1) {
+    for (let y = fibreRegionStartY; y < height; y += 1) {
       for (let x = 0; x < width; x += 1) {
         const maskIndex = y * width + x
         if (!goldMask[maskIndex]) {
           continue
         }
+        const sourceIndex = maskIndex * 4
         const targetX = x + offsetX
         const targetY = y + offsetY
-        if (targetX < 0 || targetY < 0 || targetX >= width || targetY >= height) {
+        if (
+          targetX < 0 ||
+          targetY < fibreRegionStartY ||
+          targetX >= width ||
+          targetY >= height
+        ) {
           continue
         }
         const targetIndex = (targetY * width + targetX) * 4
-        data[targetIndex] = Math.min(255, Math.max(data[targetIndex], data[maskIndex * 4]))
-        data[targetIndex + 1] = Math.min(255, Math.max(data[targetIndex + 1], data[maskIndex * 4 + 1]))
-        data[targetIndex + 2] = Math.min(255, Math.max(data[targetIndex + 2], data[maskIndex * 4 + 2]))
+        data[targetIndex] = Math.max(data[targetIndex], sourceData[sourceIndex])
+        data[targetIndex + 1] = Math.max(data[targetIndex + 1], sourceData[sourceIndex + 1])
+        data[targetIndex + 2] = Math.min(data[targetIndex + 2], sourceData[sourceIndex + 2])
       }
     }
   })
