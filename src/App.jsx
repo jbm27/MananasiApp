@@ -1472,7 +1472,7 @@ function InvoicingPage({
         image.src = logoDataUrl
       })
       const enhancedLogoDataUrl = prepareInvoiceLogoForPdf(logoImage) ?? logoDataUrl
-      const logoBox = { x: right - 58, y: top, width: 54, height: 34 }
+      const logoBox = { x: right - 81, y: top, width: 81, height: 51 }
       const logoAspectRatio = logoImage.naturalWidth / logoImage.naturalHeight
       let logoWidth = logoBox.width
       let logoHeight = logoWidth / logoAspectRatio
