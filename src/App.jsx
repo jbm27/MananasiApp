@@ -700,6 +700,111 @@ function InvoiceBankDetailsBlock({ currency }) {
   )
 }
 
+const INVOICE_PDF_MARGIN_MM = 25.4
+
+function prepareInvoiceLogoForPdf(sourceImage) {
+  const width = sourceImage.naturalWidth
+  const height = sourceImage.naturalHeight
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    return null
+  }
+  ctx.drawImage(sourceImage, 0, 0)
+  const imageData = ctx.getImageData(0, 0, width, height)
+  const { data } = imageData
+  const goldMask = new Uint8Array(width * height)
+
+  for (let pixelIndex = 0; pixelIndex < data.length; pixelIndex += 4) {
+    const r = data[pixelIndex]
+    const g = data[pixelIndex + 1]
+    const b = data[pixelIndex + 2]
+    const alpha = data[pixelIndex + 3]
+    if (alpha < 16) {
+      continue
+    }
+
+    const maxChannel = Math.max(r, g, b)
+    const minChannel = Math.min(r, g, b)
+
+    if (maxChannel < 45) {
+      data[pixelIndex] = 255
+      data[pixelIndex + 1] = 255
+      data[pixelIndex + 2] = 255
+      continue
+    }
+
+    const isGoldTone = r > 95 && g > 70 && b < 130 && r >= g && g >= b
+    if (isGoldTone) {
+      const maskIndex = pixelIndex / 4
+      goldMask[maskIndex] = 1
+      data[pixelIndex] = Math.min(255, Math.round(r * 1.05 + 55))
+      data[pixelIndex + 1] = Math.min(255, Math.round(g * 0.95 + 35))
+      data[pixelIndex + 2] = Math.max(0, Math.round(b * 0.35))
+      continue
+    }
+
+    const isNeutralTone = maxChannel - minChannel < 28 && maxChannel < 190
+    if (isNeutralTone) {
+      data[pixelIndex] = Math.max(0, Math.round(r * 0.35))
+      data[pixelIndex + 1] = Math.max(0, Math.round(g * 0.35))
+      data[pixelIndex + 2] = Math.max(0, Math.round(b * 0.35))
+    }
+  }
+
+  const boldOffsets = [
+    [0, 1],
+    [1, 0],
+    [0, -1],
+    [-1, 0],
+  ]
+  boldOffsets.forEach(([offsetX, offsetY]) => {
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const maskIndex = y * width + x
+        if (!goldMask[maskIndex]) {
+          continue
+        }
+        const targetX = x + offsetX
+        const targetY = y + offsetY
+        if (targetX < 0 || targetY < 0 || targetX >= width || targetY >= height) {
+          continue
+        }
+        const targetIndex = (targetY * width + targetX) * 4
+        data[targetIndex] = Math.min(255, Math.max(data[targetIndex], data[maskIndex * 4]))
+        data[targetIndex + 1] = Math.min(255, Math.max(data[targetIndex + 1], data[maskIndex * 4 + 1]))
+        data[targetIndex + 2] = Math.min(255, Math.max(data[targetIndex + 2], data[maskIndex * 4 + 2]))
+      }
+    }
+  })
+
+  ctx.putImageData(imageData, 0, 0)
+  return canvas.toDataURL('image/png')
+}
+
+function drawInvoicePdfField(pdf, options) {
+  const {
+    labelX,
+    valueX,
+    valueWidth,
+    y,
+    lineHeight,
+    label,
+    value,
+    labelBold = true,
+  } = options
+  const valueLines = pdf.splitTextToSize(String(value ?? ''), valueWidth)
+  pdf.setFont('helvetica', labelBold ? 'bold' : 'normal')
+  pdf.text(label, labelX, y)
+  pdf.setFont('helvetica', 'normal')
+  valueLines.forEach((line, index) => {
+    pdf.text(line, valueX, y + index * lineHeight)
+  })
+  return y + Math.max(valueLines.length, 1) * lineHeight
+}
+
 function buildBarcodeBits(value) {
   const text = String(value ?? '')
   let bits = '1010'
@@ -1334,13 +1439,17 @@ function InvoicingPage({
       return
     }
     const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-    const left = 8
     const pageWidth = 210
-    const contentWidth = 194
+    const left = INVOICE_PDF_MARGIN_MM
+    const top = INVOICE_PDF_MARGIN_MM
+    const contentWidth = pageWidth - INVOICE_PDF_MARGIN_MM * 2
     const right = left + contentWidth
-
-    pdf.setFillColor(238, 238, 238)
-    pdf.rect(0, 0, pageWidth, 297, 'F')
+    const labelX = left
+    const valueX = left + 36
+    const valueWidth = contentWidth - 36
+    const metaLabelX = left + 92
+    const metaValueX = left + 122
+    const lineHeight = 5
 
     try {
       const response = await fetch(logoStandard)
@@ -1357,7 +1466,8 @@ function InvoicingPage({
         image.onerror = reject
         image.src = logoDataUrl
       })
-      const logoBox = { x: right - 84, y: 3, width: 76, height: 48 }
+      const enhancedLogoDataUrl = prepareInvoiceLogoForPdf(logoImage) ?? logoDataUrl
+      const logoBox = { x: right - 58, y: top, width: 54, height: 34 }
       const logoAspectRatio = logoImage.naturalWidth / logoImage.naturalHeight
       let logoWidth = logoBox.width
       let logoHeight = logoWidth / logoAspectRatio
@@ -1367,7 +1477,7 @@ function InvoicingPage({
       }
       const logoX = logoBox.x + (logoBox.width - logoWidth) / 2
       const logoY = logoBox.y + (logoBox.height - logoHeight) / 2
-      pdf.addImage(logoDataUrl, 'PNG', logoX, logoY, logoWidth, logoHeight, undefined, 'FAST')
+      pdf.addImage(enhancedLogoDataUrl, 'PNG', logoX, logoY, logoWidth, logoHeight)
     } catch (error) {
       // Keep PDF generation working even if logo loading fails.
       console.error('Unable to load invoice logo for PDF export:', error)
@@ -1376,70 +1486,76 @@ function InvoicingPage({
     pdf.setTextColor(0, 0, 0)
     pdf.setFont('helvetica', 'bold')
     pdf.setFontSize(12.5)
-    pdf.text('Mananasi Fibre Limited', left, 13)
+    pdf.text('Mananasi Fibre Limited', left, top + 8)
 
     pdf.setFontSize(9)
-    pdf.text('Address:', left, 20)
+    pdf.text('Address:', left, top + 15)
     pdf.setFont('helvetica', 'normal')
-    pdf.text('P.O Box 14483', left + 28, 20)
-    pdf.text('Nairobi 00800', left + 28, 24.5)
-    pdf.text('Kenya', left + 28, 29)
+    pdf.text('P.O Box 14483', left + 28, top + 15)
+    pdf.text('Nairobi 00800', left + 28, top + 19.5)
+    pdf.text('Kenya', left + 28, top + 24)
 
     pdf.setFont('helvetica', 'bold')
-    pdf.text('KRA PIN', left, 36)
+    pdf.text('KRA PIN', left, top + 31)
     pdf.setFont('helvetica', 'normal')
-    pdf.text('P052141076P', left + 28, 36)
+    pdf.text('P052141076P', left + 28, top + 31)
 
     pdf.setFont('helvetica', 'bold')
-    pdf.text('Contact', left, 43)
+    pdf.text('Contact', left, top + 38)
     pdf.setFont('helvetica', 'normal')
-    pdf.text('info@mananasi-fibre.com', left + 28, 43)
-    pdf.text('+254717903799', left + 28, 47.5)
+    pdf.text('info@mananasi-fibre.com', left + 28, top + 38)
+    pdf.text('+254717903799', left + 28, top + 42.5)
 
     const label = selectedDocument.documentType === 'proforma' ? 'Proforma number:' : 'Invoice number:'
     pdf.setFont('helvetica', 'bold')
     pdf.setFontSize(11)
-    pdf.text('Invoice to:', left, 60)
+    pdf.text('Invoice to:', left, top + 55)
     pdf.setFontSize(9)
-    pdf.text(label, 105, 60)
+    pdf.text(label, metaLabelX, top + 55)
     pdf.setFont('helvetica', 'normal')
-    pdf.text(String(selectedDocument.documentNumber), 150, 60)
+    pdf.text(String(selectedDocument.documentNumber), metaValueX, top + 55)
     pdf.setFont('helvetica', 'bold')
-    pdf.text('Date:', 105, 67)
+    pdf.text('Date:', metaLabelX, top + 62)
     pdf.setFont('helvetica', 'normal')
-    pdf.text(formatDisplayDate(selectedDocument.invoiceDate), 150, 67)
+    pdf.text(formatDisplayDate(selectedDocument.invoiceDate), metaValueX, top + 62)
     pdf.setFont('helvetica', 'bold')
-    pdf.text('Origin', 105, 74)
+    pdf.text('Origin', metaLabelX, top + 69)
     pdf.setFont('helvetica', 'normal')
-    pdf.text(selectedDocument.origin, 150, 74)
+    pdf.text(selectedDocument.origin, metaValueX, top + 69)
 
     pdf.setFont('helvetica', 'bold')
-    pdf.text(selectedDocument.customerName, left, 67)
+    pdf.text(selectedDocument.customerName, left, top + 62)
     pdf.setFont('helvetica', 'normal')
-    const customerLines = pdf.splitTextToSize(selectedDocument.customerAddress, 70)
-    pdf.text(customerLines, left, 73)
-    pdf.text(`Company registration: ${selectedDocument.customerRegistration}`, left, 93)
+    const customerLines = pdf.splitTextToSize(selectedDocument.customerAddress, 78)
+    pdf.text(customerLines, left, top + 68)
+    const customerBlockHeight = Math.max(customerLines.length, 1) * lineHeight
+    pdf.text(
+      `Company registration: ${selectedDocument.customerRegistration}`,
+      left,
+      top + 68 + customerBlockHeight + 2,
+    )
 
-    const tableTop = 102
+    const tableTop = top + 88
     const rowH = 7
-    const tableRows = Math.max(4, selectedDocument.items.length + 2)
+    const itemCount = selectedDocument.items.length
+    const tableRowCount = itemCount + 2
     const colX = {
       product: left,
-      description: left + 28,
-      qty: left + 96,
-      rate: left + 126,
-      amount: left + 154,
+      description: left + 22,
+      qty: left + 72,
+      rate: left + 94,
+      amount: left + 118,
       end: right,
     }
 
     pdf.setDrawColor(0)
     pdf.setLineWidth(0.5)
-    pdf.rect(left, tableTop, contentWidth, rowH * (tableRows + 1))
+    pdf.rect(left, tableTop, contentWidth, rowH * tableRowCount)
     ;[colX.description, colX.qty, colX.rate, colX.amount].forEach((x) => {
-      pdf.line(x, tableTop, x, tableTop + rowH * (tableRows + 1))
+      pdf.line(x, tableTop, x, tableTop + rowH * tableRowCount)
     })
-    for (let i = 1; i <= tableRows; i += 1) {
-      pdf.line(left, tableTop + rowH * i, right, tableTop + rowH * i)
+    for (let rowIndex = 1; rowIndex < tableRowCount; rowIndex += 1) {
+      pdf.line(left, tableTop + rowH * rowIndex, right, tableTop + rowH * rowIndex)
     }
 
     pdf.setFont('helvetica', 'bold')
@@ -1454,7 +1570,7 @@ function InvoicingPage({
     selectedDocument.items.forEach((item, index) => {
       const y = tableTop + rowH * (index + 1) + 4.8
       pdf.text(String(item.product), colX.product + 1, y)
-      pdf.text(pdf.splitTextToSize(String(item.description), 66)[0] ?? '', colX.description + 1, y)
+      pdf.text(pdf.splitTextToSize(String(item.description), 48)[0] ?? '', colX.description + 1, y)
       pdf.text(String(item.quantityKg), colX.qty + 1, y)
       pdf.text(String(item.rate.toFixed(2)), colX.rate + 1, y)
       pdf.text(
@@ -1464,7 +1580,7 @@ function InvoicingPage({
       )
     })
 
-    const totalRowY = tableTop + rowH * tableRows
+    const totalRowY = tableTop + rowH * (itemCount + 1)
     pdf.setFont('helvetica', 'bold')
     pdf.text('Total', colX.rate + 1, totalRowY + 4.8)
     pdf.text(
@@ -1475,45 +1591,65 @@ function InvoicingPage({
       totalRowY + 4.8,
     )
 
-    const footerY = tableTop + rowH * (tableRows + 1) + 12
     const bankDetails = getInvoiceBankDetails(selectedDocument.currency)
-    pdf.setFont('helvetica', 'normal')
+    const bankDetailLines = [
+      bankDetails.bankName,
+      bankDetails.bankAddress,
+      bankDetails.branchCode ? `Branch code: ${bankDetails.branchCode}` : null,
+      `Account number: ${bankDetails.accountNumber}`,
+      `Currency: ${bankDetails.currency}`,
+      `Account name: ${bankDetails.accountName}`,
+      bankDetails.swiftCode ? `SWIFT code: ${bankDetails.swiftCode}` : null,
+    ].filter(Boolean)
+
     pdf.setFontSize(9)
-    pdf.text('HS Code', left, footerY)
-    pdf.text(selectedDocument.hsCode, left + 78, footerY)
-    pdf.text('Payment terms:', left + 30, footerY + 13)
-    pdf.text(selectedDocument.paymentTerms, left + 98, footerY + 13)
-    pdf.text('Shipping:', left + 30, footerY + 20)
-    pdf.text(selectedDocument.shippingTerms, left + 98, footerY + 20)
-    let bankY = footerY + 29
+    let footerY = tableTop + rowH * tableRowCount + 10
+    footerY = drawInvoicePdfField(pdf, {
+      labelX,
+      valueX,
+      valueWidth,
+      y: footerY,
+      lineHeight,
+      label: 'HS Code',
+      value: selectedDocument.hsCode,
+    })
+    footerY += 3
+    footerY = drawInvoicePdfField(pdf, {
+      labelX,
+      valueX,
+      valueWidth,
+      y: footerY,
+      lineHeight,
+      label: 'Payment terms:',
+      value: selectedDocument.paymentTerms,
+    })
+    footerY += 3
+    footerY = drawInvoicePdfField(pdf, {
+      labelX,
+      valueX,
+      valueWidth,
+      y: footerY,
+      lineHeight,
+      label: 'Shipping:',
+      value: selectedDocument.shippingTerms,
+    })
+    footerY += 3
     pdf.setFont('helvetica', 'bold')
-    pdf.text('Bank details:', left + 30, bankY)
+    pdf.text('Bank details:', labelX, footerY)
     pdf.setFont('helvetica', 'normal')
-    bankY += 6
-    pdf.text(bankDetails.bankName, left + 98, bankY)
-    bankY += 5
-    if (bankDetails.bankAddress) {
-      pdf.text(bankDetails.bankAddress, left + 98, bankY)
-      bankY += 5
-    }
-    if (bankDetails.branchCode) {
-      pdf.text(`Branch code: ${bankDetails.branchCode}`, left + 98, bankY)
-      bankY += 5
-    }
-    pdf.text(`Account number: ${bankDetails.accountNumber}`, left + 98, bankY)
-    bankY += 5
-    pdf.text(`Currency: ${bankDetails.currency}`, left + 98, bankY)
-    bankY += 5
-    pdf.text(`Account name: ${bankDetails.accountName}`, left + 98, bankY)
-    bankY += 5
-    if (bankDetails.swiftCode) {
-      pdf.text(`SWIFT code: ${bankDetails.swiftCode}`, left + 98, bankY)
-      bankY += 5
-    }
-    pdf.setFont('helvetica', 'bold')
-    pdf.text('Authorised by:', left + 30, bankY + 4)
-    pdf.setFont('helvetica', 'normal')
-    pdf.text('James Boyd-Moss (Managing Director)', left + 98, bankY + 4)
+    bankDetailLines.forEach((line, index) => {
+      pdf.text(line, valueX, footerY + index * lineHeight)
+    })
+    footerY += Math.max(bankDetailLines.length, 1) * lineHeight + 3
+    footerY = drawInvoicePdfField(pdf, {
+      labelX,
+      valueX,
+      valueWidth,
+      y: footerY,
+      lineHeight,
+      label: 'Authorised by:',
+      value: 'James Boyd-Moss (Managing Director)',
+    })
 
     const filePrefix = selectedDocument.documentType === 'proforma' ? 'proforma' : 'invoice'
     pdf.save(`${filePrefix}-${selectedDocument.documentNumber}.pdf`)
