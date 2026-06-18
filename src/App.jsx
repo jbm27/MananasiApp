@@ -7669,13 +7669,8 @@ function StockPage({
   onSelectedBatchFilterChange,
   availableBatches,
 }) {
-  const [showStockByCode, setShowStockByCode] = useState(false)
-  const [showBaleInventory, setShowBaleInventory] = useState(false)
-  const [showSilageInventory, setShowSilageInventory] = useState(false)
   const [baleLabelRanges, setBaleLabelRanges] = useState({})
   const [baleLabelStatus, setBaleLabelStatus] = useState('')
-  const [silageLabelRanges, setSilageLabelRanges] = useState({})
-  const [silageLabelStatus, setSilageLabelStatus] = useState('')
   const showAbsoluteStock = selectedBatchFilter === 'absolute'
   const filteredDryingRecords =
     showAbsoluteStock
@@ -7820,22 +7815,6 @@ function StockPage({
   })
   const totalAvailableKg = Number(stockRows.reduce((sum, row) => sum + row.totalKg, 0).toFixed(1))
 
-  const baleInventoryRows = Object.values(
-    filteredBalingRecords.reduce((map, item) => {
-      if (!map[item.baleSeriesCode]) {
-        map[item.baleSeriesCode] = {
-          baleSeriesCode: item.baleSeriesCode,
-          batchNumber: normalizeBatchNumber(item.batchNumber),
-          sourceStockCode: item.sourceStockCode,
-          baleWeightKg: item.baleWeightKg,
-          baleCount: 0,
-        }
-      }
-      map[item.baleSeriesCode].baleCount += 1
-      return map
-    }, {}),
-  ).sort((a, b) => b.baleCount - a.baleCount)
-
   function updateBaleLabelRange(baleSeriesCode, field, value) {
     setBaleLabelRanges((prev) => ({
       ...prev,
@@ -7877,69 +7856,13 @@ function StockPage({
     )
   }
 
-  const silageInventoryRows = Object.values(
-    filteredSilageRecords.reduce((map, item) => {
-      const bagSeriesCode = getSilageBagSeriesCode(item)
-      if (!map[bagSeriesCode]) {
-        map[bagSeriesCode] = {
-          bagSeriesCode,
-          batchNumber: normalizeBatchNumber(item.batchNumber),
-          bagDateCode: String(item.bagCode).split('-')[2],
-          bagMassKg: item.massKg,
-          bagCount: 0,
-        }
-      }
-      map[bagSeriesCode].bagCount += 1
-      return map
-    }, {}),
-  ).sort((a, b) => b.bagCount - a.bagCount)
-
-  function updateSilageLabelRange(bagSeriesCode, field, value) {
-    setSilageLabelRanges((prev) => ({
-      ...prev,
-      [bagSeriesCode]: {
-        ...(prev[bagSeriesCode] ?? {}),
-        [field]: value,
-      },
-    }))
-  }
-
-  function handlePrintSilageSeriesLabels(bagSeriesCode) {
-    const range = silageLabelRanges[bagSeriesCode] ?? {}
-    const start = Number(range.start)
-    const end = Number(range.end)
-    if (Number.isNaN(start) || Number.isNaN(end) || start < 1 || end < start) {
-      setSilageLabelStatus(
-        'Enter a valid start and end bag number (start must be less than or equal to end).',
-      )
-      return
-    }
-
-    const records = filteredSilageRecords
-      .filter((record) => getSilageBagSeriesCode(record) === bagSeriesCode)
-      .filter((record) => {
-        const serial = getSilageBagSerialFromCode(record.bagCode)
-        return serial >= start && serial <= end
-      })
-      .sort((a, b) => getSilageBagSerialFromCode(a.bagCode) - getSilageBagSerialFromCode(b.bagCode))
-
-    if (records.length === 0) {
-      setSilageLabelStatus(`No silage bags found in ${bagSeriesCode} for numbers ${start} to ${end}.`)
-      return
-    }
-
-    printSilageLabelsPdf(records, `silage-labels-${bagSeriesCode}-${start}-${end}.pdf`)
-    setSilageLabelStatus(
-      `Generated ${records.length} label(s) for ${bagSeriesCode} (bags ${start} to ${end}).`,
-    )
-  }
-
   return (
     <section className="panel">
       <h2>Stock</h2>
       <p>
-        Weighed fibre from Drying is added to stores as un-brushed fibre stock (`UBR`). Stock code
-        format: Batch-Decorticator-Grade (e.g. 2025-006-03-UBR).
+        Loose stock codes (for example 2026-000-01-BRS) show fibre not yet baled. Baled series codes
+        (for example 2026-000-01-BRS-100) show completed bales. Silage bag series are listed
+        separately.
       </p>
 
       <div className="form-grid">
@@ -7989,207 +7912,80 @@ function StockPage({
         </article>
       </div>
 
-      <CollapsibleSection
-        title="Stock by Code"
-        isOpen={showStockByCode}
-        onToggle={() => setShowStockByCode((prev) => !prev)}
-      >
-        <p className="inline-hint">
-          Loose codes (for example 2026-000-01-BRS) show fibre not yet baled. Baled codes show the
-          bale series (for example 2026-000-01-BRS-100). Silage bag series are included separately.
-        </p>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Stock Code</th>
-                <th>Form</th>
-                <th>Batch</th>
-                <th>Decorticator</th>
-                <th>Total Available (kg)</th>
-                <th>Quantity</th>
-              </tr>
-            </thead>
-            <tbody>
-              {stockRows.map((row) => (
-                <tr key={`${row.stockForm}-${row.stockCode}`}>
-                  <td>{row.stockCode}</td>
-                  <td>{row.stockForm}</td>
-                  <td>{row.batchNumber}</td>
-                  <td>{row.stockForm === 'Silage' ? '—' : getMachineFromStockCode(row.stockCode)}</td>
-                  <td>{row.totalKg.toLocaleString()}</td>
-                  <td>
-                    {row.stockForm === 'Loose'
-                      ? '—'
-                      : row.stockForm === 'Baled'
-                        ? `${row.quantityLabel} bale${row.quantityLabel === 1 ? '' : 's'}`
-                        : `${row.quantityLabel} bag${row.quantityLabel === 1 ? '' : 's'}`}
-                  </td>
-                </tr>
-              ))}
-              {stockRows.length === 0 && (
-                <tr>
-                  <td colSpan="6">No stock generated for the current filter.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </CollapsibleSection>
-
-      <CollapsibleSection
-        title="Bale Inventory"
-        isOpen={showBaleInventory}
-        onToggle={() => setShowBaleInventory((prev) => !prev)}
-      >
-        <p className="inline-hint">
-          Enter the first and last bale number in a series to print labels only for that range (for
-          example, 96 and 100 to replace the last five labels).
-        </p>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Bale Number Series</th>
-                <th>Batch</th>
-                <th>Source Stock Code</th>
-                <th>Bale Weight (kg)</th>
-                <th>Quantity of Bales</th>
-                <th>Start bale #</th>
-                <th>End bale #</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {baleInventoryRows.map((row) => (
-                <tr key={row.baleSeriesCode}>
-                  <td>{row.baleSeriesCode}</td>
-                  <td>{row.batchNumber}</td>
-                  <td>{row.sourceStockCode}</td>
-                  <td>{row.baleWeightKg}</td>
-                  <td>{row.baleCount}</td>
-                  <td>
+      <p className="inline-hint">
+        For baled stock, enter the first and last bale number in a series to print labels only for
+        that range (for example, 96 and 100 to replace the last five labels).
+      </p>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Stock Code</th>
+              <th>Total Available (kg)</th>
+              <th>Bale Quantity</th>
+              <th>Start bale #</th>
+              <th>End bale #</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {stockRows.map((row) => (
+              <tr key={`${row.stockForm}-${row.stockCode}`}>
+                <td>{row.stockCode}</td>
+                <td>{row.totalKg.toLocaleString()}</td>
+                <td>{row.stockForm === 'Baled' ? row.quantityLabel : '—'}</td>
+                <td>
+                  {row.stockForm === 'Baled' ? (
                     <input
                       type="number"
                       min="1"
                       className="table-inline-input"
-                      value={baleLabelRanges[row.baleSeriesCode]?.start ?? ''}
+                      value={baleLabelRanges[row.stockCode]?.start ?? ''}
                       onChange={(event) =>
-                        updateBaleLabelRange(row.baleSeriesCode, 'start', event.target.value)
+                        updateBaleLabelRange(row.stockCode, 'start', event.target.value)
                       }
                       placeholder="1"
-                      aria-label={`Start bale number for ${row.baleSeriesCode}`}
+                      aria-label={`Start bale number for ${row.stockCode}`}
                     />
-                  </td>
-                  <td>
+                  ) : (
+                    '—'
+                  )}
+                </td>
+                <td>
+                  {row.stockForm === 'Baled' ? (
                     <input
                       type="number"
                       min="1"
                       className="table-inline-input"
-                      value={baleLabelRanges[row.baleSeriesCode]?.end ?? ''}
+                      value={baleLabelRanges[row.stockCode]?.end ?? ''}
                       onChange={(event) =>
-                        updateBaleLabelRange(row.baleSeriesCode, 'end', event.target.value)
+                        updateBaleLabelRange(row.stockCode, 'end', event.target.value)
                       }
-                      placeholder={String(row.baleCount)}
-                      aria-label={`End bale number for ${row.baleSeriesCode}`}
+                      placeholder={String(row.quantityLabel)}
+                      aria-label={`End bale number for ${row.stockCode}`}
                     />
-                  </td>
-                  <td>
-                    <button type="button" onClick={() => handlePrintBaleSeriesLabels(row.baleSeriesCode)}>
+                  ) : (
+                    '—'
+                  )}
+                </td>
+                <td>
+                  {row.stockForm === 'Baled' ? (
+                    <button type="button" onClick={() => handlePrintBaleSeriesLabels(row.stockCode)}>
                       Print labels
                     </button>
-                  </td>
-                </tr>
-              ))}
-              {baleInventoryRows.length === 0 && (
-                <tr>
-                  <td colSpan="8">No bale inventory records for the current filter.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        {baleLabelStatus ? <p className="inline-hint">{baleLabelStatus}</p> : null}
-      </CollapsibleSection>
-
-      <CollapsibleSection
-        title="Silage Inventory"
-        isOpen={showSilageInventory}
-        onToggle={() => setShowSilageInventory((prev) => !prev)}
-      >
-        <p className="inline-hint">
-          Enter the first and last bag number in a series to print labels only for that range (for
-          example, 88 and 92 to replace the last five bag labels).
-        </p>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Label Series</th>
-                <th>Batch</th>
-                <th>Date Code</th>
-                <th>Bag Mass (kg)</th>
-                <th>Quantity of Bags</th>
-                <th>Start bag #</th>
-                <th>End bag #</th>
-                <th></th>
+                  ) : null}
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {silageInventoryRows.map((row) => (
-                <tr key={row.bagSeriesCode}>
-                  <td>{row.bagSeriesCode}</td>
-                  <td>{row.batchNumber}</td>
-                  <td>{row.bagDateCode}</td>
-                  <td>{row.bagMassKg}</td>
-                  <td>{row.bagCount}</td>
-                  <td>
-                    <input
-                      type="number"
-                      min="1"
-                      className="table-inline-input"
-                      value={silageLabelRanges[row.bagSeriesCode]?.start ?? ''}
-                      onChange={(event) =>
-                        updateSilageLabelRange(row.bagSeriesCode, 'start', event.target.value)
-                      }
-                      placeholder="1"
-                      aria-label={`Start bag number for ${row.bagSeriesCode}`}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      min="1"
-                      className="table-inline-input"
-                      value={silageLabelRanges[row.bagSeriesCode]?.end ?? ''}
-                      onChange={(event) =>
-                        updateSilageLabelRange(row.bagSeriesCode, 'end', event.target.value)
-                      }
-                      placeholder={String(row.bagCount)}
-                      aria-label={`End bag number for ${row.bagSeriesCode}`}
-                    />
-                  </td>
-                  <td>
-                    <button
-                      type="button"
-                      onClick={() => handlePrintSilageSeriesLabels(row.bagSeriesCode)}
-                    >
-                      Print labels
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {silageInventoryRows.length === 0 && (
-                <tr>
-                  <td colSpan="8">No silage inventory records for the current filter.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        {silageLabelStatus ? <p className="inline-hint">{silageLabelStatus}</p> : null}
-      </CollapsibleSection>
-
+            ))}
+            {stockRows.length === 0 && (
+              <tr>
+                <td colSpan="6">No stock generated for the current filter.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {baleLabelStatus ? <p className="inline-hint">{baleLabelStatus}</p> : null}
     </section>
   )
 }
@@ -9214,7 +9010,7 @@ function App() {
   const [silageBatchFilter, setSilageBatchFilter] = useState('all')
   const [stockDateFrom, setStockDateFrom] = useState(today)
   const [stockDateTo, setStockDateTo] = useState(today)
-  const [stockBatchFilter, setStockBatchFilter] = useState('all')
+  const [stockBatchFilter, setStockBatchFilter] = useState('absolute')
   const [compensationRules, setCompensationRules] = useState(defaultCompensationRules)
   const [authLeadershipId, setAuthLeadershipId] = useState(() =>
     readValidAuthLeadershipId(mananasiStaffEmployees),
