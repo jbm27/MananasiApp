@@ -22,9 +22,8 @@ function buildBaleCode(sourceStockCode, baleWeightKg, serialNumber) {
 function buildSilageBagCode(batchNumber, baggingDate, massKg, bagNumber) {
   const [year, month, day] = baggingDate.split('-')
   const datePart = `${month}${day}${year.slice(-2)}`
-  const massPart = String(Math.round(massKg)).padStart(2, '0')
   const serialPart = String(bagNumber).padStart(3, '0')
-  return `${batchNumber}-${datePart}-${massPart}-${serialPart}-SLG`
+  return `${batchNumber}-${datePart}-SLG-${Math.round(massKg)}-${serialPart}`
 }
 
 function buildBalingRecords(sourceStockCode, baleWeightKg, count, gradeCode) {

@@ -600,14 +600,23 @@ function buildBaleCode(sourceStockCode, baleWeightKg, serialNumber) {
   return `${buildBaleSeriesCode(sourceStockCode, baleWeightKg)}-${String(serialNumber).padStart(2, '0')}`
 }
 
-function buildSilageBagCode(batchNumber, baggingDate, massKg, bagNumber) {
-  const normalizedBatch = normalizeBatchNumber(batchNumber)
+function buildSilageDatePart(baggingDate) {
   const [year, month, day] = String(baggingDate ?? '').split('-')
-  const datePart =
-    year && month && day ? `${month}${day}${year.slice(-2)}` : new Date().toISOString().slice(5, 7) + new Date().toISOString().slice(8, 10) + new Date().toISOString().slice(2, 4)
-  const massPart = String(Math.round(Number(massKg))).padStart(2, '0')
+  if (year && month && day) {
+    return `${month}${day}${year.slice(-2)}`
+  }
+  const now = new Date()
+  return `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}${String(now.getFullYear()).slice(-2)}`
+}
+
+function buildSilageSeriesCode(batchNumber, baggingDate, massKg) {
+  const normalizedBatch = normalizeBatchNumber(batchNumber)
+  return `${normalizedBatch}-${buildSilageDatePart(baggingDate)}-SLG-${Math.round(Number(massKg))}`
+}
+
+function buildSilageBagCode(batchNumber, baggingDate, massKg, bagNumber) {
   const serialPart = String(bagNumber).padStart(3, '0')
-  return `${normalizedBatch}-${datePart}-${massPart}-${serialPart}-SLG`
+  return `${buildSilageSeriesCode(batchNumber, baggingDate, massKg)}-${serialPart}`
 }
 
 function getInvoiceDescriptionFromProductCode(productCode) {
@@ -899,15 +908,31 @@ function printBaleLabelsPdf(records, filename) {
 
 function getSilageBagSerialFromCode(bagCode) {
   const parts = String(bagCode ?? '').split('-')
-  if (parts.length < 2) {
-    return 0
+  const slgIndex = parts.indexOf('SLG')
+  if (slgIndex >= 0 && parts.length > slgIndex + 2) {
+    const serial = Number(parts[slgIndex + 2])
+    return Number.isNaN(serial) ? 0 : serial
   }
-  const serial = Number(parts[parts.length - 2])
-  return Number.isNaN(serial) ? 0 : serial
+  if (parts[parts.length - 1] === 'SLG' && parts.length >= 2) {
+    const serial = Number(parts[parts.length - 2])
+    return Number.isNaN(serial) ? 0 : serial
+  }
+  return 0
 }
 
 function getSilageBagSeriesCode(record) {
-  return `${normalizeBatchNumber(record.batchNumber)}-${String(record.bagCode).split('-')[2]}-${Math.round(record.massKg)}-SLG`
+  const bagCode = String(record.bagCode ?? '')
+  const parts = bagCode.split('-')
+  const slgIndex = parts.indexOf('SLG')
+  if (slgIndex >= 0) {
+    if (parts[parts.length - 1] === 'SLG') {
+      return `${normalizeBatchNumber(`${parts[0]}-${parts[1]}`)}-${parts[2]}-SLG-${parts[3]}`
+    }
+    const datePart = parts[slgIndex - 1] ?? buildSilageDatePart(record.date)
+    const massPart = parts[slgIndex + 1] ?? String(Math.round(record.massKg))
+    return `${normalizeBatchNumber(record.batchNumber)}-${datePart}-SLG-${massPart}`
+  }
+  return buildSilageSeriesCode(record.batchNumber, record.date, record.massKg)
 }
 
 function printSilageLabelsPdf(records, filename) {
@@ -7460,7 +7485,7 @@ function SilageProductionPage({
           record.date === silageDate &&
           Math.round(record.massKg) === Math.round(mass),
       )
-      .map((record) => Number(String(record.bagCode).split('-').slice(-2)[0]))
+      .map((record) => getSilageBagSerialFromCode(record.bagCode))
       .filter((value) => !Number.isNaN(value))
     let nextSerial = existingSerials.length > 0 ? Math.max(...existingSerials) + 1 : 1
     const operatorIds = employees
@@ -7489,7 +7514,7 @@ function SilageProductionPage({
     })
     onCreateSilageStock(nextRecords)
     setEntryStatus(
-      `${nextRecords.length} silage bag(s) created successfully. Print labels from Stock → Silage Inventory.`,
+      `${nextRecords.length} silage bag(s) created successfully. Print labels from the Stock page.`,
     )
     setBagCount('')
   }
@@ -7498,8 +7523,8 @@ function SilageProductionPage({
     <section className="panel">
       <h2>Silage Production</h2>
       <p>
-        Register silage bagging output after dewatering and sun-drying. Print bag labels from the
-        Stock page under Silage Inventory.
+        Register silage bagging output after dewatering and sun-drying. Print bale labels from the
+        Stock page.
       </p>
 
       <div className="form-grid">
@@ -7856,13 +7881,55 @@ function StockPage({
     )
   }
 
+  function handlePrintSilageSeriesLabels(seriesCode) {
+    const range = baleLabelRanges[seriesCode] ?? {}
+    const start = Number(range.start)
+    const end = Number(range.end)
+    if (Number.isNaN(start) || Number.isNaN(end) || start < 1 || end < start) {
+      setBaleLabelStatus(
+        'Enter a valid start and end bale number (start must be less than or equal to end).',
+      )
+      return
+    }
+
+    const records = filteredSilageRecords
+      .filter((record) => getSilageBagSeriesCode(record) === seriesCode)
+      .filter((record) => {
+        const serial = getSilageBagSerialFromCode(record.bagCode)
+        return serial >= start && serial <= end
+      })
+      .sort((a, b) => getSilageBagSerialFromCode(a.bagCode) - getSilageBagSerialFromCode(b.bagCode))
+
+    if (records.length === 0) {
+      setBaleLabelStatus(`No silage bales found in ${seriesCode} for numbers ${start} to ${end}.`)
+      return
+    }
+
+    printSilageLabelsPdf(records, `silage-labels-${seriesCode}-${start}-${end}.pdf`)
+    setBaleLabelStatus(
+      `Generated ${records.length} label(s) for ${seriesCode} (bales ${start} to ${end}).`,
+    )
+  }
+
+  function rowSupportsLabelPrinting(row) {
+    return row.stockForm === 'Baled' || row.stockForm === 'Silage'
+  }
+
+  function handlePrintRowLabels(row) {
+    if (row.stockForm === 'Silage') {
+      handlePrintSilageSeriesLabels(row.stockCode)
+      return
+    }
+    handlePrintBaleSeriesLabels(row.stockCode)
+  }
+
   return (
     <section className="panel">
       <h2>Stock</h2>
       <p>
         Loose stock codes (for example 2026-000-01-BRS) show fibre not yet baled. Baled series codes
-        (for example 2026-000-01-BRS-100) show completed bales. Silage bag series are listed
-        separately.
+        (for example 2026-000-01-BRS-100) show completed bales. Silage series codes (for example
+        2026-000-061626-SLG-50) show bagged silage bales.
       </p>
 
       <div className="form-grid">
@@ -7913,8 +7980,8 @@ function StockPage({
       </div>
 
       <p className="inline-hint">
-        For baled stock, enter the first and last bale number in a series to print labels only for
-        that range (for example, 96 and 100 to replace the last five labels).
+        For baled fibre or silage stock, enter the first and last bale number in a series to print
+        labels only for that range (for example, 96 and 100 to replace the last five labels).
       </p>
       <div className="table-wrap">
         <table>
@@ -7933,9 +8000,9 @@ function StockPage({
               <tr key={`${row.stockForm}-${row.stockCode}`}>
                 <td>{row.stockCode}</td>
                 <td>{row.totalKg.toLocaleString()}</td>
-                <td>{row.stockForm === 'Baled' ? row.quantityLabel : '—'}</td>
+                <td>{rowSupportsLabelPrinting(row) ? row.quantityLabel : '—'}</td>
                 <td>
-                  {row.stockForm === 'Baled' ? (
+                  {rowSupportsLabelPrinting(row) ? (
                     <input
                       type="number"
                       min="1"
@@ -7952,7 +8019,7 @@ function StockPage({
                   )}
                 </td>
                 <td>
-                  {row.stockForm === 'Baled' ? (
+                  {rowSupportsLabelPrinting(row) ? (
                     <input
                       type="number"
                       min="1"
@@ -7969,8 +8036,8 @@ function StockPage({
                   )}
                 </td>
                 <td>
-                  {row.stockForm === 'Baled' ? (
-                    <button type="button" onClick={() => handlePrintBaleSeriesLabels(row.stockCode)}>
+                  {rowSupportsLabelPrinting(row) ? (
+                    <button type="button" onClick={() => handlePrintRowLabels(row)}>
                       Print labels
                     </button>
                   ) : null}
