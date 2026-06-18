@@ -1,3 +1,5 @@
+import { toKenyaDateString } from './kenyaTime.js'
+
 export const CONTRACT_TYPE_OPTIONS = [
   { value: 'regular', label: 'Regular' },
   { value: 'seasonal', label: 'Seasonal' },
@@ -33,7 +35,7 @@ export function createBlankEmployeeTemplate(id, role = 'harvester') {
     role,
     contractType: 'seasonal',
     seasonalGrade: null,
-    dailyWageKes: null,
+    roleHistory: [{ effectiveDate: toKenyaDateString(new Date()), role }],
     monthlySalaryKes: null,
     position: '',
     department: '',
@@ -116,7 +118,6 @@ export function parseEmployeeProfileFromForm(formData) {
     email: String(formData.get('profileEmail') ?? '').trim(),
     contractType,
     seasonalGrade: contractType === 'seasonal' && seasonalGradeRaw ? seasonalGradeRaw : null,
-    dailyWageKes: contractType === 'regular' ? null : parseOptionalNumber(formData.get('dailyWageKes')),
     monthlySalaryKes:
       contractType === 'regular' ? parseOptionalNumber(formData.get('monthlySalaryKes')) : null,
     contractStartDate: String(formData.get('profileContractStartDate') ?? '').trim(),

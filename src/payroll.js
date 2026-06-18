@@ -1,4 +1,4 @@
-import { getEmployeeDailyWageKes } from './employeePay.js'
+import { getEmployeeDailyWageKes, sumAttendanceDailyPay } from './employeePay.js'
 import { toKenyaDateString } from './kenyaTime.js'
 import { calculateMaxAdvanceClaimable } from './payrollAdvances.js'
 
@@ -144,7 +144,14 @@ export function calculatePayrollLine({
   const unpaidLeaveDays = Number(adjustment.unpaidLeaveDays) || 0
   const maternityLeaveDays = Number(adjustment.maternityLeaveDays) || 0
   const paidLeaveDays = sickLeaveDays + compassionateLeaveDays + maternityLeaveDays
-  const regularPay = Math.round(dailyRate * (daysWorked + paidLeaveDays))
+  const attendancePay = sumAttendanceDailyPay(
+    attendanceEvents,
+    employee,
+    period.startDate,
+    period.endDate,
+  )
+  const leavePay = Math.round(dailyRate * paidLeaveDays)
+  const regularPay = attendancePay + leavePay
   const overtimeHours = Number(adjustment.overtimeHours) || 0
   const overtimePay = Math.round(overtimeHours * hourlyRate * OVERTIME_MULTIPLIER)
   const { totalIncentiveKes, kgsOver250 } = sumHarvestMetrics(

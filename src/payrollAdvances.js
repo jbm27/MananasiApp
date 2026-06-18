@@ -1,4 +1,4 @@
-import { getEmployeeDailyWageKes } from './employeePay.js'
+import { getEmployeeDailyWageKes, sumAttendanceDailyPay } from './employeePay.js'
 import { toKenyaDateString } from './kenyaTime.js'
 
 function isWageEmployee(employee) {
@@ -74,8 +74,7 @@ export function calculateEarningsToAdvanceDate(
     }
   }
 
-  const daysWorked = countDaysWorkedFromAttendance(attendanceEvents, employee.id, fromDate, toDate)
-  return dailyRate * daysWorked
+  return sumAttendanceDailyPay(attendanceEvents, employee, fromDate, toDate)
 }
 
 export function calculateMaxAdvanceClaimable(

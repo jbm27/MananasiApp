@@ -1,4 +1,22 @@
+import { toKenyaDateString } from './kenyaTime.js'
+
 const WORKING_DAYS_PER_MONTH = 22
+
+export const WAGE_RATES = {
+  seasonalHarvester: 550,
+  supplementaryHarvester: 530,
+  seasonalFactory: 732,
+  supplementaryFactory: 712,
+  supervisor: 807,
+}
+
+export const SUPERVISOR_ROLES = new Set([
+  'harvesting-supervisor',
+  'decortication-supervisor',
+  'brushing-supervisor',
+  'baling-supervisor',
+  'silage-supervisor',
+])
 
 export function normalizeContractType(value) {
   const key = String(value ?? '')
@@ -56,10 +74,80 @@ export function getSeasonalGradeLabel(seasonalGrade) {
   return '—'
 }
 
-export function getEmployeeDailyWageKes(employee) {
-  const dailyWage = Number(employee?.dailyWageKes)
-  if (Number.isFinite(dailyWage) && dailyWage > 0) {
-    return dailyWage
+export function isSupervisorRole(role) {
+  return SUPERVISOR_ROLES.has(role)
+}
+
+export function isHarvesterRole(role) {
+  return role === 'harvester'
+}
+
+export function isWageContractEmployee(employee) {
+  const contractType = normalizeContractType(employee?.contractType)
+  return contractType === 'seasonal' || contractType === 'supplementary'
+}
+
+export function getRuleBasedDailyWageKes(employee, role = employee?.role) {
+  const contractType = normalizeContractType(employee?.contractType)
+  if (contractType === 'regular') {
+    return null
+  }
+  if (isSupervisorRole(role)) {
+    return WAGE_RATES.supervisor
+  }
+  if (isHarvesterRole(role)) {
+    return contractType === 'seasonal'
+      ? WAGE_RATES.seasonalHarvester
+      : WAGE_RATES.supplementaryHarvester
+  }
+  return contractType === 'seasonal' ? WAGE_RATES.seasonalFactory : WAGE_RATES.supplementaryFactory
+}
+
+export function getEmployeeRoleHistory(employee) {
+  if (Array.isArray(employee?.roleHistory) && employee.roleHistory.length > 0) {
+    return [...employee.roleHistory].sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate))
+  }
+  return [{ effectiveDate: '2000-01-01', role: employee?.role ?? 'harvester' }]
+}
+
+export function getEmployeeRoleOnDate(employee, date) {
+  const history = getEmployeeRoleHistory(employee)
+  let role = employee?.role ?? 'harvester'
+  for (const entry of history) {
+    if (entry.effectiveDate <= date) {
+      role = entry.role
+    } else {
+      break
+    }
+  }
+  return role
+}
+
+export function appendEmployeeRoleHistory(employee, role, effectiveDate = toKenyaDateString(new Date())) {
+  const history = getEmployeeRoleHistory(employee)
+  const nextHistory = [...history]
+  const last = nextHistory[nextHistory.length - 1]
+  if (last?.effectiveDate === effectiveDate) {
+    nextHistory[nextHistory.length - 1] = { effectiveDate, role }
+  } else {
+    nextHistory.push({ effectiveDate, role })
+  }
+  return nextHistory
+}
+
+export function formatEmployeeRoleOptionLabel(optionLabel, employee, role) {
+  const rate = getRuleBasedDailyWageKes(employee, role)
+  if (rate === null) {
+    return optionLabel
+  }
+  return `${optionLabel} — KES ${rate.toLocaleString()}/day`
+}
+
+export function getEmployeeDailyWageKes(employee, options = {}) {
+  const role = options.role ?? employee?.role
+  const ruleRate = getRuleBasedDailyWageKes(employee, role)
+  if (ruleRate !== null && ruleRate > 0) {
+    return ruleRate
   }
 
   const monthlySalary = Number(employee?.monthlySalaryKes)
@@ -70,10 +158,32 @@ export function getEmployeeDailyWageKes(employee) {
   return 0
 }
 
-export function calculateHarvestWage(kg, employee, compensationRules) {
+export function sumAttendanceDailyPay(attendanceEvents, employee, fromDate, toDate) {
+  const dates = new Set()
+  attendanceEvents.forEach((event) => {
+    if (event.employeeId !== employee.id || event.eventType !== 'clock_in') {
+      return
+    }
+    const date = toKenyaDateString(event.occurredAt)
+    if (date && date >= fromDate && date <= toDate) {
+      dates.add(date)
+    }
+  })
+
+  let total = 0
+  dates.forEach((date) => {
+    const role = getEmployeeRoleOnDate(employee, date)
+    total += getEmployeeDailyWageKes(employee, { role })
+  })
+  return total
+}
+
+export function calculateHarvestWage(kg, employee, compensationRules, options = {}) {
+  const workDate = options.workDate ?? toKenyaDateString(new Date())
+  const role = getEmployeeRoleOnDate(employee, workDate)
   const threshold = Number(compensationRules?.incentiveThresholdKg ?? 250)
   const incentiveRate = Number(compensationRules?.incentiveRateKesPerKg ?? 0)
-  const baseWageKes = getEmployeeDailyWageKes(employee)
+  const baseWageKes = getEmployeeDailyWageKes(employee, { role })
   const incentiveKg = Math.max(0, Number(kg) - threshold)
   const incentiveKes = incentiveKg * incentiveRate
 

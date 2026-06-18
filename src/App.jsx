@@ -18,7 +18,7 @@ import {
   createPayrollApproval,
   isPayrollSectionApproved,
 } from './payroll.js'
-import { formatKenyaDateTime } from './kenyaTime.js'
+import { formatKenyaDateTime, toKenyaDateString } from './kenyaTime.js'
 import logoStandard from '../LogoStandard.png'
 import { mananasiStaffEmployees } from './mananasiStaffEmployees.js'
 import {
@@ -26,6 +26,9 @@ import {
   getContractTypeLabel,
   getEmployeeDailyWageKes,
   getSeasonalGradeLabel,
+  appendEmployeeRoleHistory,
+  formatEmployeeRoleOptionLabel,
+  isWageContractEmployee,
 } from './employeePay.js'
 import {
   CONTRACT_TYPE_OPTIONS,
@@ -2720,7 +2723,7 @@ function EmployeesPage({
               >
                 {employeeRoleOptions.map((option) => (
                   <option key={option.value} value={option.value}>
-                    {option.label}
+                    {formatEmployeeRoleOptionLabel(option.label, employee, option.value)}
                   </option>
                 ))}
               </select>
@@ -3399,10 +3402,9 @@ function EmployeeRecordPage({
             </p>
           ) : (
             <p>
-              <strong>Daily rate:</strong>{' '}
-              {employee.dailyWageKes
-                ? `KES ${Number(employee.dailyWageKes).toLocaleString()}`
-                : 'Not set'}
+              <strong>Daily rate:</strong> KES {getEmployeeDailyWageKes(employee).toLocaleString()}
+              {' '}
+              (set by role and contract type)
             </p>
           )}
           <p>
@@ -3590,7 +3592,7 @@ function EmployeeProfileEditor({
           <select name="profileRole" defaultValue={employee.role ?? 'harvester'} disabled={!canEdit}>
             {employeeRoleOptions.map((option) => (
               <option key={option.value} value={option.value}>
-                {option.label}
+                {formatEmployeeRoleOptionLabel(option.label, employee, option.value)}
               </option>
             ))}
           </select>
@@ -3632,16 +3634,12 @@ function EmployeeProfileEditor({
           ))}
         </select>
       </label>
-      <label>
-        Daily wage (KES)
-        <input
-          name="dailyWageKes"
-          type="number"
-          min="0"
-          defaultValue={employee.dailyWageKes ?? ''}
-          disabled={!canEdit}
-        />
-      </label>
+      {isWageContractEmployee(employee) ? (
+        <p className="inline-hint">
+          Daily rate: KES {getEmployeeDailyWageKes(employee).toLocaleString()} (follows role and
+          contract type; updates when the role changes)
+        </p>
+      ) : null}
       <label>
         Monthly salary (KES)
         <input
@@ -3901,7 +3899,7 @@ function EmployeeEditPage({
               >
                 {employeeRoleOptions.map((option) => (
                   <option key={option.value} value={option.value}>
-                    {option.label}
+                    {formatEmployeeRoleOptionLabel(option.label, employee, option.value)}
                   </option>
                 ))}
               </select>
@@ -9310,6 +9308,7 @@ function App() {
     const employee = {
       id: nextWorkNo,
       role,
+      roleHistory: [{ effectiveDate: toKenyaDateString(new Date()), role }],
       ...profile,
       position: profile.position || getEmployeeRoleLabel(role),
     }
@@ -9331,14 +9330,21 @@ function App() {
     if (!canEditEmployeeRoleForEmployee(permissions, employee)) {
       return
     }
+    if (employee.role === role) {
+      return
+    }
     setEmployees((prev) =>
-      prev.map((employee) => {
-        if (employee.id !== employeeId) {
-          return employee
+      prev.map((item) => {
+        if (item.id !== employeeId) {
+          return item
         }
-        const oldRoleLabel = getEmployeeRoleLabel(employee.role)
-        const next = { ...employee, role }
-        if (!employee.position || employee.position === oldRoleLabel) {
+        const oldRoleLabel = getEmployeeRoleLabel(item.role)
+        const next = {
+          ...item,
+          role,
+          roleHistory: appendEmployeeRoleHistory(item, role),
+        }
+        if (!item.position || item.position === oldRoleLabel) {
           next.position = getEmployeeRoleLabel(role)
         }
         return next
@@ -9355,6 +9361,7 @@ function App() {
         const next = { ...employee, ...profile }
         if (profile.role && profile.role !== employee.role) {
           const oldRoleLabel = getEmployeeRoleLabel(employee.role)
+          next.roleHistory = appendEmployeeRoleHistory(employee, profile.role)
           if (
             !profile.position ||
             profile.position === oldRoleLabel ||
@@ -9533,7 +9540,8 @@ function App() {
     }
     const kg = Number(weights.reduce((sum, weight) => sum + weight, 0).toFixed(1))
 
-    const wage = calculateHarvestWage(kg, harvester, compensationRules)
+    const harvestedOn = new Date().toISOString().slice(0, 10)
+    const wage = calculateHarvestWage(kg, harvester, compensationRules, { workDate: harvestedOn })
     const supervisor = employees.find((employee) => employee.id === recordedById)
     const nextRecord = {
       id: `${harvesterId}-${Date.now()}`,
@@ -9541,7 +9549,7 @@ function App() {
       harvesterName: harvester.name,
       bundleWeights: weights,
       kg,
-      harvestedOn: new Date().toISOString().slice(0, 10),
+      harvestedOn,
       clockInTime: '',
       clockOutTime: '',
       supervisorDailyWageKes: supervisor ? getEmployeeDailyWageKes(supervisor) : 0,
