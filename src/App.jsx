@@ -633,12 +633,22 @@ function getInvoiceDescriptionFromProductCode(productCode) {
 const FIRST_INVOICE_NUMBER = 1096
 
 function isInvoiceDocumentEditable(document) {
+  if (document?.documentType === 'proforma') {
+    return document?.status !== 'converted'
+  }
   return document?.status === 'draft'
+}
+
+function canFinalizeInvoiceDocument(document) {
+  return document?.documentType === 'invoice' && document?.status === 'draft'
 }
 
 function getInvoiceDocumentStatusLabel(document) {
   if (document?.status === 'converted') {
     return 'Converted to invoice'
+  }
+  if (document?.documentType === 'proforma') {
+    return 'Draft'
   }
   if (document?.status === 'draft') {
     return 'Draft'
@@ -1666,8 +1676,8 @@ function InvoicingPage({
     <section className="panel">
       <h2>Invoicing</h2>
       <p>
-        Create a Proforma Invoice first, then convert it to a final Invoice once the deal is
-        confirmed.
+        Create a Proforma Invoice first, then convert it to an Invoice when the deal is confirmed.
+        Only invoices need to be finalized.
       </p>
 
       <CollapsibleSection
@@ -1747,7 +1757,8 @@ function InvoicingPage({
         {formStatus ? <div className="placeholder">{formStatus}</div> : null}
         {!editingDocumentId ? (
           <div className="placeholder">
-            New documents are saved as drafts. Use Edit to change them, then Finalize when ready.
+            New documents are saved as drafts. Proforma invoices can be converted to an invoice when
+            ready. Invoices should be finalized once confirmed.
           </div>
         ) : null}
         <button type="button" onClick={handleAddProductLine}>
@@ -1902,7 +1913,7 @@ function InvoicingPage({
                       Edit
                     </button>
                   ) : null}
-                  {isInvoiceDocumentEditable(doc) ? (
+                  {canFinalizeInvoiceDocument(doc) ? (
                     <button type="button" onClick={() => handleFinalizeDocument(doc.id)}>
                       Finalize
                     </button>
@@ -1935,7 +1946,7 @@ function InvoicingPage({
                 Edit
               </button>
             ) : null}
-            {isInvoiceDocumentEditable(selectedDocument) ? (
+            {canFinalizeInvoiceDocument(selectedDocument) ? (
               <button type="button" onClick={() => handleFinalizeDocument(selectedDocument.id)}>
                 Finalize
               </button>
@@ -10016,8 +10027,14 @@ function App() {
     if (!document) {
       return { ok: false, message: 'Document could not be found.' }
     }
-    if (!isInvoiceDocumentEditable(document)) {
-      return { ok: false, message: 'Only draft documents can be finalized.' }
+    if (document.documentType !== 'invoice') {
+      return {
+        ok: false,
+        message: 'Only invoices can be finalized. Convert proforma invoices to an invoice first.',
+      }
+    }
+    if (!canFinalizeInvoiceDocument(document)) {
+      return { ok: false, message: 'Only draft invoices can be finalized.' }
     }
     setInvoiceDocuments((prev) =>
       prev.map((item) =>
@@ -10030,10 +10047,9 @@ function App() {
           : item,
       ),
     )
-    const label = document.documentType === 'proforma' ? 'Proforma' : 'Invoice'
     return {
       ok: true,
-      message: `${label} ${document.documentNumber} finalized. It can no longer be edited.`,
+      message: `Invoice ${document.documentNumber} finalized. It can no longer be edited.`,
     }
   }
 
@@ -10071,7 +10087,7 @@ function App() {
               ...item,
               status: 'converted',
               convertedInvoiceId: converted.id,
-              finalizedAt: item.finalizedAt ?? new Date().toISOString(),
+              convertedAt: new Date().toISOString(),
             }
           : item,
       ),
