@@ -52,6 +52,7 @@ export function calculateEarningsToAdvanceDate(
   period,
   attendanceEvents = [],
   harvestRecords = [],
+  dailyWageRates,
 ) {
   const fromDate = period.startDate
   const toDate = period.advanceFriday
@@ -59,7 +60,7 @@ export function calculateEarningsToAdvanceDate(
     return 0
   }
 
-  const dailyRate = getEmployeeDailyWageKes(employee)
+  const dailyRate = getEmployeeDailyWageKes(employee, { dailyWageRates })
 
   if (employee.role === 'harvester') {
     return sumHarvesterBaseEarnings(harvestRecords, employee.id, fromDate, toDate, dailyRate)
@@ -74,7 +75,7 @@ export function calculateEarningsToAdvanceDate(
     }
   }
 
-  return sumAttendanceDailyPay(attendanceEvents, employee, fromDate, toDate)
+  return sumAttendanceDailyPay(attendanceEvents, employee, fromDate, toDate, dailyWageRates)
 }
 
 export function calculateMaxAdvanceClaimable(
@@ -82,9 +83,16 @@ export function calculateMaxAdvanceClaimable(
   period,
   attendanceEvents = [],
   harvestRecords = [],
+  dailyWageRates,
 ) {
   return Math.floor(
-    calculateEarningsToAdvanceDate(employee, period, attendanceEvents, harvestRecords) / 2,
+    calculateEarningsToAdvanceDate(
+      employee,
+      period,
+      attendanceEvents,
+      harvestRecords,
+      dailyWageRates,
+    ) / 2,
   )
 }
 
@@ -95,6 +103,7 @@ export function buildAdvanceLines({
   salaryPayrollAdjustments = {},
   attendanceEvents = [],
   harvestRecords = [],
+  dailyWageRates,
 }) {
   if (!period) {
     return []
@@ -117,6 +126,7 @@ export function buildAdvanceLines({
         period,
         attendanceEvents,
         harvestRecords,
+        dailyWageRates,
       )
       const maxClaimable = Math.floor(earningsToDate / 2)
       const adjustmentSource = getAdvanceAdjustmentSource(employee)

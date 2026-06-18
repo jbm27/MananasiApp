@@ -5,7 +5,7 @@ import {
   buildAttendanceExceptionReport,
   getAttendanceExceptionLabel,
 } from './attendanceProcessing.js'
-import { getContractTypeLabel } from './employeePay.js'
+import { getContractTypeLabel, getDailyWageRatesFromCompensation } from './employeePay.js'
 import { fetchAttendanceEventsForPeriod } from './api/client.js'
 import {
   buildAdvanceLines,
@@ -216,6 +216,11 @@ export default function PayrollPage({
       .finally(() => setAttendanceLoading(false))
   }, [selectedPeriod])
 
+  const dailyWageRates = useMemo(
+    () => getDailyWageRatesFromCompensation(compensationRules),
+    [compensationRules],
+  )
+
   const advanceLines = useMemo(() => {
     if (!selectedPeriod) {
       return []
@@ -227,6 +232,7 @@ export default function PayrollPage({
       salaryPayrollAdjustments,
       attendanceEvents,
       harvestRecords,
+      dailyWageRates,
     })
   }, [
     employees,
@@ -235,6 +241,7 @@ export default function PayrollPage({
     salaryPayrollAdjustments,
     attendanceEvents,
     harvestRecords,
+    dailyWageRates,
   ])
 
   const payrollLines = useMemo(() => {
@@ -249,6 +256,7 @@ export default function PayrollPage({
       harvestRecords,
       incentiveThresholdKg: compensationRules.incentiveThresholdKg,
       contractTypeFilter,
+      dailyWageRates,
     })
   }, [
     employees,
@@ -258,6 +266,7 @@ export default function PayrollPage({
     harvestRecords,
     compensationRules.incentiveThresholdKg,
     contractTypeFilter,
+    dailyWageRates,
   ])
 
   const salaryLines = useMemo(() => {

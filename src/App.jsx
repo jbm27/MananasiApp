@@ -29,6 +29,11 @@ import {
   appendEmployeeRoleHistory,
   formatEmployeeRoleOptionLabel,
   isWageContractEmployee,
+  DAILY_WAGE_RATE_KEYS,
+  DAILY_WAGE_RATE_LABELS,
+  normalizeDailyWageRates,
+  createDefaultDailyWageRates,
+  getDailyWageRatesFromCompensation,
 } from './employeePay.js'
 import {
   CONTRACT_TYPE_OPTIONS,
@@ -157,6 +162,7 @@ const DATA_ENTRY_PERMISSION_IDS = [
   'silage-entry',
   'employee-role-seasonal',
   'employee-role-all',
+  'employee-wage-rates',
 ]
 
 const DATA_ENTRY_PERMISSION_LABELS = {
@@ -172,6 +178,7 @@ const DATA_ENTRY_PERMISSION_LABELS = {
   'silage-entry': 'Silage bag creation',
   'employee-role-seasonal': 'Edit roles for seasonal and supplementary employees',
   'employee-role-all': 'Edit roles for all employees (including permanent)',
+  'employee-wage-rates': 'Edit daily wage rate settings',
 }
 
 /** Policy defaults from organisation roles; James (admin) always receives full access in code. */
@@ -475,6 +482,7 @@ const integrationDevice = {
 const defaultCompensationRules = {
   incentiveThresholdKg: 250,
   incentiveRateKesPerKg: 1,
+  dailyWageRates: createDefaultDailyWageRates(),
 }
 
 function formatDisplayDate(isoDate) {
@@ -2637,6 +2645,8 @@ function EmployeesPage({
   employees,
   currentUser,
   currentUserDataEntryPermissions,
+  compensationRules,
+  onUpdateDailyWageRate,
   harvestingDateFrom,
   harvestingDateTo,
   clockedInIds,
@@ -2651,8 +2661,14 @@ function EmployeesPage({
   const canEditAnyEmployeeRole =
     currentUserDataEntryPermissions.has('employee-role-all') ||
     currentUserDataEntryPermissions.has('employee-role-seasonal')
+  const canEditDailyWageRates = currentUserDataEntryPermissions.has('employee-wage-rates')
+  const dailyWageRates = getDailyWageRatesFromCompensation(compensationRules)
   const [showRecentEvents, setShowRecentEvents] = useState(false)
   const [employeeSearch, setEmployeeSearch] = useState('')
+  const [selectedWageRateKey, setSelectedWageRateKey] = useState(DAILY_WAGE_RATE_KEYS[0])
+  const [wageRateInput, setWageRateInput] = useState(String(dailyWageRates[DAILY_WAGE_RATE_KEYS[0]]))
+  const [wageRateStatus, setWageRateStatus] = useState('')
+  const [showDailyWageRates, setShowDailyWageRates] = useState(true)
   const clockedInCount = clockedInIds.length
   const recentClockEvents = attendanceEvents.slice(0, RECENT_CLOCK_EVENTS_LIMIT)
   const roleDefinitions = useMemo(
@@ -2704,6 +2720,23 @@ function EmployeesPage({
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [employees, employeeSearchQuery])
 
+  useEffect(() => {
+    setWageRateInput(String(dailyWageRates[selectedWageRateKey] ?? ''))
+  }, [selectedWageRateKey, dailyWageRates])
+
+  function handleSaveDailyWageRate(event) {
+    event.preventDefault()
+    const amount = Number(wageRateInput)
+    if (Number.isNaN(amount) || amount <= 0) {
+      setWageRateStatus('Enter a valid daily rate greater than zero.')
+      return
+    }
+    onUpdateDailyWageRate(selectedWageRateKey, amount)
+    setWageRateStatus(
+      `${DAILY_WAGE_RATE_LABELS[selectedWageRateKey]} updated to KES ${amount.toLocaleString()}.`,
+    )
+  }
+
   function renderEmployeeRow(employee, { alwaysShowRole = false } = {}) {
     const canEditRole = canEditEmployeeRoleForEmployee(currentUserDataEntryPermissions, employee)
     const showRoleColumn = alwaysShowRole || canManageEmployees || canEditAnyEmployeeRole
@@ -2723,7 +2756,7 @@ function EmployeesPage({
               >
                 {employeeRoleOptions.map((option) => (
                   <option key={option.value} value={option.value}>
-                    {formatEmployeeRoleOptionLabel(option.label, employee, option.value)}
+                    {formatEmployeeRoleOptionLabel(option.label, employee, option.value, dailyWageRates)}
                   </option>
                 ))}
               </select>
@@ -2796,6 +2829,64 @@ function EmployeesPage({
           {attendanceRefreshing ? 'Refreshing…' : 'Refresh clock-in status'}
         </button>
       </div>
+
+      {canEditDailyWageRates ? (
+        <CollapsibleSection
+          title="Daily wage rates"
+          isOpen={showDailyWageRates}
+          onToggle={() => setShowDailyWageRates((prev) => !prev)}
+        >
+          <p className="inline-hint">
+            Daily rates apply by role and contract type. Role dropdowns show the rate that would apply
+            for each assignment.
+          </p>
+          <form className="form-grid" onSubmit={handleSaveDailyWageRate}>
+            <label>
+              Rate category
+              <select
+                value={selectedWageRateKey}
+                onChange={(event) => setSelectedWageRateKey(event.target.value)}
+              >
+                {DAILY_WAGE_RATE_KEYS.map((key) => (
+                  <option key={key} value={key}>
+                    {DAILY_WAGE_RATE_LABELS[key]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Daily rate (KES)
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={wageRateInput}
+                onChange={(event) => setWageRateInput(event.target.value)}
+              />
+            </label>
+            <button type="submit">Save daily rate</button>
+          </form>
+          {wageRateStatus ? <p className="inline-hint">{wageRateStatus}</p> : null}
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Category</th>
+                  <th>Daily rate (KES)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {DAILY_WAGE_RATE_KEYS.map((key) => (
+                  <tr key={key}>
+                    <td>{DAILY_WAGE_RATE_LABELS[key]}</td>
+                    <td>{dailyWageRates[key].toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CollapsibleSection>
+      ) : null}
 
       <CollapsibleSection
         title={`Recent clock events (last ${RECENT_CLOCK_EVENTS_LIMIT})`}
@@ -2931,6 +3022,7 @@ function EmployeesPage({
 function EmployeeRecordPage({
   employees,
   currentUser,
+  dailyWageRates,
   clockedInIds,
   records,
   haulageTrips,
@@ -3402,7 +3494,8 @@ function EmployeeRecordPage({
             </p>
           ) : (
             <p>
-              <strong>Daily rate:</strong> KES {getEmployeeDailyWageKes(employee).toLocaleString()}
+              <strong>Daily rate:</strong> KES{' '}
+              {getEmployeeDailyWageKes(employee, { dailyWageRates }).toLocaleString()}
               {' '}
               (set by role and contract type)
             </p>
@@ -3526,6 +3619,7 @@ function EmployeeProfileEditor({
   onSubmit,
   submitLabel = 'Save employee details',
   canEditRole = false,
+  dailyWageRates,
 }) {
   function handleSubmit(event) {
     event.preventDefault()
@@ -3592,7 +3686,7 @@ function EmployeeProfileEditor({
           <select name="profileRole" defaultValue={employee.role ?? 'harvester'} disabled={!canEdit}>
             {employeeRoleOptions.map((option) => (
               <option key={option.value} value={option.value}>
-                {formatEmployeeRoleOptionLabel(option.label, employee, option.value)}
+                {formatEmployeeRoleOptionLabel(option.label, employee, option.value, dailyWageRates)}
               </option>
             ))}
           </select>
@@ -3636,7 +3730,8 @@ function EmployeeProfileEditor({
       </label>
       {isWageContractEmployee(employee) ? (
         <p className="inline-hint">
-          Daily rate: KES {getEmployeeDailyWageKes(employee).toLocaleString()} (follows role and
+          Daily rate: KES{' '}
+          {getEmployeeDailyWageKes(employee, { dailyWageRates }).toLocaleString()} (follows role and
           contract type; updates when the role changes)
         </p>
       ) : null}
@@ -3754,6 +3849,7 @@ function EmployeeEditPage({
   currentUserDataEntryPermissions,
   pagePermissionOverrides,
   dataEntryPermissionOverrides,
+  dailyWageRates,
   onUpdateEmployeeRole,
   onSaveEmployeePageAccess,
   onSaveEmployeeDataEntryPermissions,
@@ -3899,7 +3995,7 @@ function EmployeeEditPage({
               >
                 {employeeRoleOptions.map((option) => (
                   <option key={option.value} value={option.value}>
-                    {formatEmployeeRoleOptionLabel(option.label, employee, option.value)}
+                    {formatEmployeeRoleOptionLabel(option.label, employee, option.value, dailyWageRates)}
                   </option>
                 ))}
               </select>
@@ -3953,6 +4049,7 @@ function EmployeeEditPage({
             employee={employee}
             canEdit={canEditEmployeeProfile}
             canEditRole={canEditRole}
+            dailyWageRates={dailyWageRates}
             onSubmit={(profile) => onUpdateEmployeeProfile(employee.id, profile)}
           />
         </article>
@@ -8996,6 +9093,7 @@ function hydrateAppState(data, setters) {
     setters.setCompensationRules({
       incentiveThresholdKg: sanitized.compensationRules.incentiveThresholdKg ?? 250,
       incentiveRateKesPerKg: sanitized.compensationRules.incentiveRateKesPerKg ?? 1,
+      dailyWageRates: normalizeDailyWageRates(sanitized.compensationRules.dailyWageRates),
     })
   }
   if (sanitized.pagePermissionOverrides && typeof sanitized.pagePermissionOverrides === 'object') {
@@ -9352,6 +9450,33 @@ function App() {
     )
   }
 
+  function handleUpdateDailyWageRate(rateKey, amountKes) {
+    if (!DAILY_WAGE_RATE_KEYS.includes(rateKey)) {
+      return
+    }
+    const permissions = currentUser
+      ? getEffectiveDataEntryPermissions(
+          currentUser.id,
+          dataEntryPermissionOverrides,
+          employees,
+        )
+      : new Set()
+    if (!permissions.has('employee-wage-rates')) {
+      return
+    }
+    const amount = Math.round(Number(amountKes))
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return
+    }
+    setCompensationRules((prev) => ({
+      ...prev,
+      dailyWageRates: {
+        ...normalizeDailyWageRates(prev.dailyWageRates),
+        [rateKey]: amount,
+      },
+    }))
+  }
+
   function handleUpdateEmployeeProfile(employeeId, profile) {
     setEmployees((prev) =>
       prev.map((employee) => {
@@ -9552,7 +9677,11 @@ function App() {
       harvestedOn,
       clockInTime: '',
       clockOutTime: '',
-      supervisorDailyWageKes: supervisor ? getEmployeeDailyWageKes(supervisor) : 0,
+      supervisorDailyWageKes: supervisor
+        ? getEmployeeDailyWageKes(supervisor, {
+            dailyWageRates: getDailyWageRatesFromCompensation(compensationRules),
+          })
+        : 0,
       batchNumber: normalizeBatchNumber(activeBatchNumber),
       ...wage,
       recordedById,
@@ -10082,6 +10211,8 @@ function App() {
                 employees={employees}
                 currentUser={currentUser}
                 currentUserDataEntryPermissions={currentUserDataEntryPermissions}
+                compensationRules={compensationRules}
+                onUpdateDailyWageRate={handleUpdateDailyWageRate}
                 harvestingDateFrom={harvestingDateFrom}
                 harvestingDateTo={harvestingDateTo}
                 clockedInIds={clockedInIds}
@@ -10119,6 +10250,7 @@ function App() {
               <EmployeeRecordPage
                 employees={employees}
                 currentUser={currentUser}
+                dailyWageRates={getDailyWageRatesFromCompensation(compensationRules)}
                 clockedInIds={clockedInIds}
                 records={records}
                 haulageTrips={haulageTrips}
@@ -10141,6 +10273,7 @@ function App() {
                 currentUserDataEntryPermissions={currentUserDataEntryPermissions}
                 pagePermissionOverrides={pagePermissionOverrides}
                 dataEntryPermissionOverrides={dataEntryPermissionOverrides}
+                dailyWageRates={getDailyWageRatesFromCompensation(compensationRules)}
                 onUpdateEmployeeRole={handleUpdateEmployeeRole}
                 onSaveEmployeePageAccess={handleSaveEmployeePageAccess}
                 onSaveEmployeeDataEntryPermissions={handleSaveEmployeeDataEntryPermissions}

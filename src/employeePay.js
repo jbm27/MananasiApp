@@ -2,12 +2,51 @@ import { toKenyaDateString } from './kenyaTime.js'
 
 const WORKING_DAYS_PER_MONTH = 22
 
-export const WAGE_RATES = {
-  seasonalHarvester: 550,
-  supplementaryHarvester: 530,
-  seasonalFactory: 732,
-  supplementaryFactory: 712,
-  supervisor: 807,
+export const DAILY_WAGE_RATE_KEYS = [
+  'seasonalHarvester',
+  'supplementaryHarvester',
+  'seasonalFactory',
+  'supplementaryFactory',
+  'supervisor',
+  'supplementaryDriver',
+]
+
+export const DAILY_WAGE_RATE_LABELS = {
+  seasonalHarvester: 'Seasonal harvester',
+  supplementaryHarvester: 'Supplementary harvester',
+  seasonalFactory: 'Seasonal factory worker',
+  supplementaryFactory: 'Supplementary factory worker',
+  supervisor: 'Supervisor (harvesting or factory)',
+  supplementaryDriver: 'Supplementary driver',
+}
+
+export function createDefaultDailyWageRates() {
+  return {
+    seasonalHarvester: 550,
+    supplementaryHarvester: 530,
+    seasonalFactory: 732,
+    supplementaryFactory: 712,
+    supervisor: 807,
+    supplementaryDriver: 1000,
+  }
+}
+
+export function normalizeDailyWageRates(rates) {
+  const defaults = createDefaultDailyWageRates()
+  const next = { ...defaults }
+  if (rates && typeof rates === 'object') {
+    DAILY_WAGE_RATE_KEYS.forEach((key) => {
+      const value = Number(rates[key])
+      if (Number.isFinite(value) && value > 0) {
+        next[key] = Math.round(value)
+      }
+    })
+  }
+  return next
+}
+
+export function getDailyWageRatesFromCompensation(compensationRules) {
+  return normalizeDailyWageRates(compensationRules?.dailyWageRates)
 }
 
 export const SUPERVISOR_ROLES = new Set([
@@ -82,25 +121,35 @@ export function isHarvesterRole(role) {
   return role === 'harvester'
 }
 
+export function isDriverRole(role) {
+  return role === 'truck-driver'
+}
+
 export function isWageContractEmployee(employee) {
   const contractType = normalizeContractType(employee?.contractType)
   return contractType === 'seasonal' || contractType === 'supplementary'
 }
 
-export function getRuleBasedDailyWageKes(employee, role = employee?.role) {
+export function getRuleBasedDailyWageKes(
+  employee,
+  role = employee?.role,
+  dailyWageRates = createDefaultDailyWageRates(),
+) {
+  const rates = normalizeDailyWageRates(dailyWageRates)
   const contractType = normalizeContractType(employee?.contractType)
   if (contractType === 'regular') {
     return null
   }
   if (isSupervisorRole(role)) {
-    return WAGE_RATES.supervisor
+    return rates.supervisor
   }
   if (isHarvesterRole(role)) {
-    return contractType === 'seasonal'
-      ? WAGE_RATES.seasonalHarvester
-      : WAGE_RATES.supplementaryHarvester
+    return contractType === 'seasonal' ? rates.seasonalHarvester : rates.supplementaryHarvester
   }
-  return contractType === 'seasonal' ? WAGE_RATES.seasonalFactory : WAGE_RATES.supplementaryFactory
+  if (isDriverRole(role) && contractType === 'supplementary') {
+    return rates.supplementaryDriver
+  }
+  return contractType === 'seasonal' ? rates.seasonalFactory : rates.supplementaryFactory
 }
 
 export function getEmployeeRoleHistory(employee) {
@@ -135,8 +184,13 @@ export function appendEmployeeRoleHistory(employee, role, effectiveDate = toKeny
   return nextHistory
 }
 
-export function formatEmployeeRoleOptionLabel(optionLabel, employee, role) {
-  const rate = getRuleBasedDailyWageKes(employee, role)
+export function formatEmployeeRoleOptionLabel(
+  optionLabel,
+  employee,
+  role,
+  dailyWageRates = createDefaultDailyWageRates(),
+) {
+  const rate = getRuleBasedDailyWageKes(employee, role, dailyWageRates)
   if (rate === null) {
     return optionLabel
   }
@@ -145,7 +199,8 @@ export function formatEmployeeRoleOptionLabel(optionLabel, employee, role) {
 
 export function getEmployeeDailyWageKes(employee, options = {}) {
   const role = options.role ?? employee?.role
-  const ruleRate = getRuleBasedDailyWageKes(employee, role)
+  const dailyWageRates = options.dailyWageRates ?? createDefaultDailyWageRates()
+  const ruleRate = getRuleBasedDailyWageKes(employee, role, dailyWageRates)
   if (ruleRate !== null && ruleRate > 0) {
     return ruleRate
   }
@@ -158,7 +213,13 @@ export function getEmployeeDailyWageKes(employee, options = {}) {
   return 0
 }
 
-export function sumAttendanceDailyPay(attendanceEvents, employee, fromDate, toDate) {
+export function sumAttendanceDailyPay(
+  attendanceEvents,
+  employee,
+  fromDate,
+  toDate,
+  dailyWageRates = createDefaultDailyWageRates(),
+) {
   const dates = new Set()
   attendanceEvents.forEach((event) => {
     if (event.employeeId !== employee.id || event.eventType !== 'clock_in') {
@@ -173,7 +234,7 @@ export function sumAttendanceDailyPay(attendanceEvents, employee, fromDate, toDa
   let total = 0
   dates.forEach((date) => {
     const role = getEmployeeRoleOnDate(employee, date)
-    total += getEmployeeDailyWageKes(employee, { role })
+    total += getEmployeeDailyWageKes(employee, { role, dailyWageRates })
   })
   return total
 }
@@ -181,9 +242,10 @@ export function sumAttendanceDailyPay(attendanceEvents, employee, fromDate, toDa
 export function calculateHarvestWage(kg, employee, compensationRules, options = {}) {
   const workDate = options.workDate ?? toKenyaDateString(new Date())
   const role = getEmployeeRoleOnDate(employee, workDate)
+  const dailyWageRates = getDailyWageRatesFromCompensation(compensationRules)
   const threshold = Number(compensationRules?.incentiveThresholdKg ?? 250)
   const incentiveRate = Number(compensationRules?.incentiveRateKesPerKg ?? 0)
-  const baseWageKes = getEmployeeDailyWageKes(employee, { role })
+  const baseWageKes = getEmployeeDailyWageKes(employee, { role, dailyWageRates })
   const incentiveKg = Math.max(0, Number(kg) - threshold)
   const incentiveKes = incentiveKg * incentiveRate
 

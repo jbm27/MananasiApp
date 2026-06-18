@@ -130,8 +130,10 @@ export function calculatePayrollLine({
   attendanceEvents = [],
   harvestRecords = [],
   incentiveThresholdKg = 250,
+  dailyWageRates,
 }) {
-  const dailyRate = getEmployeeDailyWageKes(employee)
+  const wageRates = dailyWageRates ?? {}
+  const dailyRate = getEmployeeDailyWageKes(employee, { dailyWageRates: wageRates })
   const hourlyRate = dailyRate / HOURS_PER_DAY
   const daysWorked = countDaysWorkedFromAttendance(
     attendanceEvents,
@@ -149,6 +151,7 @@ export function calculatePayrollLine({
     employee,
     period.startDate,
     period.endDate,
+    wageRates,
   )
   const leavePay = Math.round(dailyRate * paidLeaveDays)
   const regularPay = attendancePay + leavePay
@@ -176,6 +179,7 @@ export function calculatePayrollLine({
     period,
     attendanceEvents,
     harvestRecords,
+    wageRates,
   )
 
   return {
@@ -224,6 +228,7 @@ export function buildPayrollLines({
   harvestRecords = [],
   incentiveThresholdKg = 250,
   contractTypeFilter = 'all',
+  dailyWageRates,
 }) {
   const periodAdjustments = payrollAdjustments[period.id] ?? {}
   return employees
@@ -243,6 +248,7 @@ export function buildPayrollLines({
         attendanceEvents,
         harvestRecords,
         incentiveThresholdKg,
+        dailyWageRates,
       }),
     )
 }
