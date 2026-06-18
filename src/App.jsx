@@ -1512,9 +1512,11 @@ function InvoicingPage({
     pdf.text('+254717903799', left + 28, top + 42.5)
 
     const label = selectedDocument.documentType === 'proforma' ? 'Proforma number:' : 'Invoice number:'
+    const invoiceToLabel =
+      selectedDocument.documentType === 'proforma' ? 'Proforma Invoice to:' : 'Invoice to:'
     pdf.setFont('helvetica', 'bold')
     pdf.setFontSize(11)
-    pdf.text('Invoice to:', left, top + 55)
+    pdf.text(invoiceToLabel, left, top + 55)
     pdf.setFontSize(9)
     pdf.text(label, metaLabelX, top + 55)
     pdf.setFont('helvetica', 'normal')
@@ -1960,7 +1962,7 @@ function InvoicingPage({
 
             <section className="invoice-meta-grid">
               <div>
-                <h4>Invoice to:</h4>
+                <h4>{selectedDocument.documentType === 'proforma' ? 'Proforma Invoice to:' : 'Invoice to:'}</h4>
                 <p><strong>{selectedDocument.customerName}</strong></p>
                 <p>{selectedDocument.customerAddress}</p>
                 <p>Company registration: {selectedDocument.customerRegistration}</p>
