@@ -163,6 +163,7 @@ const DATA_ENTRY_PERMISSION_IDS = [
   'employee-role-seasonal',
   'employee-role-all',
   'employee-wage-rates',
+  'employee-add',
 ]
 
 const DATA_ENTRY_PERMISSION_LABELS = {
@@ -179,6 +180,7 @@ const DATA_ENTRY_PERMISSION_LABELS = {
   'employee-role-seasonal': 'Edit roles for seasonal and supplementary employees',
   'employee-role-all': 'Edit roles for all employees (including permanent)',
   'employee-wage-rates': 'Edit daily wage rate settings',
+  'employee-add': 'Add new employees',
 }
 
 /** Policy defaults from organisation roles; James (admin) always receives full access in code. */
@@ -2551,6 +2553,7 @@ function PageAccessAdminSection({
 function AddEmployeePage({
   employees,
   currentUser,
+  currentUserDataEntryPermissions,
   onAddEmployee,
   pagePermissionOverrides,
   dataEntryPermissionOverrides,
@@ -2561,8 +2564,7 @@ function AddEmployeePage({
 }) {
   const navigate = useNavigate()
   const [role, setRole] = useState('harvester')
-  const canManageEmployees =
-    currentUser?.role === 'admin' || currentUser?.role === 'harvesting-manager'
+  const canAddEmployees = currentUserDataEntryPermissions.has('employee-add')
   const nextWorkNo = useMemo(() => String(nextEmployeeWorkNumber(employees)), [employees])
   const blankEmployee = useMemo(
     () => createBlankEmployeeTemplate(nextWorkNo, role),
@@ -2570,7 +2572,7 @@ function AddEmployeePage({
   )
 
   function handleProfileSubmit(profile) {
-    if (!profile.name?.trim() || !canManageEmployees) {
+    if (!profile.name?.trim() || !canAddEmployees) {
       return
     }
     onAddEmployee({
@@ -2587,9 +2589,9 @@ function AddEmployeePage({
       <p>
         <Link to="/employees">Back to employee list</Link>
       </p>
-      {!canManageEmployees && (
+      {!canAddEmployees && (
         <div className="placeholder">
-          Only Admin or Harvesting Manager can add employees or manage employee settings.
+          You need the &ldquo;Add new employees&rdquo; permission to add employees.
         </div>
       )}
 
@@ -2605,7 +2607,7 @@ function AddEmployeePage({
             <select
               value={role}
               onChange={(event) => setRole(event.target.value)}
-              disabled={!canManageEmployees}
+              disabled={!canAddEmployees}
             >
               {employeeRoleOptions.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -2620,7 +2622,7 @@ function AddEmployeePage({
           <EmployeeProfileEditor
             key={`${nextWorkNo}-${role}`}
             employee={blankEmployee}
-            canEdit={canManageEmployees}
+            canEdit={canAddEmployees}
             onSubmit={handleProfileSubmit}
             submitLabel="Save employee"
           />
@@ -2658,6 +2660,7 @@ function EmployeesPage({
   const navigate = useNavigate()
   const canManageEmployees =
     currentUser?.role === 'admin' || currentUser?.role === 'harvesting-manager'
+  const canAddEmployees = currentUserDataEntryPermissions.has('employee-add')
   const canEditAnyEmployeeRole =
     currentUserDataEntryPermissions.has('employee-role-all') ||
     currentUserDataEntryPermissions.has('employee-role-seasonal')
@@ -2801,13 +2804,13 @@ function EmployeesPage({
     <section className="panel">
       <h2>Employees</h2>
       <p>Browse employees by job type, or search by name, work no, phone, email, position, or role.</p>
-      {!canManageEmployees && (
+      {!canAddEmployees && (
         <div className="placeholder">
-          Only Admin or Harvesting Manager can add new employees.
+          You need the &ldquo;Add new employees&rdquo; permission to add new employees.
         </div>
       )}
       <p>
-        <button type="button" disabled={!canManageEmployees} onClick={() => navigate('/employees/new')}>
+        <button type="button" disabled={!canAddEmployees} onClick={() => navigate('/employees/new')}>
           Add Employee
         </button>
         {isAppAdmin(currentUser) ? (
@@ -9398,6 +9401,16 @@ function App() {
       .sort((a, b) => b.totalKg - a.totalKg)
   }, [dryingRecords, brushingStockMovements, brushingDailyRecords, balingRecords])
   function handleAddEmployee(input) {
+    const permissions = currentUser
+      ? getEffectiveDataEntryPermissions(
+          currentUser.id,
+          dataEntryPermissionOverrides,
+          employees,
+        )
+      : new Set()
+    if (!permissions.has('employee-add')) {
+      return
+    }
     const { role = 'harvester', ...profile } = input
     const nextWorkNo = String(nextEmployeeWorkNumber(employees))
     if (!String(profile.name ?? '').trim()) {
@@ -10234,6 +10247,7 @@ function App() {
               <AddEmployeePage
                 employees={employees}
                 currentUser={currentUser}
+                currentUserDataEntryPermissions={currentUserDataEntryPermissions}
                 onAddEmployee={handleAddEmployee}
                 pagePermissionOverrides={pagePermissionOverrides}
                 dataEntryPermissionOverrides={dataEntryPermissionOverrides}
