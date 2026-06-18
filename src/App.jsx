@@ -622,31 +622,78 @@ function buildSilageDatePart(baggingDate) {
   return `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}${String(now.getFullYear()).slice(-2)}`
 }
 
-function buildSilageSeriesCode(batchNumber, baggingDate, massKg) {
-  const normalizedBatch = normalizeBatchNumber(batchNumber)
-  return `${normalizedBatch}-${buildSilageDatePart(baggingDate)}-SLG-${Math.round(Number(massKg))}`
+const SILAGE_DRY_MATTER_OPTIONS = [25, 35]
+
+function normalizeSilageDryMatterPercent(value) {
+  const numeric = Number(value)
+  if (numeric === 25) {
+    return 25
+  }
+  return 35
 }
 
-function buildSilageBagCode(batchNumber, baggingDate, massKg, bagNumber) {
+function getSilageProductCodeSuffix(dryMatterPercent) {
+  return `SLG${normalizeSilageDryMatterPercent(dryMatterPercent)}`
+}
+
+function findSilageGradeInBagCode(bagCode) {
+  const parts = String(bagCode ?? '').split('-')
+  for (const grade of ['SLG25', 'SLG35', 'SLG']) {
+    const index = parts.indexOf(grade)
+    if (index >= 0) {
+      return { grade, index, parts }
+    }
+  }
+  return null
+}
+
+function getSilageDryMatterFromBagCode(bagCode) {
+  const match = findSilageGradeInBagCode(bagCode)
+  if (!match) {
+    return 35
+  }
+  if (match.grade === 'SLG25') {
+    return 25
+  }
+  return 35
+}
+
+function buildSilageSeriesCode(batchNumber, baggingDate, massKg, dryMatterPercent = 35) {
+  const normalizedBatch = normalizeBatchNumber(batchNumber)
+  return `${normalizedBatch}-${buildSilageDatePart(baggingDate)}-${getSilageProductCodeSuffix(dryMatterPercent)}-${Math.round(Number(massKg))}`
+}
+
+function buildSilageBagCode(batchNumber, baggingDate, massKg, bagNumber, dryMatterPercent = 35) {
   const serialPart = String(bagNumber).padStart(3, '0')
-  return `${buildSilageSeriesCode(batchNumber, baggingDate, massKg)}-${serialPart}`
+  return `${buildSilageSeriesCode(batchNumber, baggingDate, massKg, dryMatterPercent)}-${serialPart}`
+}
+
+function migrateLegacySilageBagCode(bagCode) {
+  const code = String(bagCode ?? '')
+  if (!code || code.includes('SLG25') || code.includes('SLG35')) {
+    return code
+  }
+  return code.replace(/-SLG-(\d+)-/, '-SLG35-$1-')
 }
 
 function getInvoiceDescriptionFromProductCode(productCode) {
-  const suffix = String(productCode ?? '').split('-').at(-1)
-  if (suffix === 'UBR') {
-    return 'Pineapple Leaf Fibre'
+  const code = String(productCode ?? '').trim().toUpperCase()
+  if (code === 'UBR') {
+    return 'Unbrushed pineapple leaf fibre'
   }
-  if (suffix === 'BRS') {
-    return 'Brushed Pineapple Leaf Fibre'
+  if (code === 'BRS') {
+    return 'Brushed pineapple leaf fibre'
   }
-  if (suffix === 'TOW') {
-    return 'Residue Pineapple Leaf Fibre'
+  if (code === 'TOW') {
+    return 'Residue pineapple leaf fibre'
   }
-  if (suffix === 'SLG') {
-    return 'Silage'
+  if (code === 'SLG25') {
+    return 'Pineapple leaf silage DM25%'
   }
-  if (suffix === 'CUS') {
+  if (code === 'SLG35' || code === 'SLG') {
+    return 'Pineapple leaf silage DM35%'
+  }
+  if (code === 'CUS') {
     return ''
   }
   return 'Custom Item'
@@ -682,14 +729,17 @@ function getInvoiceDocumentStatusLabel(document) {
 }
 
 function mapDocumentItemsToLineItems(items) {
-  return items.map((item, index) => ({
-    id: `LINE-${Date.now()}-${index + 1}`,
-    product: item.product,
-    customDescription: item.product === 'CUS' ? item.description : '',
-    quantityKg: String(item.quantityKg),
-    rate: String(item.rate),
-    vatEnabled: Boolean(item.vatEnabled),
-  }))
+  return items.map((item, index) => {
+    const product = item.product === 'SLG' ? 'SLG35' : item.product
+    return {
+      id: `LINE-${Date.now()}-${index + 1}`,
+      product,
+      customDescription: product === 'CUS' ? item.description : '',
+      quantityKg: String(item.quantityKg),
+      rate: String(item.rate),
+      vatEnabled: Boolean(item.vatEnabled),
+    }
+  })
 }
 
 const INVOICE_BANK_DETAILS_BY_CURRENCY = {
@@ -920,32 +970,27 @@ function printBaleLabelsPdf(records, filename) {
 }
 
 function getSilageBagSerialFromCode(bagCode) {
-  const parts = String(bagCode ?? '').split('-')
-  const slgIndex = parts.indexOf('SLG')
-  if (slgIndex >= 0 && parts.length > slgIndex + 2) {
-    const serial = Number(parts[slgIndex + 2])
-    return Number.isNaN(serial) ? 0 : serial
-  }
-  if (parts[parts.length - 1] === 'SLG' && parts.length >= 2) {
-    const serial = Number(parts[parts.length - 2])
+  const match = findSilageGradeInBagCode(bagCode)
+  if (match && match.parts.length > match.index + 2) {
+    const serial = Number(match.parts[match.index + 2])
     return Number.isNaN(serial) ? 0 : serial
   }
   return 0
 }
 
 function getSilageBagSeriesCode(record) {
-  const bagCode = String(record.bagCode ?? '')
-  const parts = bagCode.split('-')
-  const slgIndex = parts.indexOf('SLG')
-  if (slgIndex >= 0) {
-    if (parts[parts.length - 1] === 'SLG') {
-      return `${normalizeBatchNumber(`${parts[0]}-${parts[1]}`)}-${parts[2]}-SLG-${parts[3]}`
-    }
-    const datePart = parts[slgIndex - 1] ?? buildSilageDatePart(record.date)
-    const massPart = parts[slgIndex + 1] ?? String(Math.round(record.massKg))
-    return `${normalizeBatchNumber(record.batchNumber)}-${datePart}-SLG-${massPart}`
+  const bagCode = migrateLegacySilageBagCode(record.bagCode ?? '')
+  const match = findSilageGradeInBagCode(bagCode)
+  if (match) {
+    const datePart = match.parts[match.index - 1] ?? buildSilageDatePart(record.date)
+    const massPart = match.parts[match.index + 1] ?? String(Math.round(record.massKg))
+    const grade = match.grade === 'SLG' ? 'SLG35' : match.grade
+    return `${normalizeBatchNumber(record.batchNumber)}-${datePart}-${grade}-${massPart}`
   }
-  return buildSilageSeriesCode(record.batchNumber, record.date, record.massKg)
+  const dryMatterPercent = normalizeSilageDryMatterPercent(
+    record.dryMatterPercent ?? getSilageDryMatterFromBagCode(bagCode),
+  )
+  return buildSilageSeriesCode(record.batchNumber, record.date, record.massKg, dryMatterPercent)
 }
 
 function printSilageLabelsPdf(records, filename) {
@@ -1266,7 +1311,8 @@ function InvoicingPage({
   const [currency, setCurrency] = useState('USD')
   const [selectedCustomerId, setSelectedCustomerId] = useState(customers[0]?.id ?? '')
   const [lineItems, setLineItems] = useState([])
-  const productCodeOptions = ['UBR', 'BRS', 'TOW', 'SLG', 'CUS']
+  const productCodeOptions = ['UBR', 'BRS', 'TOW', 'SLG25', 'SLG35', 'CUS']
+  const CUSTOM_INVOICE_DESCRIPTION_LIMIT = 30
   const [hsCode, setHsCode] = useState('53050090')
   const [paymentTerms, setPaymentTerms] = useState('30% deposit, balance upon arrival at port')
   const [shippingTerms, setShippingTerms] = useState('CIF Nansha')
@@ -1358,7 +1404,15 @@ function InvoicingPage({
 
   function handleLineItemChange(lineId, field, value) {
     setLineItems((prev) =>
-      prev.map((item) => (item.id === lineId ? { ...item, [field]: value } : item)),
+      prev.map((item) => {
+        if (item.id !== lineId) {
+          return item
+        }
+        if (field === 'customDescription') {
+          return { ...item, customDescription: String(value).slice(0, CUSTOM_INVOICE_DESCRIPTION_LIMIT) }
+        }
+        return { ...item, [field]: value }
+      }),
     )
   }
 
@@ -1430,9 +1484,13 @@ function InvoicingPage({
     const hasInvalidLine = computedLineItems.some((item) => {
       const quantityValue = Number(item.quantityKg)
       const rateValue = Number(item.rate)
+      const customDescriptionTooLong =
+        item.product === 'CUS' &&
+        String(item.customDescription ?? '').trim().length > CUSTOM_INVOICE_DESCRIPTION_LIMIT
       return (
         !item.product.trim() ||
         !item.description.trim() ||
+        customDescriptionTooLong ||
         Number.isNaN(quantityValue) ||
         Number.isNaN(rateValue) ||
         quantityValue <= 0 ||
@@ -1832,14 +1890,15 @@ function InvoicingPage({
                       ))}
                     </select>
                     <input
-                      value={item.description}
+                      value={item.product === 'CUS' ? item.customDescription : item.description}
                       onChange={(event) =>
                         handleLineItemChange(item.id, 'customDescription', event.target.value)
                       }
                       disabled={item.product !== 'CUS'}
+                      maxLength={CUSTOM_INVOICE_DESCRIPTION_LIMIT}
                       placeholder={
                         item.product === 'CUS'
-                          ? 'Enter custom item description'
+                          ? 'Enter custom item description (max 30 characters)'
                           : 'Auto-mapped description'
                       }
                     />
@@ -7506,6 +7565,7 @@ function SilageProductionPage({
   const [batchNumber, setBatchNumber] = useState(availableBatches[0] ?? '')
   const [bagMassKg, setBagMassKg] = useState('75')
   const [bagCount, setBagCount] = useState('')
+  const [dryMatterPercent, setDryMatterPercent] = useState('35')
 
   const canManageSilage = currentUserDataEntryPermissions.has('silage-entry')
 
@@ -7572,6 +7632,7 @@ function SilageProductionPage({
     }
     const mass = Number(bagMassKg)
     const count = Number(bagCount)
+    const dm = normalizeSilageDryMatterPercent(dryMatterPercent)
     if (!silageDate || !batchNumber || Number.isNaN(mass) || Number.isNaN(count) || mass <= 0 || count <= 0) {
       setEntryStatus('Enter a valid date, batch number, bag mass, and bag count.')
       return
@@ -7581,7 +7642,10 @@ function SilageProductionPage({
         (record) =>
           normalizeBatchNumber(record.batchNumber) === normalizeBatchNumber(batchNumber) &&
           record.date === silageDate &&
-          Math.round(record.massKg) === Math.round(mass),
+          Math.round(record.massKg) === Math.round(mass) &&
+          normalizeSilageDryMatterPercent(
+            record.dryMatterPercent ?? getSilageDryMatterFromBagCode(record.bagCode),
+          ) === dm,
       )
       .map((record) => getSilageBagSerialFromCode(record.bagCode))
       .filter((value) => !Number.isNaN(value))
@@ -7597,12 +7661,13 @@ function SilageProductionPage({
       .filter(Boolean)
     const normalizedBatch = normalizeBatchNumber(batchNumber)
     const nextRecords = Array.from({ length: count }, () => {
-      const bagCode = buildSilageBagCode(normalizedBatch, silageDate, mass, nextSerial)
+      const bagCode = buildSilageBagCode(normalizedBatch, silageDate, mass, nextSerial, dm)
       nextSerial += 1
       return {
         date: silageDate,
         batchNumber: normalizedBatch,
         massKg: Number(mass.toFixed(1)),
+        dryMatterPercent: dm,
         bagCode,
         supervisorId: currentUser.id,
         supervisorName: currentUser.name,
@@ -7694,6 +7759,19 @@ function SilageProductionPage({
               {availableBatches.map((batch) => (
                 <option key={batch} value={batch}>
                   {batch}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Dry matter (DM)
+            <select
+              value={dryMatterPercent}
+              onChange={(event) => setDryMatterPercent(event.target.value)}
+            >
+              {SILAGE_DRY_MATTER_OPTIONS.map((option) => (
+                <option key={option} value={String(option)}>
+                  {option}%
                 </option>
               ))}
             </select>
@@ -8027,7 +8105,7 @@ function StockPage({
       <p>
         Loose stock codes (for example 2026-000-01-BRS) show fibre not yet baled. Baled series codes
         (for example 2026-000-01-BRS-100) show completed bales. Silage series codes (for example
-        2026-000-061626-SLG-50) show bagged silage bales.
+        2026-000-061626-SLG35-50) show bagged silage bales.
       </p>
 
       <div className="form-grid">

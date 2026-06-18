@@ -47,6 +47,30 @@ function isSeedMaintenanceEntry(entry) {
   return /^MTN-(SVC|REP)-\d{4}-\d{2}-\d{2}$/.test(String(entry?.id ?? ''))
 }
 
+function migrateSilageRecord(record) {
+  if (!record || typeof record !== 'object') {
+    return record
+  }
+  const bagCode = String(record.bagCode ?? '').replace(/-SLG-(\d+)-/, '-SLG35-$1-')
+  return {
+    ...record,
+    bagCode,
+    dryMatterPercent: record.dryMatterPercent ?? 35,
+  }
+}
+
+function migrateInvoiceDocument(document) {
+  if (!document || typeof document !== 'object' || !Array.isArray(document.items)) {
+    return document
+  }
+  return {
+    ...document,
+    items: document.items.map((item) =>
+      item?.product === 'SLG' ? { ...item, product: 'SLG35' } : item,
+    ),
+  }
+}
+
 export function sanitizePersistedAppState(data) {
   if (!data || typeof data !== 'object') {
     return data
@@ -77,10 +101,14 @@ export function sanitizePersistedAppState(data) {
     ? data.balingRecords.filter((record) => !hasSeedMarker(record.id))
     : data.balingRecords
   const silageRecords = Array.isArray(data.silageRecords)
-    ? data.silageRecords.filter((record) => !hasSeedMarker(record.id))
+    ? data.silageRecords
+        .filter((record) => !hasSeedMarker(record.id))
+        .map(migrateSilageRecord)
     : data.silageRecords
   const invoiceDocuments = Array.isArray(data.invoiceDocuments)
-    ? data.invoiceDocuments.filter((document) => document.id !== DEMO_INVOICE_ID)
+    ? data.invoiceDocuments
+        .filter((document) => document.id !== DEMO_INVOICE_ID)
+        .map(migrateInvoiceDocument)
     : data.invoiceDocuments
   const customers = Array.isArray(data.customers)
     ? data.customers.filter((customer) => customer.id !== DEMO_CUSTOMER_ID)

@@ -19,11 +19,12 @@ function buildBaleCode(sourceStockCode, baleWeightKg, serialNumber) {
   return `${buildBaleSeriesCode(sourceStockCode, baleWeightKg)}-${String(serialNumber).padStart(2, '0')}`
 }
 
-function buildSilageBagCode(batchNumber, baggingDate, massKg, bagNumber) {
+function buildSilageBagCode(batchNumber, baggingDate, massKg, bagNumber, dryMatterPercent = 35) {
   const [year, month, day] = baggingDate.split('-')
   const datePart = `${month}${day}${year.slice(-2)}`
   const serialPart = String(bagNumber).padStart(3, '0')
-  return `${batchNumber}-${datePart}-SLG-${Math.round(massKg)}-${serialPart}`
+  const grade = `SLG${dryMatterPercent === 25 ? 25 : 35}`
+  return `${batchNumber}-${datePart}-${grade}-${Math.round(massKg)}-${serialPart}`
 }
 
 function buildBalingRecords(sourceStockCode, baleWeightKg, count, gradeCode) {
@@ -99,7 +100,8 @@ export function buildOpeningStockRecords() {
     date: OPENING_STOCK_DATE,
     batchNumber: OPENING_STOCK_BATCH,
     massKg: 50,
-    bagCode: buildSilageBagCode(OPENING_STOCK_BATCH, OPENING_STOCK_DATE, 50, index + 1),
+    dryMatterPercent: 35,
+    bagCode: buildSilageBagCode(OPENING_STOCK_BATCH, OPENING_STOCK_DATE, 50, index + 1, 35),
     supervisorId: 'SYSTEM',
     supervisorName: 'Opening stock',
     operatorIds: [],
