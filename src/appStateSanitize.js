@@ -1,3 +1,5 @@
+import { migrateSilageRecord } from './silageCodes.js'
+
 const DEMO_CUSTOMER_ID = 'CUST-001'
 const DEMO_INVOICE_ID = 'INV-SEED-1087'
 
@@ -45,18 +47,6 @@ function isSeedFuelEntry(entry) {
 
 function isSeedMaintenanceEntry(entry) {
   return /^MTN-(SVC|REP)-\d{4}-\d{2}-\d{2}$/.test(String(entry?.id ?? ''))
-}
-
-function migrateSilageRecord(record) {
-  if (!record || typeof record !== 'object') {
-    return record
-  }
-  const bagCode = String(record.bagCode ?? '').replace(/-SLG-(\d+)-/, '-SLG35-$1-')
-  return {
-    ...record,
-    bagCode,
-    dryMatterPercent: record.dryMatterPercent ?? 35,
-  }
 }
 
 function migrateInvoiceDocument(document) {

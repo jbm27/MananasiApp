@@ -44,6 +44,15 @@ import {
 } from './employeeFields.js'
 import { sanitizePersistedAppState } from './appStateSanitize.js'
 import { mergeOpeningStockRecords } from './openingStockSeed.js'
+import {
+  SILAGE_DRY_MATTER_OPTIONS,
+  buildSilageBagCode,
+  getSilageBagSerialFromCode,
+  getSilageBagSeriesCode,
+  getSilageDryMatterFromBagCode,
+  migrateLegacySilageBagCode,
+  normalizeSilageDryMatterPercent,
+} from './silageCodes.js'
 
 const RECENT_CLOCK_EVENTS_LIMIT = 10
 import { useBackendSync } from './hooks/useBackendSync.js'
@@ -613,69 +622,6 @@ function buildBaleCode(sourceStockCode, baleWeightKg, serialNumber) {
   return `${buildBaleSeriesCode(sourceStockCode, baleWeightKg)}-${String(serialNumber).padStart(2, '0')}`
 }
 
-function buildSilageDatePart(baggingDate) {
-  const [year, month, day] = String(baggingDate ?? '').split('-')
-  if (year && month && day) {
-    return `${month}${day}${year.slice(-2)}`
-  }
-  const now = new Date()
-  return `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}${String(now.getFullYear()).slice(-2)}`
-}
-
-const SILAGE_DRY_MATTER_OPTIONS = [25, 35]
-
-function normalizeSilageDryMatterPercent(value) {
-  const numeric = Number(value)
-  if (numeric === 25) {
-    return 25
-  }
-  return 35
-}
-
-function getSilageProductCodeSuffix(dryMatterPercent) {
-  return `SLG${normalizeSilageDryMatterPercent(dryMatterPercent)}`
-}
-
-function findSilageGradeInBagCode(bagCode) {
-  const parts = String(bagCode ?? '').split('-')
-  for (const grade of ['SLG25', 'SLG35', 'SLG']) {
-    const index = parts.indexOf(grade)
-    if (index >= 0) {
-      return { grade, index, parts }
-    }
-  }
-  return null
-}
-
-function getSilageDryMatterFromBagCode(bagCode) {
-  const match = findSilageGradeInBagCode(bagCode)
-  if (!match) {
-    return 35
-  }
-  if (match.grade === 'SLG25') {
-    return 25
-  }
-  return 35
-}
-
-function buildSilageSeriesCode(batchNumber, baggingDate, massKg, dryMatterPercent = 35) {
-  const normalizedBatch = normalizeBatchNumber(batchNumber)
-  return `${normalizedBatch}-${buildSilageDatePart(baggingDate)}-${getSilageProductCodeSuffix(dryMatterPercent)}-${Math.round(Number(massKg))}`
-}
-
-function buildSilageBagCode(batchNumber, baggingDate, massKg, bagNumber, dryMatterPercent = 35) {
-  const serialPart = String(bagNumber).padStart(3, '0')
-  return `${buildSilageSeriesCode(batchNumber, baggingDate, massKg, dryMatterPercent)}-${serialPart}`
-}
-
-function migrateLegacySilageBagCode(bagCode) {
-  const code = String(bagCode ?? '')
-  if (!code || code.includes('SLG25') || code.includes('SLG35')) {
-    return code
-  }
-  return code.replace(/-SLG-(\d+)-/, '-SLG35-$1-')
-}
-
 function getInvoiceDescriptionFromProductCode(productCode) {
   const code = String(productCode ?? '').trim().toUpperCase()
   if (code === 'UBR') {
@@ -969,31 +915,7 @@ function printBaleLabelsPdf(records, filename) {
   return records.length
 }
 
-function getSilageBagSerialFromCode(bagCode) {
-  const match = findSilageGradeInBagCode(bagCode)
-  if (match && match.parts.length > match.index + 2) {
-    const serial = Number(match.parts[match.index + 2])
-    return Number.isNaN(serial) ? 0 : serial
-  }
-  return 0
-}
-
-function getSilageBagSeriesCode(record) {
-  const bagCode = migrateLegacySilageBagCode(record.bagCode ?? '')
-  const match = findSilageGradeInBagCode(bagCode)
-  if (match) {
-    const datePart = match.parts[match.index - 1] ?? buildSilageDatePart(record.date)
-    const massPart = match.parts[match.index + 1] ?? String(Math.round(record.massKg))
-    const grade = match.grade === 'SLG' ? 'SLG35' : match.grade
-    return `${normalizeBatchNumber(record.batchNumber)}-${datePart}-${grade}-${massPart}`
-  }
-  const dryMatterPercent = normalizeSilageDryMatterPercent(
-    record.dryMatterPercent ?? getSilageDryMatterFromBagCode(bagCode),
-  )
-  return buildSilageSeriesCode(record.batchNumber, record.date, record.massKg, dryMatterPercent)
-}
-
-function printSilageLabelsPdf(records, filename) {
+function printSilageLabelsPdf(records, filename, baggingDate) {
   if (!Array.isArray(records) || records.length === 0) {
     return 0
   }
@@ -1006,7 +928,7 @@ function printSilageLabelsPdf(records, filename) {
   const gapY = 6
   const columns = 2
   const labelWidth = (pageWidth - marginX * 2 - gapX) / columns
-  const labelHeight = 52
+  const labelHeight = 56
   const rowsPerPage = Math.floor((pageHeight - marginY * 2 + gapY) / (labelHeight + gapY))
   const maxPerPage = rowsPerPage * columns
 
@@ -1019,12 +941,13 @@ function printSilageLabelsPdf(records, filename) {
     const col = pageIndex % columns
     const labelX = marginX + col * (labelWidth + gapX)
     const labelY = marginY + row * (labelHeight + gapY)
+    const labelCode = migrateLegacySilageBagCode(record.bagCode, record)
 
     pdf.setDrawColor(0)
     pdf.setLineWidth(0.6)
     pdf.rect(labelX, labelY, labelWidth, labelHeight)
 
-    const bits = buildBarcodeBits(record.bagCode)
+    const bits = buildBarcodeBits(labelCode)
     const barcodeAreaWidth = labelWidth - 12
     const barcodeAreaHeight = 24
     const barWidth = barcodeAreaWidth / bits.length
@@ -1046,8 +969,18 @@ function printSilageLabelsPdf(records, filename) {
 
     pdf.setTextColor(0, 0, 0)
     pdf.setFont('helvetica', 'bold')
-    pdf.setFontSize(11)
-    pdf.text(record.bagCode, labelX + labelWidth / 2, labelY + 42, { align: 'center' })
+    pdf.setFontSize(10)
+    pdf.text(labelCode, labelX + labelWidth / 2, labelY + 38, { align: 'center' })
+    if (baggingDate) {
+      pdf.setFont('helvetica', 'normal')
+      pdf.setFontSize(9)
+      pdf.text(
+        `Bagged: ${formatDisplayDate(baggingDate)}`,
+        labelX + labelWidth / 2,
+        labelY + 46,
+        { align: 'center' },
+      )
+    }
   })
 
   pdf.save(filename)
@@ -7641,7 +7574,6 @@ function SilageProductionPage({
       .filter(
         (record) =>
           normalizeBatchNumber(record.batchNumber) === normalizeBatchNumber(batchNumber) &&
-          record.date === silageDate &&
           Math.round(record.massKg) === Math.round(mass) &&
           normalizeSilageDryMatterPercent(
             record.dryMatterPercent ?? getSilageDryMatterFromBagCode(record.bagCode),
@@ -7661,7 +7593,7 @@ function SilageProductionPage({
       .filter(Boolean)
     const normalizedBatch = normalizeBatchNumber(batchNumber)
     const nextRecords = Array.from({ length: count }, () => {
-      const bagCode = buildSilageBagCode(normalizedBatch, silageDate, mass, nextSerial, dm)
+      const bagCode = buildSilageBagCode(normalizedBatch, mass, nextSerial, dm)
       nextSerial += 1
       return {
         date: silageDate,
@@ -7872,6 +7804,7 @@ function StockPage({
 }) {
   const [baleLabelRanges, setBaleLabelRanges] = useState({})
   const [baleLabelStatus, setBaleLabelStatus] = useState('')
+  const [silageLabelDialog, setSilageLabelDialog] = useState(null)
   const showAbsoluteStock = selectedBatchFilter === 'absolute'
   const filteredDryingRecords =
     showAbsoluteStock
@@ -8063,7 +7996,7 @@ function StockPage({
     const end = Number(range.end)
     if (Number.isNaN(start) || Number.isNaN(end) || start < 1 || end < start) {
       setBaleLabelStatus(
-        'Enter a valid start and end bale number (start must be less than or equal to end).',
+        'Enter a valid start and end bag number (start must be less than or equal to end).',
       )
       return
     }
@@ -8077,14 +8010,34 @@ function StockPage({
       .sort((a, b) => getSilageBagSerialFromCode(a.bagCode) - getSilageBagSerialFromCode(b.bagCode))
 
     if (records.length === 0) {
-      setBaleLabelStatus(`No silage bales found in ${seriesCode} for numbers ${start} to ${end}.`)
+      setBaleLabelStatus(`No silage bags found in ${seriesCode} for numbers ${start} to ${end}.`)
       return
     }
 
-    printSilageLabelsPdf(records, `silage-labels-${seriesCode}-${start}-${end}.pdf`)
-    setBaleLabelStatus(
-      `Generated ${records.length} label(s) for ${seriesCode} (bales ${start} to ${end}).`,
+    setSilageLabelDialog({
+      seriesCode,
+      records,
+      start,
+      end,
+      baggingDate: new Date().toISOString().slice(0, 10),
+    })
+  }
+
+  function confirmSilageLabelPrint() {
+    if (!silageLabelDialog?.baggingDate) {
+      setBaleLabelStatus('Enter the bagging date before printing silage labels.')
+      return
+    }
+    const { seriesCode, records, start, end, baggingDate } = silageLabelDialog
+    printSilageLabelsPdf(
+      records,
+      `silage-labels-${seriesCode}-${start}-${end}.pdf`,
+      baggingDate,
     )
+    setBaleLabelStatus(
+      `Generated ${records.length} label(s) for ${seriesCode} (bags ${start} to ${end}).`,
+    )
+    setSilageLabelDialog(null)
   }
 
   function rowSupportsLabelPrinting(row) {
@@ -8105,7 +8058,8 @@ function StockPage({
       <p>
         Loose stock codes (for example 2026-000-01-BRS) show fibre not yet baled. Baled series codes
         (for example 2026-000-01-BRS-100) show completed bales. Silage series codes (for example
-        2026-000-061626-SLG35-50) show bagged silage bales.
+        (for example 2026-000-SLG35-050) show bagged silage stock. Individual bag labels append a
+        four-digit serial (for example 2026-000-SLG35-050-0001).
       </p>
 
       <div className="form-grid">
@@ -8229,6 +8183,43 @@ function StockPage({
         </table>
       </div>
       {baleLabelStatus ? <p className="inline-hint">{baleLabelStatus}</p> : null}
+
+      {silageLabelDialog ? (
+        <div className="dialog-backdrop" role="presentation" onClick={() => setSilageLabelDialog(null)}>
+          <div
+            className="dialog-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="silage-label-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 id="silage-label-dialog-title">Print silage labels</h3>
+            <p>
+              Printing {silageLabelDialog.records.length} label(s) for{' '}
+              <strong>{silageLabelDialog.seriesCode}</strong> (bags {silageLabelDialog.start} to{' '}
+              {silageLabelDialog.end}).
+            </p>
+            <label className="form-grid">
+              Bagging date (printed on each label)
+              <input
+                type="date"
+                value={silageLabelDialog.baggingDate}
+                onChange={(event) =>
+                  setSilageLabelDialog((prev) => ({ ...prev, baggingDate: event.target.value }))
+                }
+              />
+            </label>
+            <div className="dialog-actions">
+              <button type="button" onClick={() => setSilageLabelDialog(null)}>
+                Cancel
+              </button>
+              <button type="button" onClick={confirmSilageLabelPrint}>
+                Print labels
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   )
 }
