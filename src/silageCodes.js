@@ -70,7 +70,10 @@ export function parseSilageBagCode(bagCode, record = {}) {
   const massRaw = parts[massIndex] ?? String(Math.round(record.massKg ?? 50))
   const massKg = Number(massRaw)
   const serialPart = parts[massIndex + 1]
-  const serial = serialPart !== undefined ? Number(serialPart) : 0
+  let serial = serialPart !== undefined ? Number(serialPart) : 0
+  if ((!serial || Number.isNaN(serial)) && serialPart === undefined) {
+    serial = extractSilageSerialFromRecordId(record.id)
+  }
   return {
     batch,
     grade: normalizedGrade,
@@ -80,28 +83,48 @@ export function parseSilageBagCode(bagCode, record = {}) {
   }
 }
 
+function extractSilageSerialFromRecordId(recordId) {
+  const id = String(recordId ?? '')
+  const openingMatch = id.match(/SLG-(\d+)$/i)
+  if (openingMatch) {
+    return Number(openingMatch[1])
+  }
+  const createMatch = id.match(/-(\d+)$/)
+  if (createMatch && id.startsWith('SLG-')) {
+    return Number(createMatch[1])
+  }
+  return 0
+}
+
 export function migrateLegacySilageBagCode(bagCode, record = {}) {
   const parsed = parseSilageBagCode(bagCode, record)
   if (!parsed) {
     if (record?.batchNumber && record?.massKg) {
+      const serial = extractSilageSerialFromRecordId(record.id) || 1
       return buildSilageBagCode(
         record.batchNumber,
         record.massKg,
-        1,
+        serial,
         record.dryMatterPercent ?? 35,
       )
     }
     return String(bagCode ?? '')
   }
-  if (!parsed.serial) {
+  const serial = parsed.serial || extractSilageSerialFromRecordId(record.id)
+  if (!serial) {
     return buildSilageSeriesCode(parsed.batch, parsed.massKg, parsed.dm)
   }
-  return buildSilageBagCode(parsed.batch, parsed.massKg, parsed.serial, parsed.dm)
+  return buildSilageBagCode(parsed.batch, parsed.massKg, serial, parsed.dm)
 }
 
-export function getSilageBagSerialFromCode(bagCode) {
-  const parsed = parseSilageBagCode(bagCode)
+export function getSilageBagSerialFromCode(bagCode, record = {}) {
+  const migrated = migrateLegacySilageBagCode(bagCode, record)
+  const parsed = parseSilageBagCode(migrated, record)
   return parsed?.serial ?? 0
+}
+
+export function getSilageRecordSerial(record) {
+  return getSilageBagSerialFromCode(record?.bagCode ?? '', record)
 }
 
 export function getSilageBagSeriesCode(record) {

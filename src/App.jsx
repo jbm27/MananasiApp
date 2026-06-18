@@ -50,6 +50,7 @@ import {
   getSilageBagSerialFromCode,
   getSilageBagSeriesCode,
   getSilageDryMatterFromBagCode,
+  getSilageRecordSerial,
   migrateLegacySilageBagCode,
   normalizeSilageDryMatterPercent,
 } from './silageCodes.js'
@@ -7590,7 +7591,7 @@ function SilageProductionPage({
             record.dryMatterPercent ?? getSilageDryMatterFromBagCode(record.bagCode),
           ) === dm,
       )
-      .map((record) => getSilageBagSerialFromCode(record.bagCode))
+      .map((record) => getSilageRecordSerial(record))
       .filter((value) => !Number.isNaN(value))
     let nextSerial = existingSerials.length > 0 ? Math.max(...existingSerials) + 1 : 1
     const operatorIds = employees
@@ -8015,10 +8016,10 @@ function StockPage({
     const records = filteredSilageRecords
       .filter((record) => getSilageBagSeriesCode(record) === seriesCode)
       .filter((record) => {
-        const serial = getSilageBagSerialFromCode(record.bagCode)
+        const serial = getSilageRecordSerial(record)
         return serial >= start && serial <= end
       })
-      .sort((a, b) => getSilageBagSerialFromCode(a.bagCode) - getSilageBagSerialFromCode(b.bagCode))
+      .sort((a, b) => getSilageRecordSerial(a) - getSilageRecordSerial(b))
 
     if (records.length === 0) {
       setBaleLabelStatus(`No silage bags found in ${seriesCode} for numbers ${start} to ${end}.`)
