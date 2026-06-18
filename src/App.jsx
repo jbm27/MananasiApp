@@ -1062,6 +1062,17 @@ function ActivityPage({ name, summary }) {
   )
 }
 
+function nextCustomerId(customers) {
+  const maxNumber = customers.reduce((max, customer) => {
+    const match = String(customer.id ?? '').match(/^CUST-(\d+)$/)
+    if (!match) {
+      return max
+    }
+    return Math.max(max, Number(match[1]))
+  }, 0)
+  return `CUST-${String(maxNumber + 1).padStart(3, '0')}`
+}
+
 function CustomersPage({ customers, onAddCustomer }) {
   const [name, setName] = useState('')
   const [addressLine1, setAddressLine1] = useState('')
@@ -9336,6 +9347,7 @@ function App() {
         salaryPayrollAdjustments,
         payrollApprovals,
         }),
+        { forPersist: true },
       ),
     [
       employees,
@@ -9686,11 +9698,10 @@ function App() {
   }
 
   function handleAddCustomer(input) {
-    const nextId = `CUST-${String(customers.length + 1).padStart(3, '0')}`
     setCustomers((prev) => [
       ...prev,
       {
-        id: nextId,
+        id: nextCustomerId(prev),
         name: input.name,
         addressLine1: input.addressLine1,
         addressLine2: input.addressLine2,

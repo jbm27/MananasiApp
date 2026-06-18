@@ -1,6 +1,6 @@
 import { migrateSilageRecord } from './silageCodes.js'
 
-const DEMO_CUSTOMER_ID = 'CUST-001'
+const DEMO_CUSTOMER_ID = 'CUST-SEED-001'
 const DEMO_INVOICE_ID = 'INV-SEED-1087'
 
 /** Real harvest entries in production began on this date (inclusive). */
@@ -61,7 +61,7 @@ function migrateInvoiceDocument(document) {
   }
 }
 
-export function sanitizePersistedAppState(data) {
+export function sanitizePersistedAppState(data, { forPersist = false } = {}) {
   if (!data || typeof data !== 'object') {
     return data
   }
@@ -101,7 +101,9 @@ export function sanitizePersistedAppState(data) {
         .map(migrateInvoiceDocument)
     : data.invoiceDocuments
   const customers = Array.isArray(data.customers)
-    ? data.customers.filter((customer) => customer.id !== DEMO_CUSTOMER_ID)
+    ? forPersist
+      ? data.customers
+      : data.customers.filter((customer) => customer.id !== DEMO_CUSTOMER_ID)
     : data.customers
   const fuelEntries = Array.isArray(data.fuelEntries)
     ? data.fuelEntries.filter((entry) => !isSeedFuelEntry(entry))
