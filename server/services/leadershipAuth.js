@@ -28,7 +28,7 @@ function isLeadershipTeamMember(employee) {
   if (leadershipTeamEmployeeIds.has(employee.id)) {
     return true
   }
-  return ['admin', 'harvesting-manager', 'production-manager'].includes(employee.role)
+  return ['admin', 'harvesting-manager', 'production-manager', 'director'].includes(employee.role)
 }
 
 async function getEmployees() {

@@ -13,7 +13,7 @@ export const PAYROLL_EDITOR_EMPLOYEE_IDS = new Set(['1002', '1010', '1019'])
 export const PAYROLL_APPROVER_EMPLOYEE_ID = '1019'
 
 export function canEditPayroll(user) {
-  if (!user) {
+  if (!user || user.role === 'director') {
     return false
   }
   if (user.role === 'admin') {

@@ -40,6 +40,7 @@ import {
   SEASONAL_GRADE_OPTIONS,
   createBlankEmployeeTemplate,
   formatEmployeeFieldValue,
+  mergeEmployeesWithSeed,
   parseEmployeeProfileFromForm,
 } from './employeeFields.js'
 import { sanitizePersistedAppState } from './appStateSanitize.js'
@@ -358,7 +359,7 @@ function pathnameToRequiredPageId(pathname) {
 
 function getBasePageListForEditor(employeeId, overrides, employees) {
   const employee = employees.find((item) => item.id === employeeId)
-  if (employee?.role === 'admin') {
+  if (employee?.role === 'admin' || employee?.role === 'director') {
     return [...PAGE_ACCESS_IDS]
   }
   const override = overrides[employeeId]
@@ -373,7 +374,7 @@ function getBasePageListForEditor(employeeId, overrides, employees) {
 
 function getEffectivePagePermissions(employeeId, overrides, employees) {
   const employee = employees.find((item) => item.id === employeeId)
-  if (employee?.role === 'admin') {
+  if (employee?.role === 'admin' || employee?.role === 'director') {
     return new Set(PAGE_ACCESS_IDS)
   }
   const base = getBasePageListForEditor(employeeId, overrides, employees)
@@ -385,6 +386,9 @@ function getEffectivePagePermissions(employeeId, overrides, employees) {
 function getDefaultDataEntryPermissionsForRole(role) {
   if (role === 'admin') {
     return [...DATA_ENTRY_PERMISSION_IDS]
+  }
+  if (role === 'director') {
+    return []
   }
   if (role === 'harvesting-manager') {
     return ['harvesting-entry', 'harvesting-batch', 'haulage-mileage', 'employee-role-all']
@@ -440,6 +444,9 @@ function getBaseDataEntryPermissionsForEditor(employeeId, overrides, employees) 
 function getEffectiveDataEntryPermissions(employeeId, overrides, employees) {
   const employee = employees.find((item) => item.id === employeeId)
   if (!employee) {
+    return new Set()
+  }
+  if (employee.role === 'director') {
     return new Set()
   }
   if (employee.role === 'admin') {
@@ -520,6 +527,7 @@ const employeeRoleOptions = [
   { value: 'baler', label: 'Baler' },
   { value: 'silage-supervisor', label: 'Silage Supervisor' },
   { value: 'silage-operator', label: 'Silage Operator' },
+  { value: 'director', label: 'Director' },
   { value: 'admin', label: 'Admin' },
 ]
 
@@ -529,6 +537,7 @@ function getEmployeeRoleLabel(role) {
 
 function getEmployeePermissionSummary(role) {
   if (role === 'admin') return 'Can manage employees and compensation settings'
+  if (role === 'director') return 'Read-only access to all pages; cannot change operational data'
   if (role === 'general-staff') return 'Directory profile only; no operational modules'
   if (role === 'inactive') return 'No longer active; kept on file only with no app access'
   if (role === 'harvesting-manager') {
@@ -1074,7 +1083,7 @@ function nextCustomerId(customers) {
   return `CUST-${String(maxNumber + 1).padStart(3, '0')}`
 }
 
-function CustomersPage({ customers, onAddCustomer }) {
+function CustomersPage({ customers, onAddCustomer, readOnly = false }) {
   const [name, setName] = useState('')
   const [addressLine1, setAddressLine1] = useState('')
   const [addressLine2, setAddressLine2] = useState('')
@@ -1088,6 +1097,9 @@ function CustomersPage({ customers, onAddCustomer }) {
 
   function handleSubmit(event) {
     event.preventDefault()
+    if (readOnly) {
+      return
+    }
     const missingFields = []
     if (!name.trim()) {
       missingFields.push('Customer Name')
@@ -1134,6 +1146,9 @@ function CustomersPage({ customers, onAddCustomer }) {
       <h2>Customers</h2>
       <p>Register and maintain your full customer list for invoice selection.</p>
 
+      {readOnly ? (
+        <p className="inline-hint">Director view: customer records are read-only.</p>
+      ) : (
       <CollapsibleSection title="Add Customer" isOpen onToggle={() => {}}>
         <form className="stacked-form" onSubmit={handleSubmit}>
           <label>
@@ -1199,6 +1214,7 @@ function CustomersPage({ customers, onAddCustomer }) {
           line 2, and company registration are optional.
         </div>
       </CollapsibleSection>
+      )}
 
       <h3>Customer Register</h3>
       <div className="table-wrap">
@@ -1249,6 +1265,7 @@ function InvoicingPage({
   onUpdateDocument,
   onFinalizeDocument,
   onConvertToInvoice,
+  readOnly = false,
 }) {
   const [documentType, setDocumentType] = useState('proforma')
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10))
@@ -1376,6 +1393,9 @@ function InvoicingPage({
   }
 
   function startEditingDocument(document) {
+    if (readOnly) {
+      return
+    }
     if (!isInvoiceDocumentEditable(document)) {
       setFormStatus('Only draft documents can be edited.')
       return
@@ -1426,6 +1446,9 @@ function InvoicingPage({
 
   function handleCreateDocument(event) {
     event.preventDefault()
+    if (readOnly) {
+      return
+    }
     const hasInvalidLine = computedLineItems.some((item) => {
       const quantityValue = Number(item.quantityKg)
       const rateValue = Number(item.rate)
@@ -1469,6 +1492,9 @@ function InvoicingPage({
   }
 
   function handleFinalizeDocument(documentId) {
+    if (readOnly) {
+      return
+    }
     const result = onFinalizeDocument(documentId)
     if (!result.ok) {
       setFormStatus(result.message)
@@ -1481,6 +1507,9 @@ function InvoicingPage({
   }
 
   function handleConvertDocument(documentId) {
+    if (readOnly) {
+      return
+    }
     const result = onConvertToInvoice(documentId)
     if (!result.ok) {
       setFormStatus(result.message)
@@ -1721,6 +1750,9 @@ function InvoicingPage({
         Only invoices need to be finalized.
       </p>
 
+      {readOnly ? (
+        <p className="inline-hint">Director view: invoices and proformas are read-only. You can view and print documents.</p>
+      ) : (
       <CollapsibleSection
         title={editingDocumentId ? 'Edit Document' : 'Create Document'}
         isOpen
@@ -1920,6 +1952,7 @@ function InvoicingPage({
           </article>
         </div>
       </CollapsibleSection>
+      )}
 
       <h3>Document Register</h3>
       <div className="table-wrap">
@@ -1950,17 +1983,17 @@ function InvoicingPage({
                   <button type="button" onClick={() => setSelectedDocumentId(doc.id)}>
                     View
                   </button>
-                  {isInvoiceDocumentEditable(doc) ? (
+                  {isInvoiceDocumentEditable(doc) && !readOnly ? (
                     <button type="button" onClick={() => startEditingDocument(doc)}>
                       Edit
                     </button>
                   ) : null}
-                  {canFinalizeInvoiceDocument(doc) ? (
+                  {canFinalizeInvoiceDocument(doc) && !readOnly ? (
                     <button type="button" onClick={() => handleFinalizeDocument(doc.id)}>
                       Finalize
                     </button>
                   ) : null}
-                  {doc.documentType === 'proforma' && doc.status !== 'converted' ? (
+                  {doc.documentType === 'proforma' && doc.status !== 'converted' && !readOnly ? (
                     <button type="button" onClick={() => handleConvertDocument(doc.id)}>
                       Convert to Invoice
                     </button>
@@ -1983,17 +2016,19 @@ function InvoicingPage({
             <button type="button" onClick={handlePrintDocumentPdf}>
               Print Document
             </button>
-            {isInvoiceDocumentEditable(selectedDocument) ? (
+            {isInvoiceDocumentEditable(selectedDocument) && !readOnly ? (
               <button type="button" onClick={() => startEditingDocument(selectedDocument)}>
                 Edit
               </button>
             ) : null}
-            {canFinalizeInvoiceDocument(selectedDocument) ? (
+            {canFinalizeInvoiceDocument(selectedDocument) && !readOnly ? (
               <button type="button" onClick={() => handleFinalizeDocument(selectedDocument.id)}>
                 Finalize
               </button>
             ) : null}
-            {selectedDocument.documentType === 'proforma' && selectedDocument.status !== 'converted' ? (
+            {selectedDocument.documentType === 'proforma' &&
+            selectedDocument.status !== 'converted' &&
+            !readOnly ? (
               <button type="button" onClick={() => handleConvertDocument(selectedDocument.id)}>
                 Convert to Invoice
               </button>
@@ -2125,6 +2160,14 @@ function isAppAdmin(user) {
   return user?.role === 'admin'
 }
 
+function isDirectorUser(user) {
+  return user?.role === 'director'
+}
+
+function canMutateAppData(user) {
+  return Boolean(user) && !isDirectorUser(user)
+}
+
 function readAuthLeadershipId() {
   if (typeof sessionStorage === 'undefined') {
     return ''
@@ -2151,7 +2194,7 @@ function isLeadershipTeamMember(employee) {
   if (leadershipTeamEmployeeIds.has(employee.id)) {
     return true
   }
-  return ['admin', 'harvesting-manager', 'production-manager'].includes(employee.role)
+  return ['admin', 'harvesting-manager', 'production-manager', 'director'].includes(employee.role)
 }
 
 function buildLoginUsername(displayName) {
@@ -9164,7 +9207,10 @@ function hydrateAppState(data, setters) {
   const sanitized = mergeOpeningStockRecords(sanitizePersistedAppState(data))
   if (Array.isArray(sanitized.employees)) {
     setters.setEmployees(
-      sanitized.employees.length > 0 ? sanitized.employees : [...mananasiStaffEmployees],
+      mergeEmployeesWithSeed(
+        sanitized.employees.length > 0 ? sanitized.employees : [],
+        mananasiStaffEmployees,
+      ),
     )
   }
   if (Array.isArray(sanitized.customers)) setters.setCustomers(sanitized.customers)
@@ -9401,6 +9447,7 @@ function App() {
         : new Set(),
     [currentUser, pagePermissionOverrides, employees],
   )
+  const readOnlyMode = !canMutateAppData(currentUser)
   const currentUserDataEntryPermissions = useMemo(
     () =>
       currentUser
@@ -9573,6 +9620,9 @@ function App() {
   }
 
   function handleUpdateEmployeeProfile(employeeId, profile) {
+    if (!canMutateAppData(currentUser)) {
+      return
+    }
     setEmployees((prev) =>
       prev.map((employee) => {
         if (employee.id !== employeeId) {
@@ -9601,6 +9651,9 @@ function App() {
   }
 
   function handleSaveEmployeePageAccess(employeeId, pageIds) {
+    if (!canMutateAppData(currentUser)) {
+      return
+    }
     const unique = [...new Set(pageIds)].filter((id) => PAGE_ACCESS_IDS.includes(id))
     if (!unique.includes('dashboard')) {
       unique.unshift('dashboard')
@@ -9690,6 +9743,9 @@ function App() {
   }
 
   function handleSaveEmployeeDataEntryPermissions(employeeId, permissionIds) {
+    if (!canMutateAppData(currentUser)) {
+      return
+    }
     const unique = [...new Set(permissionIds)].filter((id) => DATA_ENTRY_PERMISSION_IDS.includes(id))
     setDataEntryPermissionOverrides((prev) => {
       const next = { ...prev, [employeeId]: unique }
@@ -9699,6 +9755,9 @@ function App() {
   }
 
   function handleAddCustomer(input) {
+    if (!canMutateAppData(currentUser)) {
+      return
+    }
     setCustomers((prev) => [
       ...prev,
       {
@@ -10044,6 +10103,9 @@ function App() {
   }
 
   function handleCreateInvoiceDocument(input) {
+    if (!canMutateAppData(currentUser)) {
+      return null
+    }
     const isProforma = input.documentType === 'proforma'
     const prefix = isProforma ? 'PFI' : 'INV'
     const existingNumbers = invoiceDocuments
@@ -10070,6 +10132,9 @@ function App() {
   }
 
   function handleUpdateInvoiceDocument(documentId, input) {
+    if (!canMutateAppData(currentUser)) {
+      return null
+    }
     let updatedDocument = null
     setInvoiceDocuments((prev) =>
       prev.map((document) => {
@@ -10096,6 +10161,9 @@ function App() {
   }
 
   function handleFinalizeInvoiceDocument(documentId) {
+    if (!canMutateAppData(currentUser)) {
+      return { ok: false, message: 'You have read-only access and cannot finalize invoices.' }
+    }
     const document = invoiceDocuments.find((item) => item.id === documentId)
     if (!document) {
       return { ok: false, message: 'Document could not be found.' }
@@ -10127,6 +10195,9 @@ function App() {
   }
 
   function handleConvertProformaToInvoice(documentId) {
+    if (!canMutateAppData(currentUser)) {
+      return { ok: false, message: 'You have read-only access and cannot convert proformas.' }
+    }
     const source = invoiceDocuments.find((item) => item.id === documentId)
     if (!source || source.documentType !== 'proforma') {
       return { ok: false, message: 'Only proforma invoices can be converted.' }
@@ -10289,6 +10360,11 @@ function App() {
         </nav>
       </aside>
       <main className="content">
+        {readOnlyMode ? (
+          <p className="read-only-banner">
+            Director view: you can browse all pages, but operational data cannot be changed.
+          </p>
+        ) : null}
         <GatedRoutes allowedPages={allowedPages}>
           <Routes>
           <Route path="/login" element={<Navigate to="/" replace />} />
@@ -10378,7 +10454,13 @@ function App() {
           />
           <Route
             path="/customers"
-            element={<CustomersPage customers={customers} onAddCustomer={handleAddCustomer} />}
+            element={
+              <CustomersPage
+                customers={customers}
+                onAddCustomer={handleAddCustomer}
+                readOnly={readOnlyMode}
+              />
+            }
           />
           <Route
             path="/payroll"
@@ -10581,6 +10663,7 @@ function App() {
                 onUpdateDocument={handleUpdateInvoiceDocument}
                 onFinalizeDocument={handleFinalizeInvoiceDocument}
                 onConvertToInvoice={handleConvertProformaToInvoice}
+                readOnly={readOnlyMode}
               />
             }
           />
