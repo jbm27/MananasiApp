@@ -7670,7 +7670,6 @@ function StockPage({
   availableBatches,
 }) {
   const [showStockByCode, setShowStockByCode] = useState(false)
-  const [showStockInwardMovements, setShowStockInwardMovements] = useState(false)
   const [showBaleInventory, setShowBaleInventory] = useState(false)
   const [showSilageInventory, setShowSilageInventory] = useState(false)
   const [baleLabelRanges, setBaleLabelRanges] = useState({})
@@ -7761,62 +7760,66 @@ function StockPage({
     stockMap[sourceCode].movements += 1
   })
 
-  const stockRows = Object.values(stockMap)
-    .map((item) => ({ ...item, totalKg: Number(item.totalKg.toFixed(1)) }))
+  const looseStockRows = Object.values(stockMap)
+    .map((item) => ({
+      ...item,
+      totalKg: Number(item.totalKg.toFixed(1)),
+      stockForm: 'Loose',
+      quantityLabel: null,
+    }))
     .filter((item) => item.totalKg > 0)
-    .sort((a, b) => b.totalKg - a.totalKg)
+
+  const baledStockRows = Object.values(
+    filteredBalingRecords.reduce((map, item) => {
+      if (!map[item.baleSeriesCode]) {
+        map[item.baleSeriesCode] = {
+          stockCode: item.baleSeriesCode,
+          batchNumber: normalizeBatchNumber(item.batchNumber),
+          totalKg: 0,
+          stockForm: 'Baled',
+          quantityLabel: 0,
+        }
+      }
+      map[item.baleSeriesCode].totalKg += item.baleWeightKg
+      map[item.baleSeriesCode].quantityLabel += 1
+      return map
+    }, {}),
+  ).map((item) => ({
+    ...item,
+    totalKg: Number(item.totalKg.toFixed(1)),
+  }))
+
+  const silageStockRows = Object.values(
+    filteredSilageRecords.reduce((map, item) => {
+      const seriesCode = getSilageBagSeriesCode(item)
+      if (!map[seriesCode]) {
+        map[seriesCode] = {
+          stockCode: seriesCode,
+          batchNumber: normalizeBatchNumber(item.batchNumber),
+          totalKg: 0,
+          stockForm: 'Silage',
+          quantityLabel: 0,
+        }
+      }
+      map[seriesCode].totalKg += item.massKg
+      map[seriesCode].quantityLabel += 1
+      return map
+    }, {}),
+  ).map((item) => ({
+    ...item,
+    totalKg: Number(item.totalKg.toFixed(1)),
+  }))
+
+  const stockFormOrder = { Loose: 0, Baled: 1, Silage: 2 }
+  const stockRows = [...looseStockRows, ...baledStockRows, ...silageStockRows].sort((a, b) => {
+    const formDiff = stockFormOrder[a.stockForm] - stockFormOrder[b.stockForm]
+    if (formDiff !== 0) {
+      return formDiff
+    }
+    return a.stockCode.localeCompare(b.stockCode)
+  })
   const totalAvailableKg = Number(stockRows.reduce((sum, row) => sum + row.totalKg, 0).toFixed(1))
 
-  const stockMovements = [...filteredDryingRecords]
-    .map((record) => ({
-      id: record.id,
-      weighedDate: record.weighedDate,
-      stockCode: buildStockCode(record.batchNumber, record.machine, 'UBR'),
-      quantityKg: record.totalDriedKg,
-      batchNumber: normalizeBatchNumber(record.batchNumber),
-      machine: record.machine,
-    }))
-    .concat(
-      filteredBrushingMovements.map((item) => ({
-        id: item.id,
-        weighedDate: item.date,
-        stockCode: item.sourceStockCode,
-        quantityKg: item.type === 'issue' ? -item.quantityKg : item.quantityKg,
-        batchNumber: normalizeBatchNumber(item.batchNumber),
-        machine: item.machine ?? getMachineFromStockCode(item.sourceStockCode),
-      })),
-    )
-    .concat(
-      filteredBrushingDailyRecords.flatMap((item) => [
-        {
-          id: `${item.id}-BRS`,
-          weighedDate: item.date,
-          stockCode: `${String(item.sourceStockCode ?? '').replace(/-UBR$/, '')}-BRS`,
-          quantityKg: item.brsKg,
-          batchNumber: normalizeBatchNumber(item.batchNumber),
-          machine: item.machine ?? getMachineFromStockCode(item.sourceStockCode),
-        },
-        {
-          id: `${item.id}-TOW`,
-          weighedDate: item.date,
-          stockCode: `${String(item.sourceStockCode ?? '').replace(/-UBR$/, '')}-TOW`,
-          quantityKg: item.towKg,
-          batchNumber: normalizeBatchNumber(item.batchNumber),
-          machine: item.machine ?? getMachineFromStockCode(item.sourceStockCode),
-        },
-      ]),
-    )
-    .concat(
-      filteredBalingRecords.map((item) => ({
-        id: `${item.id}-BALING-CONSUME`,
-        weighedDate: item.date,
-        stockCode: item.sourceStockCode,
-        quantityKg: -item.baleWeightKg,
-        batchNumber: normalizeBatchNumber(item.batchNumber),
-        machine: item.machine ?? getMachineFromStockCode(item.sourceStockCode),
-      })),
-    )
-    .sort((a, b) => b.weighedDate.localeCompare(a.weighedDate))
   const baleInventoryRows = Object.values(
     filteredBalingRecords.reduce((map, item) => {
       if (!map[item.baleSeriesCode]) {
@@ -7991,66 +7994,42 @@ function StockPage({
         isOpen={showStockByCode}
         onToggle={() => setShowStockByCode((prev) => !prev)}
       >
+        <p className="inline-hint">
+          Loose codes (for example 2026-000-01-BRS) show fibre not yet baled. Baled codes show the
+          bale series (for example 2026-000-01-BRS-100). Silage bag series are included separately.
+        </p>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
                 <th>Stock Code</th>
+                <th>Form</th>
                 <th>Batch</th>
                 <th>Decorticator</th>
                 <th>Total Available (kg)</th>
-                <th>Movement Events</th>
+                <th>Quantity</th>
               </tr>
             </thead>
             <tbody>
               {stockRows.map((row) => (
-                <tr key={row.stockCode}>
+                <tr key={`${row.stockForm}-${row.stockCode}`}>
                   <td>{row.stockCode}</td>
+                  <td>{row.stockForm}</td>
                   <td>{row.batchNumber}</td>
-                  <td>{getMachineFromStockCode(row.stockCode)}</td>
-                  <td>{row.totalKg}</td>
-                  <td>{row.movements}</td>
+                  <td>{row.stockForm === 'Silage' ? '—' : getMachineFromStockCode(row.stockCode)}</td>
+                  <td>{row.totalKg.toLocaleString()}</td>
+                  <td>
+                    {row.stockForm === 'Loose'
+                      ? '—'
+                      : row.stockForm === 'Baled'
+                        ? `${row.quantityLabel} bale${row.quantityLabel === 1 ? '' : 's'}`
+                        : `${row.quantityLabel} bag${row.quantityLabel === 1 ? '' : 's'}`}
+                  </td>
                 </tr>
               ))}
               {stockRows.length === 0 && (
                 <tr>
-                  <td colSpan="5">No stock generated for the current filter.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </CollapsibleSection>
-
-      <CollapsibleSection
-        title="Stock Inward Movements"
-        isOpen={showStockInwardMovements}
-        onToggle={() => setShowStockInwardMovements((prev) => !prev)}
-      >
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Weighed Date</th>
-                <th>Stock Code</th>
-                <th>Batch</th>
-                <th>Decorticator</th>
-                <th>Quantity Added (kg)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {stockMovements.map((movement) => (
-                <tr key={movement.id}>
-                  <td>{formatDisplayDate(movement.weighedDate)}</td>
-                  <td>{movement.stockCode}</td>
-                  <td>{movement.batchNumber}</td>
-                  <td>{movement.machine}</td>
-                  <td>{movement.quantityKg}</td>
-                </tr>
-              ))}
-              {stockMovements.length === 0 && (
-                <tr>
-                  <td colSpan="5">No stock inward movements for the current filter.</td>
+                  <td colSpan="6">No stock generated for the current filter.</td>
                 </tr>
               )}
             </tbody>
