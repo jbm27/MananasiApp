@@ -54,6 +54,10 @@ import {
   parseEmployeeProfileFromForm,
 } from './employeeFields.js'
 import { sanitizePersistedAppState } from './appStateSanitize.js'
+import {
+  findDuplicateDecorticationShift,
+  formatDecorticationShiftConflictMessage,
+} from './decortication.js'
 import { mergeOpeningStockRecords } from './openingStockSeed.js'
 import {
   SILAGE_DRY_MATTER_OPTIONS,
@@ -4939,6 +4943,7 @@ function DecorticationPage({
   dryingRecords,
   onCreateDecorticationShift,
   onUpdateDecorticationRecord,
+  onDeleteDecorticationRecord,
   dateFrom,
   dateTo,
   onDateFromChange,
@@ -5153,9 +5158,8 @@ function DecorticationPage({
       return
     }
     const warnings = getDecorticationStaffingWarnings(supervisorId, selectedOperatorIds.length)
-    const assignmentId = `ASG-${Date.now()}`
-    onCreateDecorticationShift({
-      assignmentId,
+    const result = onCreateDecorticationShift({
+      assignmentId: `ASG-${Date.now()}`,
       date: shiftDate,
       machine,
       shiftNumber: shift,
@@ -5171,6 +5175,10 @@ function DecorticationPage({
       runtimeHours: 0,
       leafInputKg: 0,
     })
+    if (!result.ok) {
+      setAssignmentStatus(result.message)
+      return
+    }
     setSelectedOperatorIds([])
     setAssignmentStatus(
       warnings.length > 0
@@ -5178,6 +5186,30 @@ function DecorticationPage({
         : 'Team assignment saved. It is now visible in Decortication Records.',
     )
     setShowProductionRecords(true)
+  }
+
+  function handleDeleteRecord(record) {
+    if (!canManageDecortication) {
+      return
+    }
+    const confirmed = window.confirm(
+      `Delete ${record.machine} shift ${record.shiftNumber} on ${formatDisplayDate(record.date)}? This cannot be undone.`,
+    )
+    if (!confirmed) {
+      return
+    }
+    const result = onDeleteDecorticationRecord(record.id)
+    if (!result.ok) {
+      setEditStatus(result.message)
+      return
+    }
+    if (editingRecordId === record.id) {
+      cancelEditingRecord()
+    }
+    if (viewingRecordId === record.id) {
+      setViewingRecordId('')
+    }
+    setEditStatus(result.message)
   }
 
   function startEditingRecord(record) {
@@ -5274,6 +5306,22 @@ function DecorticationPage({
   const editStaffingWarnings = editingRecordId
     ? getDecorticationStaffingWarnings(editSupervisorId, editOperatorIds.length)
     : []
+  const pendingShiftDuplicate = findDuplicateDecorticationShift(decorticationRecords, {
+    date: shiftDate,
+    machine,
+    shiftNumber,
+  })
+  const editShiftDuplicate =
+    editingRecordId &&
+    findDuplicateDecorticationShift(
+      decorticationRecords,
+      {
+        date: editDate,
+        machine: editMachine,
+        shiftNumber: editShiftNumber,
+      },
+      editingRecordId,
+    )
 
   return (
     <section className="panel">
@@ -5421,6 +5469,15 @@ function DecorticationPage({
               ))}
             </div>
           </label>
+          {pendingShiftDuplicate ? (
+            <div className="staffing-warning" role="alert">
+              {formatDecorticationShiftConflictMessage({
+                date: shiftDate,
+                machine,
+                shiftNumber,
+              })}
+            </div>
+          ) : null}
           {staffingWarnings.length > 0 ? (
             <div className="staffing-warning" role="alert">
               <strong>Staffing advisory</strong>
@@ -5432,7 +5489,7 @@ function DecorticationPage({
               <p>You can still save this shift assignment.</p>
             </div>
           ) : null}
-          <button type="submit" disabled={!canManageDecortication}>
+          <button type="submit" disabled={!canManageDecortication || Boolean(pendingShiftDuplicate)}>
             Save Team Assignment
           </button>
         </form>
@@ -5547,6 +5604,14 @@ function DecorticationPage({
                             disabled={!canManageDecortication}
                           >
                             Edit Shift
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            onClick={() => handleDeleteRecord(record)}
+                            disabled={!canManageDecortication}
+                          >
+                            Delete Shift
                           </button>
                           <button
                             type="button"
@@ -5695,8 +5760,19 @@ function DecorticationPage({
                               </ul>
                             </div>
                           ) : null}
+                          {editShiftDuplicate ? (
+                            <div className="staffing-warning" role="alert">
+                              {formatDecorticationShiftConflictMessage({
+                                date: editDate,
+                                machine: editMachine,
+                                shiftNumber: editShiftNumber,
+                              })}
+                            </div>
+                          ) : null}
                           <div className="record-edit-actions">
-                            <button type="submit">Save Changes</button>
+                            <button type="submit" disabled={Boolean(editShiftDuplicate)}>
+                              Save Changes
+                            </button>
                             <button type="button" className="secondary-button" onClick={cancelEditingRecord}>
                               Cancel
                             </button>
@@ -10241,6 +10317,14 @@ function App() {
       runtimeHours: updates.runtimeHours ?? record.runtimeHours,
     }
 
+    const duplicate = findDuplicateDecorticationShift(decorticationRecords, nextFields, recordId)
+    if (duplicate) {
+      return {
+        ok: false,
+        message: formatDecorticationShiftConflictMessage(nextFields),
+      }
+    }
+
     const identityChanged =
       nextFields.date !== record.date ||
       nextFields.machine !== record.machine ||
@@ -10546,8 +10630,23 @@ function App() {
   }
 
   function handleCreateDecorticationAssignment(input) {
-    const assignmentId = input.assignmentId ?? `ASG-${Date.now()}`
+    if (
+      !canMutateAppData(currentUser) ||
+      !currentUserDataEntryPermissions.has('decortication-entry')
+    ) {
+      return { ok: false, message: 'You do not have permission to create decortication shifts.' }
+    }
     const normalizedBatchNumber = normalizeBatchNumber(input.batchNumber)
+    const shiftFields = {
+      date: input.date,
+      machine: input.machine,
+      shiftNumber: input.shiftNumber,
+    }
+    const duplicate = findDuplicateDecorticationShift(decorticationRecords, shiftFields)
+    if (duplicate) {
+      return { ok: false, message: formatDecorticationShiftConflictMessage(shiftFields) }
+    }
+    const assignmentId = input.assignmentId ?? `ASG-${Date.now()}`
     const assignment = { ...input, id: assignmentId, batchNumber: normalizedBatchNumber }
     const record = {
       id: `DEC-${Date.now()}`,
@@ -10567,6 +10666,52 @@ function App() {
     }
     setDecorticationAssignments((prev) => [assignment, ...prev])
     setDecorticationRecords((prev) => [record, ...prev])
+    return { ok: true, message: 'Team assignment saved.' }
+  }
+
+  function handleDeleteDecorticationRecord(recordId) {
+    if (
+      !canMutateAppData(currentUser) ||
+      !currentUserDataEntryPermissions.has('decortication-entry')
+    ) {
+      return { ok: false, message: 'You do not have permission to delete decortication shifts.' }
+    }
+    const record = decorticationRecords.find((item) => item.id === recordId)
+    if (!record) {
+      return { ok: false, message: 'Decortication record could not be found.' }
+    }
+    const linkedDryingRecord = dryingRecords.find((item) => item.decorticationRecordId === recordId)
+    if (linkedDryingRecord && linkedDryingRecord.totalDriedKg > 0) {
+      return {
+        ok: false,
+        message:
+          'Cannot delete this shift because drying output has already been recorded. Remove or reassign the drying record first.',
+      }
+    }
+    const sourceStockCode = buildStockCode(record.batchNumber, record.machine, 'UBR')
+    const hasBrushingActivity =
+      brushingStockMovements.some((item) => item.sourceStockCode === sourceStockCode) ||
+      brushingDailyRecords.some((item) => item.sourceStockCode === sourceStockCode)
+    if (hasBrushingActivity) {
+      return {
+        ok: false,
+        message:
+          'Cannot delete this shift because its fibre stock has already been used in brushing.',
+      }
+    }
+    setDecorticationRecords((prev) => prev.filter((item) => item.id !== recordId))
+    if (record.assignmentId) {
+      setDecorticationAssignments((prev) =>
+        prev.filter((item) => item.id !== record.assignmentId),
+      )
+    }
+    if (linkedDryingRecord) {
+      setDryingRecords((prev) => prev.filter((item) => item.id !== linkedDryingRecord.id))
+    }
+    return {
+      ok: true,
+      message: `${record.machine} shift ${record.shiftNumber} on ${formatDisplayDate(record.date)} deleted.`,
+    }
   }
 
   function handleSaveDryingTeamAssignment(input) {
@@ -10887,6 +11032,7 @@ function App() {
                 decorticationRecords={decorticationRecords}
                 onCreateDecorticationShift={handleCreateDecorticationAssignment}
                 onUpdateDecorticationRecord={handleUpdateDecorticationRecord}
+                onDeleteDecorticationRecord={handleDeleteDecorticationRecord}
                 dryingRecords={dryingRecords}
                 dateFrom={decorticationDateFrom}
                 dateTo={decorticationDateTo}
