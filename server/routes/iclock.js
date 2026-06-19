@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { recordAttendanceEvent } from '../services/attendanceService.js'
 import { getAppState } from '../stateStore.js'
 import { parseKenyaLocalDateTime } from '../utils/kenyaTime.js'
+import { syncClockedInIdsToAppState } from '../services/attendanceAutoClockOut.js'
 import {
   resolveEmployeeIdFromDevicePin,
   resolveEventTypeForPin,
@@ -144,6 +145,7 @@ router.post('/cdata', async (req, res) => {
         `ATTLOG ${serialNumber}: PIN ${parsed.pin} -> ${employeeId} ${eventType} @ ${parsed.occurredAt.toISOString()}`,
       )
     }
+    await syncClockedInIdsToAppState()
     res.type('text/plain').send('OK')
   } catch (error) {
     console.error('POST /iclock/cdata failed:', error)

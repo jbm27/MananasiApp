@@ -1,4 +1,5 @@
 import { getPool } from '../db.js'
+import { getAppState, saveAppState } from '../stateStore.js'
 import { recordAttendanceEvent } from './attendanceService.js'
 
 /** Must match AUTO_CLOCK_OUT_HOURS in src/attendanceProcessing.js */
@@ -45,4 +46,38 @@ export async function ensureAutoClockOutsPersisted(referenceNow = new Date()) {
   }
 
   return applied
+}
+
+/** Employees whose latest event is clock_in within the last 12 hours. */
+export async function getActiveClockedInEmployeeIds(referenceNow = new Date()) {
+  const activeSince = new Date(referenceNow.getTime() - AUTO_CLOCK_OUT_MS).toISOString()
+  const result = await getPool().query(
+    `WITH latest AS (
+       SELECT DISTINCT ON (employee_id)
+         employee_id,
+         event_type,
+         occurred_at
+       FROM attendance_events
+       ORDER BY employee_id, occurred_at DESC
+     )
+     SELECT employee_id AS "employeeId"
+     FROM latest
+     WHERE event_type = 'clock_in'
+       AND occurred_at > $1`,
+    [activeSince],
+  )
+  return result.rows.map((row) => row.employeeId)
+}
+
+/** Run overdue auto clock-outs, then write authoritative clockedInIds to app state. */
+export async function syncClockedInIdsToAppState(referenceNow = new Date()) {
+  await ensureAutoClockOutsPersisted(referenceNow)
+  const clockedInIds = await getActiveClockedInEmployeeIds(referenceNow)
+  const current = await getAppState()
+  const data = current?.data ?? {}
+  await saveAppState({
+    ...data,
+    clockedInIds,
+  })
+  return clockedInIds
 }

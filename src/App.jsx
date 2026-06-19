@@ -9458,7 +9458,6 @@ function App() {
         employees,
         customers,
         activeBatchNumber,
-        clockedInIds,
         records,
         compensationRules,
         pagePermissionOverrides,
@@ -9486,7 +9485,6 @@ function App() {
       employees,
       customers,
       activeBatchNumber,
-      clockedInIds,
       records,
       compensationRules,
       pagePermissionOverrides,
@@ -9521,10 +9519,15 @@ function App() {
     if (!ready) {
       return
     }
-    fetchAttendanceEvents(RECENT_CLOCK_EVENTS_LIMIT)
-      .then((events) => setAttendanceEvents(events))
+    Promise.all([fetchAttendanceEvents(RECENT_CLOCK_EVENTS_LIMIT), fetchAppState()])
+      .then(([events, state]) => {
+        setAttendanceEvents(events)
+        if (Array.isArray(state?.clockedInIds)) {
+          setClockedInIds(state.clockedInIds)
+        }
+      })
       .catch(() => setAttendanceEvents([]))
-  }, [ready, clockedInIds])
+  }, [ready])
 
   const allowedPages = useMemo(
     () =>
