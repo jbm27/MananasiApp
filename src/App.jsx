@@ -13,6 +13,15 @@ import {
 import { jsPDF } from 'jspdf'
 import './App.css'
 import PayrollPage from './PayrollPage.jsx'
+import ProcurementPage from './ProcurementPage.jsx'
+import {
+  allItemsReceived,
+  buildPoItemsFromInput,
+  canEmployeeAuthorizePo,
+  isPurchaseOrderEditable,
+  nextPurchaseOrderNumber,
+  nextSupplierId,
+} from './procurement.js'
 import {
   canApprovePayroll,
   createPayrollApproval,
@@ -141,6 +150,7 @@ const PAGE_ACCESS_IDS = [
   'baling',
   'silage-production',
   'invoicing',
+  'procurement',
   'payroll',
 ]
 
@@ -158,6 +168,7 @@ const PAGE_ACCESS_LABELS = {
   baling: 'Baling',
   'silage-production': 'Silage production',
   invoicing: 'Invoicing',
+  procurement: 'Procurement',
   payroll: 'Payroll',
 }
 
@@ -176,6 +187,8 @@ const DATA_ENTRY_PERMISSION_IDS = [
   'employee-role-all',
   'employee-wage-rates',
   'employee-add',
+  'procurement-entry',
+  'procurement-approval-limits',
 ]
 
 const DATA_ENTRY_PERMISSION_LABELS = {
@@ -193,12 +206,14 @@ const DATA_ENTRY_PERMISSION_LABELS = {
   'employee-role-all': 'Edit roles for all employees (including permanent)',
   'employee-wage-rates': 'Edit daily wage rate settings',
   'employee-add': 'Add new employees',
+  'procurement-entry': 'Create and manage purchase orders and suppliers',
+  'procurement-approval-limits': 'Set LPO approval limits for sign-in employees',
 }
 
 /** Policy defaults from organisation roles; James (admin) always receives full access in code. */
 const DEFAULT_PAGE_ACCESS_BY_EMPLOYEE_ID = {
   '1002': ['dashboard', 'employees', 'payroll'],
-  '1010': ['dashboard', 'employees', 'invoicing', 'customers', 'stock', 'payroll'],
+  '1010': ['dashboard', 'employees', 'invoicing', 'customers', 'procurement', 'stock', 'payroll'],
   '1018': ['dashboard', 'stock'],
   '1019': [...PAGE_ACCESS_IDS],
   '1004': [
@@ -348,6 +363,9 @@ function pathnameToRequiredPageId(pathname) {
   }
   if (path.startsWith('/activities/invoicing')) {
     return 'invoicing'
+  }
+  if (path.startsWith('/procurement')) {
+    return 'procurement'
   }
   if (path.startsWith('/payroll')) {
     return 'payroll'
@@ -9350,6 +9368,15 @@ function hydrateAppState(data, setters) {
   if (Array.isArray(sanitized.invoiceDocuments)) {
     setters.setInvoiceDocuments(sanitized.invoiceDocuments)
   }
+  if (Array.isArray(sanitized.suppliers)) {
+    setters.setSuppliers(sanitized.suppliers)
+  }
+  if (Array.isArray(sanitized.purchaseOrders)) {
+    setters.setPurchaseOrders(sanitized.purchaseOrders)
+  }
+  if (sanitized.lpoApprovalLimits && typeof sanitized.lpoApprovalLimits === 'object') {
+    setters.setLpoApprovalLimits(sanitized.lpoApprovalLimits)
+  }
   if (sanitized.payrollAdjustments) setters.setPayrollAdjustments(sanitized.payrollAdjustments)
   if (sanitized.salaryPayrollAdjustments) {
     setters.setSalaryPayrollAdjustments(sanitized.salaryPayrollAdjustments)
@@ -9414,6 +9441,9 @@ function App() {
   const [silageRecords, setSilageRecords] = useState([])
   const [attendanceEvents, setAttendanceEvents] = useState([])
   const [invoiceDocuments, setInvoiceDocuments] = useState([])
+  const [suppliers, setSuppliers] = useState([])
+  const [purchaseOrders, setPurchaseOrders] = useState([])
+  const [lpoApprovalLimits, setLpoApprovalLimits] = useState({})
 
   const currentUser = employees.find((employee) => employee.id === authLeadershipId) ?? null
 
@@ -9443,6 +9473,9 @@ function App() {
       setBalingRecords,
       setSilageRecords,
       setInvoiceDocuments,
+      setSuppliers,
+      setPurchaseOrders,
+      setLpoApprovalLimits,
       setPayrollAdjustments,
       setSalaryPayrollAdjustments,
       setPayrollApprovals,
@@ -9475,6 +9508,9 @@ function App() {
         balingRecords,
         silageRecords,
         invoiceDocuments,
+        suppliers,
+        purchaseOrders,
+        lpoApprovalLimits,
         payrollAdjustments,
         salaryPayrollAdjustments,
         payrollApprovals,
@@ -9502,6 +9538,9 @@ function App() {
       balingRecords,
       silageRecords,
       invoiceDocuments,
+      suppliers,
+      purchaseOrders,
+      lpoApprovalLimits,
       payrollAdjustments,
       salaryPayrollAdjustments,
       payrollApprovals,
@@ -9543,6 +9582,15 @@ function App() {
         ? getEffectiveDataEntryPermissions(currentUser.id, dataEntryPermissionOverrides, employees)
         : new Set(),
     [currentUser, dataEntryPermissionOverrides, employees],
+  )
+
+  const signInEmployees = useMemo(
+    () =>
+      employees
+        .filter(isLeadershipTeamMember)
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [employees],
   )
 
   const availableBatchNumbers = useMemo(
@@ -9862,6 +9910,196 @@ function App() {
         companyRegistration: input.companyRegistration,
       },
     ])
+  }
+
+  function getSignInEmployeesById() {
+    return new Map(signInEmployees.map((employee) => [employee.id, employee]))
+  }
+
+  function handleAddSupplier(input) {
+    if (!canMutateAppData(currentUser) || !currentUserDataEntryPermissions.has('procurement-entry')) {
+      return
+    }
+    setSuppliers((prev) => [
+      ...prev,
+      {
+        id: nextSupplierId(prev),
+        name: input.name,
+        addressLine1: input.addressLine1,
+        addressLine2: input.addressLine2,
+        city: input.city,
+        postCode: input.postCode,
+        country: input.country,
+        email: input.email,
+        phone: input.phone,
+      },
+    ])
+  }
+
+  function handleCreatePurchaseOrder(input) {
+    if (!canMutateAppData(currentUser) || !currentUserDataEntryPermissions.has('procurement-entry')) {
+      return null
+    }
+    const signInById = getSignInEmployeesById()
+    const items = buildPoItemsFromInput(input.items, signInById)
+    if (items.some((item) => !item.receiverEmployeeId)) {
+      return null
+    }
+    let created = null
+    setPurchaseOrders((prev) => {
+      created = {
+        id: `PO-${Date.now()}`,
+        poNumber: nextPurchaseOrderNumber(prev),
+        orderDate: input.orderDate,
+        supplierId: input.supplierId,
+        supplierName: input.supplierName,
+        currency: 'KES',
+        items,
+        totalAmount: input.totalAmount,
+        status: 'draft',
+        authorizedById: '',
+        authorizedByName: '',
+        authorizedAt: null,
+        createdById: currentUser.id,
+        createdByName: currentUser.name,
+        createdAt: new Date().toISOString(),
+        finalizedAt: null,
+      }
+      return [created, ...prev]
+    })
+    return created
+  }
+
+  function handleUpdatePurchaseOrder(poId, input) {
+    if (!canMutateAppData(currentUser) || !currentUserDataEntryPermissions.has('procurement-entry')) {
+      return null
+    }
+    const existing = purchaseOrders.find((item) => item.id === poId)
+    if (!existing || !isPurchaseOrderEditable(existing)) {
+      return null
+    }
+    const signInById = getSignInEmployeesById()
+    const items = buildPoItemsFromInput(input.items, signInById)
+    if (items.some((item) => !item.receiverEmployeeId)) {
+      return null
+    }
+    let updated = null
+    setPurchaseOrders((prev) =>
+      prev.map((po) => {
+        if (po.id !== poId) {
+          return po
+        }
+        updated = {
+          ...po,
+          orderDate: input.orderDate,
+          supplierId: input.supplierId,
+          supplierName: input.supplierName,
+          items,
+          totalAmount: input.totalAmount,
+        }
+        return updated
+      }),
+    )
+    return updated
+  }
+
+  function handleAuthorizePurchaseOrder(poId, authorizerId) {
+    const authorizer = employees.find((employee) => employee.id === authorizerId)
+    if (!authorizer || !canMutateAppData(authorizer)) {
+      return { ok: false, message: 'You cannot authorise purchase orders.' }
+    }
+    const po = purchaseOrders.find((item) => item.id === poId)
+    if (!po) {
+      return { ok: false, message: 'Purchase order not found.' }
+    }
+    if (po.status !== 'draft') {
+      return { ok: false, message: 'Only draft purchase orders can be authorised.' }
+    }
+    if (!canEmployeeAuthorizePo(authorizer, po.totalAmount, lpoApprovalLimits)) {
+      return {
+        ok: false,
+        message: `This LPO total (KES ${po.totalAmount.toLocaleString(undefined, {
+          minimumFractionDigits: 2,
+        })}) exceeds your approval limit.`,
+      }
+    }
+    setPurchaseOrders((prev) =>
+      prev.map((item) =>
+        item.id === poId
+          ? {
+              ...item,
+              status: 'authorized',
+              authorizedById: authorizer.id,
+              authorizedByName: authorizer.name,
+              authorizedAt: new Date().toISOString(),
+            }
+          : item,
+      ),
+    )
+    return { ok: true, message: `${po.poNumber} authorised. You can now download the PDF.` }
+  }
+
+  function handleMarkPoItemReceived(poId, itemId, receivedById) {
+    if (!canMutateAppData(currentUser) || !currentUserDataEntryPermissions.has('procurement-entry')) {
+      return { ok: false, message: 'You do not have permission to mark items as received.' }
+    }
+    const receiver = employees.find((employee) => employee.id === receivedById)
+    if (!receiver) {
+      return { ok: false, message: 'Could not record who received this item.' }
+    }
+    const po = purchaseOrders.find((item) => item.id === poId)
+    if (!po || po.status === 'draft') {
+      return { ok: false, message: 'Authorise the purchase order before marking items received.' }
+    }
+    let resultMessage = 'Item marked as received.'
+    setPurchaseOrders((prev) =>
+      prev.map((item) => {
+        if (item.id !== poId) {
+          return item
+        }
+        const items = item.items.map((line) => {
+          if (line.id !== itemId || line.received) {
+            return line
+          }
+          return {
+            ...line,
+            received: true,
+            receivedAt: new Date().toISOString(),
+            receivedById: receiver.id,
+            receivedByName: receiver.name,
+          }
+        })
+        const updated = { ...item, items }
+        if (allItemsReceived(updated)) {
+          resultMessage = `${item.poNumber} finalised — all items received.`
+          return {
+            ...updated,
+            status: 'received',
+            finalizedAt: new Date().toISOString(),
+          }
+        }
+        return updated
+      }),
+    )
+    return { ok: true, message: resultMessage }
+  }
+
+  function handleSetLpoApprovalLimit(employeeId, maxAmountKes) {
+    if (
+      !canMutateAppData(currentUser) ||
+      !currentUserDataEntryPermissions.has('procurement-approval-limits')
+    ) {
+      return
+    }
+    setLpoApprovalLimits((prev) => {
+      const next = { ...prev }
+      if (maxAmountKes === null || maxAmountKes === undefined || maxAmountKes === '') {
+        delete next[employeeId]
+      } else {
+        next[employeeId] = maxAmountKes
+      }
+      return next
+    })
   }
 
   async function handleRefreshAttendance() {
@@ -10436,6 +10674,7 @@ function App() {
             <NavLink to="/admin/sign-in-accounts">Sign-in accounts</NavLink>
           ) : null}
           {allowedPages.has('customers') ? <NavLink to="/customers">Customers</NavLink> : null}
+          {allowedPages.has('procurement') ? <NavLink to="/procurement">Procurement</NavLink> : null}
           {allowedPages.has('stock') ? <NavLink to="/stock">Stock</NavLink> : null}
           {allowedPages.has('harvesting') ? (
             <NavLink to="/activities/harvesting">Harvesting</NavLink>
@@ -10557,6 +10796,27 @@ function App() {
                 customers={customers}
                 onAddCustomer={handleAddCustomer}
                 readOnly={readOnlyMode}
+              />
+            }
+          />
+          <Route
+            path="/procurement"
+            element={
+              <ProcurementPage
+                suppliers={suppliers}
+                purchaseOrders={purchaseOrders}
+                lpoApprovalLimits={lpoApprovalLimits}
+                signInEmployees={signInEmployees}
+                currentUser={currentUser}
+                canManageProcurement={currentUserDataEntryPermissions.has('procurement-entry')}
+                canSetApprovalLimits={currentUserDataEntryPermissions.has('procurement-approval-limits')}
+                readOnly={readOnlyMode}
+                onAddSupplier={handleAddSupplier}
+                onCreatePurchaseOrder={handleCreatePurchaseOrder}
+                onUpdatePurchaseOrder={handleUpdatePurchaseOrder}
+                onAuthorizePurchaseOrder={handleAuthorizePurchaseOrder}
+                onMarkPoItemReceived={handleMarkPoItemReceived}
+                onSetLpoApprovalLimit={handleSetLpoApprovalLimit}
               />
             }
           />
