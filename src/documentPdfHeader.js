@@ -11,6 +11,7 @@ export function formatDisplayDate(isoDate) {
   return `${day}/${month}/${year}`
 }
 
+/** Same logo treatment as invoice PDFs: solid black MANANASI text, enhanced gold FIBRE LTD. */
 export function prepareLogoForPdf(sourceImage) {
   const width = sourceImage.naturalWidth
   const height = sourceImage.naturalHeight
@@ -39,6 +40,29 @@ export function prepareLogoForPdf(sourceImage) {
     ]
   }
 
+  for (let y = 0; y < fibreRegionStartY; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const pixelIndex = (y * width + x) * 4
+      const alpha = data[pixelIndex + 3]
+      if (alpha < 16) {
+        continue
+      }
+      const r = data[pixelIndex]
+      const g = data[pixelIndex + 1]
+      const b = data[pixelIndex + 2]
+      if (r > 235 && g > 235 && b > 235) {
+        continue
+      }
+      if (isGoldPixel(r, g, b)) {
+        continue
+      }
+      data[pixelIndex] = 0
+      data[pixelIndex + 1] = 0
+      data[pixelIndex + 2] = 0
+      data[pixelIndex + 3] = 255
+    }
+  }
+
   for (let y = fibreRegionStartY; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const pixelIndex = (y * width + x) * 4
@@ -50,31 +74,49 @@ export function prepareLogoForPdf(sourceImage) {
         continue
       }
       goldMask[y * width + x] = 1
+      const [nextR, nextG, nextB] = brightenGold(r, g, b)
+      data[pixelIndex] = nextR
+      data[pixelIndex + 1] = nextG
+      data[pixelIndex + 2] = nextB
     }
   }
 
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const pixelIndex = (y * width + x) * 4
-      const alpha = data[pixelIndex + 3]
-      if (alpha < 16) {
-        continue
-      }
-      const r = data[pixelIndex]
-      const g = data[pixelIndex + 1]
-      const b = data[pixelIndex + 2]
-      if (goldMask[y * width + x]) {
-        const [nr, ng, nb] = brightenGold(r, g, b)
-        data[pixelIndex] = nr
-        data[pixelIndex + 1] = ng
-        data[pixelIndex + 2] = nb
-      } else if (y >= fibreRegionStartY) {
-        data[pixelIndex] = 255
-        data[pixelIndex + 1] = 255
-        data[pixelIndex + 2] = 255
+  const sourceData = new Uint8ClampedArray(data)
+  const boldOffsets = [
+    [0, 1],
+    [1, 0],
+    [0, -1],
+    [-1, 0],
+    [1, 1],
+    [-1, 1],
+    [1, -1],
+    [-1, -1],
+  ]
+  boldOffsets.forEach(([offsetX, offsetY]) => {
+    for (let y = fibreRegionStartY; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const maskIndex = y * width + x
+        if (!goldMask[maskIndex]) {
+          continue
+        }
+        const sourceIndex = maskIndex * 4
+        const targetX = x + offsetX
+        const targetY = y + offsetY
+        if (
+          targetX < 0 ||
+          targetY < fibreRegionStartY ||
+          targetX >= width ||
+          targetY >= height
+        ) {
+          continue
+        }
+        const targetIndex = (targetY * width + targetX) * 4
+        data[targetIndex] = Math.max(data[targetIndex], sourceData[sourceIndex])
+        data[targetIndex + 1] = Math.max(data[targetIndex + 1], sourceData[sourceIndex + 1])
+        data[targetIndex + 2] = Math.min(data[targetIndex + 2], sourceData[sourceIndex + 2])
       }
     }
-  }
+  })
 
   ctx.putImageData(imageData, 0, 0)
   return canvas.toDataURL('image/png')

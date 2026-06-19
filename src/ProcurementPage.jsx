@@ -167,6 +167,18 @@ async function printPurchaseOrderPdf(purchaseOrder, supplier) {
   )
 
   let footerY = tableTop + rowH * tableRowCount + 10
+  if (purchaseOrder.generalNotes?.trim()) {
+    footerY = drawPdfField(pdf, {
+      labelX,
+      valueX,
+      valueWidth,
+      y: footerY,
+      lineHeight,
+      label: 'Notes:',
+      value: purchaseOrder.generalNotes.trim(),
+    })
+    footerY += 3
+  }
   footerY = drawPdfField(pdf, {
     labelX,
     valueX,
@@ -226,6 +238,7 @@ export default function ProcurementPage({
   const [supplierStatus, setSupplierStatus] = useState('')
 
   const [orderDate, setOrderDate] = useState(new Date().toISOString().slice(0, 10))
+  const [generalNotes, setGeneralNotes] = useState('')
   const [selectedSupplierId, setSelectedSupplierId] = useState(suppliers[0]?.id ?? '')
   const [lineItems, setLineItems] = useState([])
   const [editingPoId, setEditingPoId] = useState('')
@@ -381,6 +394,7 @@ export default function ProcurementPage({
   function resetPoForm() {
     setEditingPoId('')
     setOrderDate(new Date().toISOString().slice(0, 10))
+    setGeneralNotes('')
     setSelectedSupplierId(suppliers[0]?.id ?? '')
     setLineItems(signInEmployees.length > 0 ? [emptyLineItem(signInEmployees)] : [])
     setFormStatus('')
@@ -396,6 +410,7 @@ export default function ProcurementPage({
     }
     setEditingPoId(po.id)
     setOrderDate(po.orderDate)
+    setGeneralNotes(po.generalNotes ?? '')
     setSelectedSupplierId(po.supplierId)
     setLineItems(mapPoItemsToLineItems(po.items))
     setFormStatus(`Editing ${po.poNumber}.`)
@@ -408,6 +423,7 @@ export default function ProcurementPage({
       orderDate,
       supplierId: selectedSupplier?.id ?? '',
       supplierName: selectedSupplier?.name ?? '',
+      generalNotes: generalNotes.trim(),
       items: computedLineItems.map((item) => ({
         id: item.id,
         description: item.description.trim(),
@@ -748,6 +764,16 @@ export default function ProcurementPage({
               <p className="inline-hint">Add a supplier before creating a purchase order.</p>
             ) : null}
 
+            <label>
+              General notes
+              <textarea
+                value={generalNotes}
+                onChange={(event) => setGeneralNotes(event.target.value)}
+                rows={4}
+                placeholder="Delivery instructions, payment terms, or other notes for this LPO"
+              />
+            </label>
+
             <h4>Line items</h4>
             {computedLineItems.map((item, index) => (
               <div key={item.id} className="form-grid" style={{ marginBottom: '1rem' }}>
@@ -901,6 +927,11 @@ export default function ProcurementPage({
           ) : null}
           {selectedPo.finalizedAt ? (
             <p>Finalised (all items received) on {formatKenyaDateTime(selectedPo.finalizedAt)}</p>
+          ) : null}
+          {selectedPo.generalNotes?.trim() ? (
+            <p>
+              <strong>Notes:</strong> {selectedPo.generalNotes.trim()}
+            </p>
           ) : null}
 
           <div className="table-wrap">
