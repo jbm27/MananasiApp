@@ -100,12 +100,13 @@ async function printPurchaseOrderPdf(purchaseOrder, supplier) {
   const supplierLines = pdf.splitTextToSize(supplierAddress || '—', 78)
   pdf.text(supplierLines, left, top + 68)
   const supplierBlockHeight = Math.max(supplierLines.length, 1) * lineHeight
+  let supplierDetailY = top + 68 + supplierBlockHeight + 2
+  if (supplier?.companyRegistration) {
+    pdf.text(`Company registration: ${supplier.companyRegistration}`, left, supplierDetailY)
+    supplierDetailY += lineHeight
+  }
   if (supplier?.phone || supplier?.email) {
-    pdf.text(
-      [supplier?.phone, supplier?.email].filter(Boolean).join(' · '),
-      left,
-      top + 68 + supplierBlockHeight + 2,
-    )
+    pdf.text([supplier?.phone, supplier?.email].filter(Boolean).join(' · '), left, supplierDetailY)
   }
 
   const tableTop = top + 88
@@ -219,6 +220,7 @@ export default function ProcurementPage({
   const [supplierCountry, setSupplierCountry] = useState('Kenya')
   const [supplierEmail, setSupplierEmail] = useState('')
   const [supplierPhone, setSupplierPhone] = useState('')
+  const [supplierCompanyRegistration, setSupplierCompanyRegistration] = useState('')
   const [supplierStatus, setSupplierStatus] = useState('')
 
   const [orderDate, setOrderDate] = useState(new Date().toISOString().slice(0, 10))
@@ -309,6 +311,7 @@ export default function ProcurementPage({
       country: supplierCountry.trim(),
       email: supplierEmail.trim(),
       phone: supplierPhone.trim(),
+      companyRegistration: supplierCompanyRegistration.trim(),
     })
     setSupplierName('')
     setSupplierAddressLine1('')
@@ -318,6 +321,7 @@ export default function ProcurementPage({
     setSupplierCountry('Kenya')
     setSupplierEmail('')
     setSupplierPhone('')
+    setSupplierCompanyRegistration('')
     setSupplierStatus(`Supplier "${addedName}" added.`)
   }
 
@@ -544,6 +548,13 @@ export default function ProcurementPage({
               Phone
               <input value={supplierPhone} onChange={(event) => setSupplierPhone(event.target.value)} />
             </label>
+            <label>
+              Company registration
+              <input
+                value={supplierCompanyRegistration}
+                onChange={(event) => setSupplierCompanyRegistration(event.target.value)}
+              />
+            </label>
             <button type="submit">Add supplier</button>
           </form>
         )}
@@ -557,6 +568,7 @@ export default function ProcurementPage({
                 <th>ID</th>
                 <th>Name</th>
                 <th>Address</th>
+                <th>Registration</th>
                 <th>Contact</th>
               </tr>
             </thead>
@@ -570,6 +582,7 @@ export default function ProcurementPage({
                       .filter(Boolean)
                       .join(', ')}
                   </td>
+                  <td>{supplier.companyRegistration || 'N/A'}</td>
                   <td>
                     {[supplier.phone, supplier.email].filter(Boolean).join(' · ') || '—'}
                   </td>
@@ -577,7 +590,7 @@ export default function ProcurementPage({
               ))}
               {suppliers.length === 0 ? (
                 <tr>
-                  <td colSpan="4">No suppliers yet.</td>
+                  <td colSpan="5">No suppliers yet.</td>
                 </tr>
               ) : null}
             </tbody>

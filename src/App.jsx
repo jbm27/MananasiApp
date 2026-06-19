@@ -9932,6 +9932,7 @@ function App() {
         country: input.country,
         email: input.email,
         phone: input.phone,
+        companyRegistration: input.companyRegistration,
       },
     ])
   }
