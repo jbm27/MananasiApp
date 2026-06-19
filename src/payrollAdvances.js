@@ -1,4 +1,4 @@
-import { getEmployeeDailyWageKes, sumAttendanceDailyPay } from './employeePay.js'
+import { getEmployeeDailyWageKes, isPayrollParticipant, sumAttendanceDailyPay } from './employeePay.js'
 import { toKenyaDateString } from './kenyaTime.js'
 
 function isWageEmployee(employee) {
@@ -37,6 +37,9 @@ function sumHarvesterBaseEarnings(records, employeeId, fromDate, toDate, dailyRa
 }
 
 export function isAdvanceEligibleEmployee(employee) {
+  if (!isPayrollParticipant(employee)) {
+    return false
+  }
   const contractType = employee?.contractType
   return (
     contractType === 'regular' || contractType === 'seasonal' || contractType === 'supplementary'

@@ -1,4 +1,4 @@
-import { getEmployeeDailyWageKes, sumAttendanceDailyPay } from './employeePay.js'
+import { getEmployeeDailyWageKes, isPayrollParticipant, sumAttendanceDailyPay } from './employeePay.js'
 import { toKenyaDateString } from './kenyaTime.js'
 import { calculateMaxAdvanceClaimable } from './payrollAdvances.js'
 
@@ -74,7 +74,9 @@ export function createPayrollApproval(user) {
 }
 
 export function isPayrollEmployee(employee) {
-  return employee?.contractType === 'seasonal' || employee?.contractType === 'supplementary'
+  return isPayrollParticipant(employee) && (
+    employee?.contractType === 'seasonal' || employee?.contractType === 'supplementary'
+  )
 }
 
 export function createBlankPayrollAdjustment() {

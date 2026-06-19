@@ -1,3 +1,4 @@
+import { isPayrollParticipant } from './employeePay.js'
 import { toKenyaDateString } from './kenyaTime.js'
 
 export const AUTO_CLOCK_OUT_HOURS = 12
@@ -187,7 +188,7 @@ export function buildAttendanceExceptionReport(
   const workDays = listWorkDaysInRange(period.startDate, period.endDate)
   const rows = []
 
-  for (const employee of employees) {
+  for (const employee of employees.filter(isPayrollParticipant)) {
     for (const dateStr of workDays) {
       if (!employeeHasAnyManualEventOnDay(attendanceEvents, employee.id, dateStr)) {
         continue

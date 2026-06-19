@@ -1,4 +1,5 @@
 import { calculateMaxAdvanceClaimable } from './payrollAdvances.js'
+import { isPayrollParticipant } from './employeePay.js'
 
 const NSSF_TIER_1_KES = 540
 const NSSF_TIER_2_LOWER_LIMIT_KES = 9000
@@ -10,7 +11,11 @@ const SHA_RATE = 0.0275
 const PERSONAL_TAX_RELIEF_KES = 2400
 
 export function isSalariedEmployee(employee) {
-  return employee?.contractType === 'regular' && Number(employee?.monthlySalaryKes) > 0
+  return (
+    isPayrollParticipant(employee) &&
+    employee?.contractType === 'regular' &&
+    Number(employee?.monthlySalaryKes) > 0
+  )
 }
 
 export function createBlankSalaryAdjustment() {

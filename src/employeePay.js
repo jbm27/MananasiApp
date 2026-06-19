@@ -20,6 +20,11 @@ export const DAILY_WAGE_RATE_LABELS = {
   supplementaryDriver: 'Supplementary driver',
 }
 
+/** Board directors use read-only app access and are excluded from all payroll runs. */
+export function isPayrollParticipant(employee) {
+  return employee?.role !== 'director'
+}
+
 export function createDefaultDailyWageRates() {
   return {
     seasonalHarvester: 550,
