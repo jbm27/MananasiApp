@@ -202,6 +202,7 @@ export default function ProcurementPage({
   canSetApprovalLimits,
   readOnly = false,
   onAddSupplier,
+  onUpdateSupplier,
   onCreatePurchaseOrder,
   onUpdatePurchaseOrder,
   onAuthorizePurchaseOrder,
@@ -221,6 +222,7 @@ export default function ProcurementPage({
   const [supplierEmail, setSupplierEmail] = useState('')
   const [supplierPhone, setSupplierPhone] = useState('')
   const [supplierCompanyRegistration, setSupplierCompanyRegistration] = useState('')
+  const [editingSupplierId, setEditingSupplierId] = useState('')
   const [supplierStatus, setSupplierStatus] = useState('')
 
   const [orderDate, setOrderDate] = useState(new Date().toISOString().slice(0, 10))
@@ -279,7 +281,52 @@ export default function ProcurementPage({
     }
   }, [selectedPo, selectedPoId])
 
-  function handleAddSupplierSubmit(event) {
+  function resetSupplierForm() {
+    setEditingSupplierId('')
+    setSupplierName('')
+    setSupplierAddressLine1('')
+    setSupplierAddressLine2('')
+    setSupplierCity('')
+    setSupplierPostCode('')
+    setSupplierCountry('Kenya')
+    setSupplierEmail('')
+    setSupplierPhone('')
+    setSupplierCompanyRegistration('')
+  }
+
+  function startEditingSupplier(supplier) {
+    if (readOnly || !canManageProcurement) {
+      return
+    }
+    setEditingSupplierId(supplier.id)
+    setSupplierName(supplier.name ?? '')
+    setSupplierAddressLine1(supplier.addressLine1 ?? '')
+    setSupplierAddressLine2(supplier.addressLine2 ?? '')
+    setSupplierCity(supplier.city ?? '')
+    setSupplierPostCode(supplier.postCode ?? '')
+    setSupplierCountry(supplier.country ?? 'Kenya')
+    setSupplierEmail(supplier.email ?? '')
+    setSupplierPhone(supplier.phone ?? '')
+    setSupplierCompanyRegistration(supplier.companyRegistration ?? '')
+    setSupplierStatus(`Editing ${supplier.name} (${supplier.id}).`)
+    setSupplierFormOpen(true)
+  }
+
+  function buildSupplierInput() {
+    return {
+      name: supplierName.trim(),
+      addressLine1: supplierAddressLine1.trim(),
+      addressLine2: supplierAddressLine2.trim(),
+      city: supplierCity.trim(),
+      postCode: supplierPostCode.trim(),
+      country: supplierCountry.trim(),
+      email: supplierEmail.trim(),
+      phone: supplierPhone.trim(),
+      companyRegistration: supplierCompanyRegistration.trim(),
+    }
+  }
+
+  function handleSaveSupplierSubmit(event) {
     event.preventDefault()
     if (readOnly || !canManageProcurement) {
       return
@@ -301,28 +348,20 @@ export default function ProcurementPage({
       setSupplierStatus(`Please fill in: ${missingFields.join(', ')}.`)
       return
     }
-    const addedName = supplierName.trim()
-    onAddSupplier({
-      name: addedName,
-      addressLine1: supplierAddressLine1.trim(),
-      addressLine2: supplierAddressLine2.trim(),
-      city: supplierCity.trim(),
-      postCode: supplierPostCode.trim(),
-      country: supplierCountry.trim(),
-      email: supplierEmail.trim(),
-      phone: supplierPhone.trim(),
-      companyRegistration: supplierCompanyRegistration.trim(),
-    })
-    setSupplierName('')
-    setSupplierAddressLine1('')
-    setSupplierAddressLine2('')
-    setSupplierCity('')
-    setSupplierPostCode('')
-    setSupplierCountry('Kenya')
-    setSupplierEmail('')
-    setSupplierPhone('')
-    setSupplierCompanyRegistration('')
-    setSupplierStatus(`Supplier "${addedName}" added.`)
+    const input = buildSupplierInput()
+    if (editingSupplierId) {
+      const updated = onUpdateSupplier(editingSupplierId, input)
+      if (!updated) {
+        setSupplierStatus('This supplier could not be updated.')
+        return
+      }
+      resetSupplierForm()
+      setSupplierStatus(`Supplier "${updated.name}" updated.`)
+      return
+    }
+    onAddSupplier(input)
+    resetSupplierForm()
+    setSupplierStatus(`Supplier "${input.name}" added.`)
   }
 
   function handleAddLineItem() {
@@ -501,14 +540,14 @@ export default function ProcurementPage({
       ) : null}
 
       <CollapsibleSection
-        title="Suppliers"
+        title={editingSupplierId ? 'Edit supplier' : 'Add supplier'}
         isOpen={supplierFormOpen}
         onToggle={() => setSupplierFormOpen((open) => !open)}
       >
         {readOnly || !canManageProcurement ? (
-          <p className="inline-hint">You do not have permission to add suppliers.</p>
+          <p className="inline-hint">You do not have permission to manage suppliers.</p>
         ) : (
-          <form className="stacked-form" onSubmit={handleAddSupplierSubmit}>
+          <form className="stacked-form" onSubmit={handleSaveSupplierSubmit}>
             <label>
               Supplier name (required)
               <input value={supplierName} onChange={(event) => setSupplierName(event.target.value)} required />
@@ -555,7 +594,17 @@ export default function ProcurementPage({
                 onChange={(event) => setSupplierCompanyRegistration(event.target.value)}
               />
             </label>
-            <button type="submit">Add supplier</button>
+            <div className="form-actions">
+              <button type="submit">{editingSupplierId ? 'Update supplier' : 'Add supplier'}</button>
+              {editingSupplierId ? (
+                <button type="button" onClick={() => {
+                  resetSupplierForm()
+                  setSupplierStatus('')
+                }}>
+                  Cancel edit
+                </button>
+              ) : null}
+            </div>
           </form>
         )}
         {supplierStatus ? <div className="placeholder">{supplierStatus}</div> : null}
@@ -570,6 +619,7 @@ export default function ProcurementPage({
                 <th>Address</th>
                 <th>Registration</th>
                 <th>Contact</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -586,11 +636,18 @@ export default function ProcurementPage({
                   <td>
                     {[supplier.phone, supplier.email].filter(Boolean).join(' · ') || '—'}
                   </td>
+                  <td>
+                    {canManageProcurement && !readOnly ? (
+                      <button type="button" onClick={() => startEditingSupplier(supplier)}>
+                        Edit
+                      </button>
+                    ) : null}
+                  </td>
                 </tr>
               ))}
               {suppliers.length === 0 ? (
                 <tr>
-                  <td colSpan="5">No suppliers yet.</td>
+                  <td colSpan="6">No suppliers yet.</td>
                 </tr>
               ) : null}
             </tbody>

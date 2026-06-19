@@ -9937,6 +9937,45 @@ function App() {
     ])
   }
 
+  function handleUpdateSupplier(supplierId, input) {
+    if (!canMutateAppData(currentUser) || !currentUserDataEntryPermissions.has('procurement-entry')) {
+      return null
+    }
+    const existing = suppliers.find((item) => item.id === supplierId)
+    if (!existing) {
+      return null
+    }
+    let updated = null
+    setSuppliers((prev) =>
+      prev.map((supplier) => {
+        if (supplier.id !== supplierId) {
+          return supplier
+        }
+        updated = {
+          ...supplier,
+          name: input.name,
+          addressLine1: input.addressLine1,
+          addressLine2: input.addressLine2,
+          city: input.city,
+          postCode: input.postCode,
+          country: input.country,
+          email: input.email,
+          phone: input.phone,
+          companyRegistration: input.companyRegistration,
+        }
+        return updated
+      }),
+    )
+    if (updated && input.name !== existing.name) {
+      setPurchaseOrders((prev) =>
+        prev.map((po) =>
+          po.supplierId === supplierId ? { ...po, supplierName: input.name } : po,
+        ),
+      )
+    }
+    return updated
+  }
+
   function handleCreatePurchaseOrder(input) {
     if (!canMutateAppData(currentUser) || !currentUserDataEntryPermissions.has('procurement-entry')) {
       return null
@@ -10813,6 +10852,7 @@ function App() {
                 canSetApprovalLimits={currentUserDataEntryPermissions.has('procurement-approval-limits')}
                 readOnly={readOnlyMode}
                 onAddSupplier={handleAddSupplier}
+                onUpdateSupplier={handleUpdateSupplier}
                 onCreatePurchaseOrder={handleCreatePurchaseOrder}
                 onUpdatePurchaseOrder={handleUpdatePurchaseOrder}
                 onAuthorizePurchaseOrder={handleAuthorizePurchaseOrder}
