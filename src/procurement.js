@@ -13,13 +13,27 @@ export function nextSupplierId(suppliers) {
 
 export function nextPurchaseOrderNumber(purchaseOrders) {
   const maxNumber = (purchaseOrders ?? []).reduce((max, po) => {
-    const match = String(po.poNumber ?? '').match(/^LPO-(\d+)$/)
+    const match = String(po.poNumber ?? '').match(/^(?:LPO|PO)-(\d+)$/)
     if (!match) {
       return max
     }
     return Math.max(max, Number(match[1]))
   }, FIRST_PO_NUMBER - 1)
-  return `LPO-${String(maxNumber + 1).padStart(4, '0')}`
+  return `PO-${String(maxNumber + 1).padStart(4, '0')}`
+}
+
+export function normalizePurchaseOrderNumber(poNumber) {
+  return String(poNumber ?? '').replace(/^LPO-/, 'PO-')
+}
+
+export function migratePurchaseOrder(po) {
+  if (!po || typeof po !== 'object') {
+    return po
+  }
+  return {
+    ...po,
+    poNumber: normalizePurchaseOrderNumber(po.poNumber),
+  }
 }
 
 export function computePoLineAmount(quantity, unitPrice) {

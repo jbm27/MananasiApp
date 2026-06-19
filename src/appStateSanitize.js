@@ -111,6 +111,18 @@ export function sanitizePersistedAppState(data, { forPersist = false } = {}) {
   const maintenanceEntries = Array.isArray(data.maintenanceEntries)
     ? data.maintenanceEntries.filter((entry) => !isSeedMaintenanceEntry(entry))
     : data.maintenanceEntries
+  const purchaseOrders = Array.isArray(data.purchaseOrders)
+    ? data.purchaseOrders.map((po) => ({
+        ...po,
+        poNumber: String(po?.poNumber ?? '').replace(/^LPO-/, 'PO-'),
+      }))
+    : data.purchaseOrders
+  const poApprovalLimits =
+    data.poApprovalLimits && typeof data.poApprovalLimits === 'object'
+      ? data.poApprovalLimits
+      : data.lpoApprovalLimits && typeof data.lpoApprovalLimits === 'object'
+        ? data.lpoApprovalLimits
+        : data.poApprovalLimits
 
   return {
     ...data,
@@ -118,6 +130,8 @@ export function sanitizePersistedAppState(data, { forPersist = false } = {}) {
     haulageTrips,
     fuelEntries,
     maintenanceEntries,
+    purchaseOrders,
+    poApprovalLimits,
     decorticationRecords,
     decorticationAssignments,
     dryingRecords,

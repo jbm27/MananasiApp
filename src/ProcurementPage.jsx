@@ -73,7 +73,7 @@ async function printPurchaseOrderPdf(purchaseOrder, supplier) {
   pdf.setFontSize(11)
   pdf.text('Purchase order to:', left, top + 55)
   pdf.setFontSize(9)
-  pdf.text('LPO number:', metaLabelX, top + 55)
+  pdf.text('PO number:', metaLabelX, top + 55)
   pdf.setFont('helvetica', 'normal')
   pdf.text(String(purchaseOrder.poNumber), metaValueX, top + 55)
   pdf.setFont('helvetica', 'bold')
@@ -207,7 +207,7 @@ async function printPurchaseOrderPdf(purchaseOrder, supplier) {
 export default function ProcurementPage({
   suppliers,
   purchaseOrders,
-  lpoApprovalLimits,
+  poApprovalLimits,
   signInEmployees,
   currentUser,
   canManageProcurement,
@@ -219,7 +219,7 @@ export default function ProcurementPage({
   onUpdatePurchaseOrder,
   onAuthorizePurchaseOrder,
   onMarkPoItemReceived,
-  onSetLpoApprovalLimit,
+  onSetPoApprovalLimit,
 }) {
   const [supplierFormOpen, setSupplierFormOpen] = useState(true)
   const [poFormOpen, setPoFormOpen] = useState(true)
@@ -278,7 +278,7 @@ export default function ProcurementPage({
   const canAuthorizeSelected =
     selectedPo &&
     selectedPo.status === 'draft' &&
-    canEmployeeAuthorizePo(currentUser, selectedPo.totalAmount, lpoApprovalLimits)
+    canEmployeeAuthorizePo(currentUser, selectedPo.totalAmount, poApprovalLimits)
 
   useEffect(() => {
     if (lineItems.length === 0 && signInEmployees.length > 0) {
@@ -546,14 +546,14 @@ export default function ProcurementPage({
       }
       const trimmed = String(raw).trim()
       if (trimmed === '') {
-        onSetLpoApprovalLimit(employee.id, null)
+        onSetPoApprovalLimit(employee.id, null)
         return
       }
       const value = Number(trimmed)
       if (Number.isNaN(value) || value < 0) {
         return
       }
-      onSetLpoApprovalLimit(employee.id, value)
+      onSetPoApprovalLimit(employee.id, value)
     })
     setLimitsStatus('Approval limits saved.')
   }
@@ -561,10 +561,10 @@ export default function ProcurementPage({
   return (
     <section className="panel">
       <h2>Procurement</h2>
-      <p>Create local purchase orders (LPOs), register suppliers, assign receivers, and track receipt.</p>
+      <p>Create purchase orders, register suppliers, assign receivers, and track receipt.</p>
 
       {readOnly ? (
-        <p className="inline-hint">Director view: procurement records are read-only. You can view and print authorised LPOs.</p>
+        <p className="inline-hint">Director view: procurement records are read-only. You can view and print authorised purchase orders.</p>
       ) : null}
 
       <CollapsibleSection
@@ -685,7 +685,7 @@ export default function ProcurementPage({
 
       {canSetApprovalLimits ? (
         <CollapsibleSection
-          title="LPO approval limits"
+          title="Purchase order approval limits"
           isOpen={limitsFormOpen}
           onToggle={() => setLimitsFormOpen((open) => !open)}
         >
@@ -706,7 +706,7 @@ export default function ProcurementPage({
                       <td>
                         {employee.name} ({employee.id})
                       </td>
-                      <td>{getEmployeeApprovalLimitDisplay(employee, lpoApprovalLimits)}</td>
+                      <td>{getEmployeeApprovalLimitDisplay(employee, poApprovalLimits)}</td>
                       <td>
                         {employee.role === 'admin' ? (
                           'Unlimited'
@@ -718,9 +718,9 @@ export default function ProcurementPage({
                             placeholder="Not set"
                             value={
                               limitDrafts[employee.id] ??
-                              (lpoApprovalLimits[employee.id] !== undefined &&
-                              lpoApprovalLimits[employee.id] !== null
-                                ? String(lpoApprovalLimits[employee.id])
+                              (poApprovalLimits[employee.id] !== undefined &&
+                              poApprovalLimits[employee.id] !== null
+                                ? String(poApprovalLimits[employee.id])
                                 : '')
                             }
                             onChange={(event) =>
@@ -755,7 +755,7 @@ export default function ProcurementPage({
           <form className="stacked-form" onSubmit={handleSavePurchaseOrder}>
             {editingPo?.status === 'authorized' ? (
               <p className="inline-hint">
-                This LPO is authorised. Saving changes will return it to draft and clear any receipt
+                This purchase order is authorised. Saving changes will return it to draft and clear any receipt
                 progress — it must be authorised again before items can be received or a PDF downloaded.
               </p>
             ) : null}
@@ -788,7 +788,7 @@ export default function ProcurementPage({
                 value={generalNotes}
                 onChange={(event) => setGeneralNotes(event.target.value)}
                 rows={4}
-                placeholder="Delivery instructions, payment terms, or other notes for this LPO"
+                placeholder="Delivery instructions, payment terms, or other notes for this purchase order"
               />
             </label>
 
@@ -870,7 +870,7 @@ export default function ProcurementPage({
             </p>
             <div className="form-actions">
               <button type="submit" disabled={suppliers.length === 0 || signInEmployees.length === 0}>
-                {editingPoId ? 'Update draft LPO' : 'Save draft LPO'}
+                {editingPoId ? 'Update draft PO' : 'Save draft PO'}
               </button>
               {editingPoId ? (
                 <button type="button" onClick={resetPoForm}>
@@ -892,7 +892,7 @@ export default function ProcurementPage({
         <table>
           <thead>
             <tr>
-              <th>LPO #</th>
+              <th>PO #</th>
               <th>Date</th>
               <th>Supplier</th>
               <th>Total (KES)</th>
@@ -997,7 +997,7 @@ export default function ProcurementPage({
           <div className="form-actions">
             {selectedPo.status === 'draft' && canAuthorizeSelected && !readOnly ? (
               <button type="button" onClick={handleAuthorize}>
-                Authorise LPO
+                Authorise PO
               </button>
             ) : null}
             {selectedPo.status !== 'draft' ? (
@@ -1007,7 +1007,7 @@ export default function ProcurementPage({
             ) : null}
             {selectedPo.status === 'draft' && !canAuthorizeSelected && !readOnly ? (
               <p className="inline-hint">
-                Your approval limit: {getEmployeeApprovalLimitDisplay(currentUser, lpoApprovalLimits)}. Total KES{' '}
+                Your approval limit: {getEmployeeApprovalLimitDisplay(currentUser, poApprovalLimits)}. Total KES{' '}
                 {selectedPo.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })} exceeds your limit or
                 no limit is set.
               </p>

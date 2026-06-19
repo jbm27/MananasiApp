@@ -208,7 +208,7 @@ const DATA_ENTRY_PERMISSION_LABELS = {
   'employee-wage-rates': 'Edit daily wage rate settings',
   'employee-add': 'Add new employees',
   'procurement-entry': 'Create and manage purchase orders and suppliers',
-  'procurement-approval-limits': 'Set LPO approval limits for sign-in employees',
+  'procurement-approval-limits': 'Set purchase order approval limits for sign-in employees',
 }
 
 /** Policy defaults from organisation roles; James (admin) always receives full access in code. */
@@ -9288,8 +9288,8 @@ function hydrateAppState(data, setters) {
   if (Array.isArray(sanitized.purchaseOrders)) {
     setters.setPurchaseOrders(sanitized.purchaseOrders)
   }
-  if (sanitized.lpoApprovalLimits && typeof sanitized.lpoApprovalLimits === 'object') {
-    setters.setLpoApprovalLimits(sanitized.lpoApprovalLimits)
+  if (sanitized.poApprovalLimits && typeof sanitized.poApprovalLimits === 'object') {
+    setters.setPoApprovalLimits(sanitized.poApprovalLimits)
   }
   if (sanitized.payrollAdjustments) setters.setPayrollAdjustments(sanitized.payrollAdjustments)
   if (sanitized.salaryPayrollAdjustments) {
@@ -9357,7 +9357,7 @@ function App() {
   const [invoiceDocuments, setInvoiceDocuments] = useState([])
   const [suppliers, setSuppliers] = useState([])
   const [purchaseOrders, setPurchaseOrders] = useState([])
-  const [lpoApprovalLimits, setLpoApprovalLimits] = useState({})
+  const [poApprovalLimits, setPoApprovalLimits] = useState({})
 
   const currentUser = employees.find((employee) => employee.id === authLeadershipId) ?? null
 
@@ -9389,7 +9389,7 @@ function App() {
       setInvoiceDocuments,
       setSuppliers,
       setPurchaseOrders,
-      setLpoApprovalLimits,
+      setPoApprovalLimits,
       setPayrollAdjustments,
       setSalaryPayrollAdjustments,
       setPayrollApprovals,
@@ -9424,7 +9424,7 @@ function App() {
         invoiceDocuments,
         suppliers,
         purchaseOrders,
-        lpoApprovalLimits,
+        poApprovalLimits,
         payrollAdjustments,
         salaryPayrollAdjustments,
         payrollApprovals,
@@ -9454,7 +9454,7 @@ function App() {
       invoiceDocuments,
       suppliers,
       purchaseOrders,
-      lpoApprovalLimits,
+      poApprovalLimits,
       payrollAdjustments,
       salaryPayrollAdjustments,
       payrollApprovals,
@@ -9990,10 +9990,10 @@ function App() {
     if (po.status !== 'draft') {
       return { ok: false, message: 'Only draft purchase orders can be authorised.' }
     }
-    if (!canEmployeeAuthorizePo(authorizer, po.totalAmount, lpoApprovalLimits)) {
+    if (!canEmployeeAuthorizePo(authorizer, po.totalAmount, poApprovalLimits)) {
       return {
         ok: false,
-        message: `This LPO total (KES ${po.totalAmount.toLocaleString(undefined, {
+        message: `This purchase order total (KES ${po.totalAmount.toLocaleString(undefined, {
           minimumFractionDigits: 2,
         })}) exceeds your approval limit.`,
       }
@@ -10059,14 +10059,14 @@ function App() {
     return { ok: true, message: resultMessage }
   }
 
-  function handleSetLpoApprovalLimit(employeeId, maxAmountKes) {
+  function handleSetPoApprovalLimit(employeeId, maxAmountKes) {
     if (
       !canMutateAppData(currentUser) ||
       !currentUserDataEntryPermissions.has('procurement-approval-limits')
     ) {
       return
     }
-    setLpoApprovalLimits((prev) => {
+    setPoApprovalLimits((prev) => {
       const next = { ...prev }
       if (maxAmountKes === null || maxAmountKes === undefined || maxAmountKes === '') {
         delete next[employeeId]
@@ -10780,7 +10780,7 @@ function App() {
               <ProcurementPage
                 suppliers={suppliers}
                 purchaseOrders={purchaseOrders}
-                lpoApprovalLimits={lpoApprovalLimits}
+                poApprovalLimits={poApprovalLimits}
                 signInEmployees={signInEmployees}
                 currentUser={currentUser}
                 canManageProcurement={currentUserDataEntryPermissions.has('procurement-entry')}
@@ -10792,7 +10792,7 @@ function App() {
                 onUpdatePurchaseOrder={handleUpdatePurchaseOrder}
                 onAuthorizePurchaseOrder={handleAuthorizePurchaseOrder}
                 onMarkPoItemReceived={handleMarkPoItemReceived}
-                onSetLpoApprovalLimit={handleSetLpoApprovalLimit}
+                onSetPoApprovalLimit={handleSetPoApprovalLimit}
               />
             }
           />
