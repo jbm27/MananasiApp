@@ -36,6 +36,50 @@ async function getEmployees() {
   return Array.isArray(state?.data?.employees) ? state.data.employees : []
 }
 
+async function verifyMemberPassword(employeeId, password) {
+  const employees = await getEmployees()
+  const member = employees.find((employee) => employee.id === employeeId)
+  if (!member || !isLeadershipTeamMember(member)) {
+    return { ok: false, error: 'That account cannot change a leadership sign-in password.' }
+  }
+
+  const hashes = await getLeadershipPasswordHashes()
+  const storedHash = hashes[employeeId]
+  if (storedHash) {
+    if (sha256Hex(password) !== storedHash) {
+      return { ok: false, error: 'Current password is incorrect.' }
+    }
+  } else if (String(password ?? '').trim() !== '') {
+    return {
+      ok: false,
+      error: 'No password is set yet. Leave the current password blank to set your first password.',
+    }
+  }
+
+  return { ok: true, member }
+}
+
+export async function changeLeadershipPasswordForUser({
+  employeeId,
+  currentPassword,
+  newPassword,
+  confirmPassword,
+}) {
+  const actor = await verifyMemberPassword(employeeId, currentPassword)
+  if (!actor.ok) {
+    return actor
+  }
+  if (newPassword !== confirmPassword) {
+    return { ok: false, error: 'New passwords do not match.' }
+  }
+  if (String(newPassword).length < 6) {
+    return { ok: false, error: 'Use at least 6 characters.' }
+  }
+
+  await setLeadershipPasswordHash(employeeId, sha256Hex(String(newPassword)))
+  return { ok: true }
+}
+
 export async function verifyLeadershipLogin(username, password) {
   const normalized = buildLoginUsername(username)
   if (!normalized) {

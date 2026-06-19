@@ -109,6 +109,28 @@ export async function fetchLeadershipAccounts(adminEmployeeId, adminPassword) {
   return parseJsonResponse(response)
 }
 
+export async function changeLeadershipPassword({
+  employeeId,
+  currentPassword,
+  newPassword,
+  confirmPassword,
+}) {
+  const response = await fetch(`${API_BASE}/api/auth/leadership/change-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      employeeId,
+      currentPassword,
+      newPassword,
+      confirmPassword,
+    }),
+  })
+  if (!response.ok) {
+    await parseErrorResponse(response, `Failed to change password (${response.status})`)
+  }
+  return parseJsonResponse(response)
+}
+
 export async function setLeadershipPassword({
   adminEmployeeId,
   adminPassword,

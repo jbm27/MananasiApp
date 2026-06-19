@@ -59,6 +59,7 @@ import {
 const RECENT_CLOCK_EVENTS_LIMIT = 10
 import { useBackendSync } from './hooks/useBackendSync.js'
 import {
+  changeLeadershipPassword,
   fetchAppState,
   fetchAttendanceEvents,
   fetchLeadershipAccounts,
@@ -2331,6 +2332,91 @@ function LeadershipAccountRow({ account, adminEmployeeId, adminPassword, onPassw
         </div>
       </td>
     </tr>
+  )
+}
+
+function LeadershipChangePasswordPage({ currentUser }) {
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [status, setStatus] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  if (!isLeadershipTeamMember(currentUser)) {
+    return <Navigate to="/" replace />
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault()
+    setStatus('')
+    setSaving(true)
+    try {
+      await changeLeadershipPassword({
+        employeeId: currentUser.id,
+        currentPassword,
+        newPassword,
+        confirmPassword,
+      })
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      setStatus('Password updated successfully.')
+    } catch (error) {
+      setStatus(error.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section className="panel">
+      <h2>Change password</h2>
+      <p>
+        Your sign-in username is <code>{buildLoginUsername(currentUser.name)}</code>.
+      </p>
+      <p className="inline-hint">
+        If you have never set a password, leave the current password blank. Use at least 6 characters
+        for your new password.
+      </p>
+      <form className="form-grid" onSubmit={handleSubmit}>
+        <label>
+          Current password
+          <input
+            type="password"
+            value={currentPassword}
+            onChange={(event) => setCurrentPassword(event.target.value)}
+            autoComplete="current-password"
+            placeholder="Leave blank if not set yet"
+          />
+        </label>
+        <label>
+          New password
+          <input
+            type="password"
+            value={newPassword}
+            onChange={(event) => setNewPassword(event.target.value)}
+            autoComplete="new-password"
+            required
+            minLength={6}
+          />
+        </label>
+        <label>
+          Confirm new password
+          <input
+            type="password"
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+            autoComplete="new-password"
+            required
+            minLength={6}
+          />
+        </label>
+        <button type="submit" disabled={saving}>
+          {saving ? 'Saving…' : 'Update password'}
+        </button>
+      </form>
+      {status ? <p className="inline-hint">{status}</p> : null}
+    </section>
   )
 }
 
@@ -10324,6 +10410,11 @@ function App() {
             Sign out
           </button>
           <p className="session-signed-name">{currentUser?.name ?? '—'}</p>
+          {isLeadershipTeamMember(currentUser) ? (
+            <p>
+              <Link to="/account/password">Change password</Link>
+            </p>
+          ) : null}
           <p className="backend-sync-status">
             {syncError
               ? `Sync error: ${syncError}`
@@ -10394,6 +10485,10 @@ function App() {
             }
           />
           <Route path="/attendance" element={<Navigate to="/employees" replace />} />
+          <Route
+            path="/account/password"
+            element={<LeadershipChangePasswordPage currentUser={currentUser} />}
+          />
           <Route
             path="/admin/sign-in-accounts"
             element={<LeadershipAccountsPage currentUser={currentUser} />}

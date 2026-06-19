@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import {
+  changeLeadershipPasswordForUser,
   listLeadershipAccountsForAdmin,
   setLeadershipPasswordForAdmin,
   verifyLeadershipLogin,
@@ -32,6 +33,19 @@ router.post('/accounts', async (req, res) => {
   } catch (error) {
     console.error('POST /api/auth/leadership/accounts failed:', error)
     res.status(500).json({ error: 'Failed to load leadership accounts' })
+  }
+})
+
+router.post('/change-password', async (req, res) => {
+  try {
+    const result = await changeLeadershipPasswordForUser(req.body ?? {})
+    if (!result.ok) {
+      return res.status(403).json({ error: result.error })
+    }
+    res.json({ ok: true })
+  } catch (error) {
+    console.error('POST /api/auth/leadership/change-password failed:', error)
+    res.status(500).json({ error: 'Failed to change password' })
   }
 })
 
