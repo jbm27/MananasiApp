@@ -263,6 +263,10 @@ export default function ProcurementPage({
     sortedPurchaseOrders[0] ??
     null
 
+  const editingPo = editingPoId
+    ? purchaseOrders.find((item) => item.id === editingPoId) ?? null
+    : null
+
   const selectedSupplier = suppliers.find((item) => item.id === selectedSupplierId) ?? null
 
   const computedLineItems = lineItems.map((item) => {
@@ -405,7 +409,7 @@ export default function ProcurementPage({
       return
     }
     if (!isPurchaseOrderEditable(po)) {
-      setFormStatus('Only draft purchase orders can be edited.')
+      setFormStatus('Finalised purchase orders cannot be edited.')
       return
     }
     setEditingPoId(po.id)
@@ -413,7 +417,11 @@ export default function ProcurementPage({
     setGeneralNotes(po.generalNotes ?? '')
     setSelectedSupplierId(po.supplierId)
     setLineItems(mapPoItemsToLineItems(po.items))
-    setFormStatus(`Editing ${po.poNumber}.`)
+    setFormStatus(
+      po.status === 'authorized'
+        ? `Editing ${po.poNumber}. Saving changes will return it to draft for re-approval.`
+        : `Editing ${po.poNumber}.`,
+    )
     setSelectedPoId(po.id)
     setPoFormOpen(true)
   }
@@ -470,12 +478,16 @@ export default function ProcurementPage({
     if (editingPoId) {
       const updated = onUpdatePurchaseOrder(editingPoId, buildPoInput())
       if (!updated) {
-        setFormStatus('This purchase order could not be updated. Only drafts can be edited.')
+        setFormStatus('This purchase order could not be updated. Finalised orders cannot be edited.')
         return
       }
       setSelectedPoId(updated.id)
       setEditingPoId('')
-      setFormStatus(`${updated.poNumber} updated.`)
+      setFormStatus(
+        updated.requiresReapproval
+          ? `${updated.poNumber} updated and returned to draft for re-approval.`
+          : `${updated.poNumber} updated.`,
+      )
       return
     }
     const created = onCreatePurchaseOrder(buildPoInput())
@@ -741,6 +753,12 @@ export default function ProcurementPage({
           <p className="inline-hint">You do not have permission to create or edit purchase orders.</p>
         ) : (
           <form className="stacked-form" onSubmit={handleSavePurchaseOrder}>
+            {editingPo?.status === 'authorized' ? (
+              <p className="inline-hint">
+                This LPO is authorised. Saving changes will return it to draft and clear any receipt
+                progress — it must be authorised again before items can be received or a PDF downloaded.
+              </p>
+            ) : null}
             <label>
               Order date
               <input type="date" value={orderDate} onChange={(event) => setOrderDate(event.target.value)} required />
@@ -962,7 +980,7 @@ export default function ProcurementPage({
                           Yes
                           {item.receivedAt ? ` (${formatKenyaDateTime(item.receivedAt)})` : ''}
                         </>
-                      ) : selectedPo.status !== 'draft' && canManageProcurement && !readOnly ? (
+                      ) : selectedPo.status === 'authorized' && canManageProcurement && !readOnly ? (
                         <button type="button" onClick={() => handleMarkReceived(item.id)}>
                           Mark received
                         </button>

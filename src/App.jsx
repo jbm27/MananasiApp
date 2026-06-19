@@ -9938,6 +9938,16 @@ function App() {
     if (items.some((item) => !item.receiverEmployeeId)) {
       return null
     }
+    const wasAuthorized = existing.status === 'authorized'
+    const itemsToSave = wasAuthorized
+      ? items.map((item) => ({
+          ...item,
+          received: false,
+          receivedAt: null,
+          receivedById: '',
+          receivedByName: '',
+        }))
+      : items
     let updated = null
     setPurchaseOrders((prev) =>
       prev.map((po) => {
@@ -9950,13 +9960,22 @@ function App() {
           supplierId: input.supplierId,
           supplierName: input.supplierName,
           generalNotes: input.generalNotes ?? '',
-          items,
+          items: itemsToSave,
           totalAmount: input.totalAmount,
+          ...(wasAuthorized
+            ? {
+                status: 'draft',
+                authorizedById: '',
+                authorizedByName: '',
+                authorizedAt: null,
+                finalizedAt: null,
+              }
+            : {}),
         }
         return updated
       }),
     )
-    return updated
+    return updated ? { ...updated, requiresReapproval: wasAuthorized } : null
   }
 
   function handleAuthorizePurchaseOrder(poId, authorizerId) {
@@ -10004,7 +10023,7 @@ function App() {
       return { ok: false, message: 'Could not record who received this item.' }
     }
     const po = purchaseOrders.find((item) => item.id === poId)
-    if (!po || po.status === 'draft') {
+    if (!po || po.status === 'draft' || po.status === 'received') {
       return { ok: false, message: 'Authorise the purchase order before marking items received.' }
     }
     let resultMessage = 'Item marked as received.'

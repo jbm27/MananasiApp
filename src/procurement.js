@@ -109,5 +109,9 @@ export function buildPoItemsFromInput(lineItems, signInEmployeesById) {
 }
 
 export function isPurchaseOrderEditable(po) {
-  return po?.status === 'draft'
+  return po?.status === 'draft' || po?.status === 'authorized'
+}
+
+export function isPurchaseOrderFinalized(po) {
+  return po?.status === 'received'
 }
