@@ -188,6 +188,7 @@ const DATA_ENTRY_PERMISSION_IDS = [
   'brushing-entry',
   'baling-entry',
   'silage-entry',
+  'stock-delete',
   'employee-role-seasonal',
   'employee-role-all',
   'employee-wage-rates',
@@ -207,6 +208,7 @@ const DATA_ENTRY_PERMISSION_LABELS = {
   'brushing-entry': 'Brushing stock and outputs entry',
   'baling-entry': 'Baling creation',
   'silage-entry': 'Silage bag creation',
+  'stock-delete': 'Delete stock records',
   'employee-role-seasonal': 'Edit roles for seasonal and supplementary employees',
   'employee-role-all': 'Edit roles for all employees (including permanent)',
   'employee-wage-rates': 'Edit daily wage rate settings',
@@ -215,7 +217,11 @@ const DATA_ENTRY_PERMISSION_LABELS = {
   'procurement-approval-limits': 'Set purchase order approval limits for sign-in employees',
 }
 
-/** Policy defaults from organisation roles; James (admin) always receives full access in code. */
+/** Policy defaults from organisation roles; James (1019) receives stock-delete separately. */
+const RESTRICTED_DATA_ENTRY_PERMISSIONS = ['stock-delete']
+const DEFAULT_EXCLUSIVE_DATA_ENTRY_PERMISSIONS_BY_EMPLOYEE_ID = {
+  '1019': ['stock-delete'],
+}
 const DEFAULT_PAGE_ACCESS_BY_EMPLOYEE_ID = {
   '1002': ['dashboard', 'employees', 'payroll'],
   '1010': ['dashboard', 'employees', 'invoicing', 'customers', 'procurement', 'stock', 'payroll'],
@@ -473,10 +479,28 @@ function getEffectiveDataEntryPermissions(employeeId, overrides, employees) {
   if (employee.role === 'director') {
     return new Set()
   }
-  if (employee.role === 'admin') {
-    return new Set(DATA_ENTRY_PERMISSION_IDS)
+  const permissions =
+    employee.role === 'admin'
+      ? new Set(
+          DATA_ENTRY_PERMISSION_IDS.filter(
+            (permissionId) => !RESTRICTED_DATA_ENTRY_PERMISSIONS.includes(permissionId),
+          ),
+        )
+      : new Set(getBaseDataEntryPermissionsForEditor(employeeId, overrides, employees))
+  for (const permissionId of DEFAULT_EXCLUSIVE_DATA_ENTRY_PERMISSIONS_BY_EMPLOYEE_ID[employeeId] ??
+    []) {
+    if (DATA_ENTRY_PERMISSION_IDS.includes(permissionId)) {
+      permissions.add(permissionId)
+    }
   }
-  return new Set(getBaseDataEntryPermissionsForEditor(employeeId, overrides, employees))
+  return permissions
+}
+
+function canDeleteStock(currentUser, overrides, employees) {
+  if (!currentUser || !canMutateAppData(currentUser)) {
+    return false
+  }
+  return getEffectiveDataEntryPermissions(currentUser.id, overrides, employees).has('stock-delete')
 }
 
 function mergeEffectivePagePermissions(employeeIds, overrides, employees) {
@@ -8063,11 +8087,16 @@ function SilageProductionPage({
 }
 
 function StockPage({
+  currentUser,
+  employees,
+  dataEntryPermissionOverrides,
   dryingRecords,
   brushingStockMovements,
   brushingDailyRecords,
   balingRecords,
   silageRecords,
+  onDeleteBaledStock,
+  onDeleteSilageStock,
   dateFrom,
   dateTo,
   onDateFromChange,
@@ -8079,6 +8108,8 @@ function StockPage({
   const [baleLabelRanges, setBaleLabelRanges] = useState({})
   const [baleLabelStatus, setBaleLabelStatus] = useState('')
   const [silageLabelDialog, setSilageLabelDialog] = useState(null)
+  const [stockDeleteDialog, setStockDeleteDialog] = useState(null)
+  const canDeleteStockRecords = canDeleteStock(currentUser, dataEntryPermissionOverrides, employees)
   const showAbsoluteStock = selectedBatchFilter === 'absolute'
   const filteredDryingRecords =
     showAbsoluteStock
@@ -8326,6 +8357,66 @@ function StockPage({
     handlePrintBaleSeriesLabels(row.stockCode)
   }
 
+  function getStockSerialRange(seriesCode) {
+    const range = baleLabelRanges[seriesCode] ?? {}
+    const start = Number(range.start)
+    const end = Number(range.end)
+    return { start, end }
+  }
+
+  function openStockDeleteDialog(row) {
+    const { start, end } = getStockSerialRange(row.stockCode)
+    if (Number.isNaN(start) || Number.isNaN(end) || start < 1 || end < start) {
+      setBaleLabelStatus(
+        'Enter a valid start and end number before deleting stock (start must be less than or equal to end).',
+      )
+      return
+    }
+
+    const matchingRecords =
+      row.stockForm === 'Silage'
+        ? filteredSilageRecords
+            .filter((record) => getSilageBagSeriesCode(record) === row.stockCode)
+            .filter((record) => {
+              const serial = getSilageRecordSerial(record)
+              return serial >= start && serial <= end
+            })
+        : filteredBalingRecords
+            .filter((record) => record.baleSeriesCode === row.stockCode)
+            .filter((record) => {
+              const serial = getBaleSerialFromCode(record.baleCode)
+              return serial >= start && serial <= end
+            })
+
+    if (matchingRecords.length === 0) {
+      setBaleLabelStatus(
+        `No ${row.stockForm === 'Silage' ? 'bags' : 'bales'} found in ${row.stockCode} for numbers ${start} to ${end}.`,
+      )
+      return
+    }
+
+    setStockDeleteDialog({
+      stockForm: row.stockForm,
+      stockCode: row.stockCode,
+      start,
+      end,
+      count: matchingRecords.length,
+    })
+  }
+
+  function confirmStockDelete() {
+    if (!stockDeleteDialog) {
+      return
+    }
+    const { stockForm, stockCode, start, end } = stockDeleteDialog
+    const result =
+      stockForm === 'Silage'
+        ? onDeleteSilageStock(stockCode, start, end)
+        : onDeleteBaledStock(stockCode, start, end)
+    setBaleLabelStatus(result.message)
+    setStockDeleteDialog(null)
+  }
+
   return (
     <section className="panel">
       <h2>Stock</h2>
@@ -8441,9 +8532,20 @@ function StockPage({
                 </td>
                 <td>
                   {rowSupportsLabelPrinting(row) ? (
-                    <button type="button" onClick={() => handlePrintRowLabels(row)}>
-                      Print labels
-                    </button>
+                    <>
+                      <button type="button" onClick={() => handlePrintRowLabels(row)}>
+                        Print labels
+                      </button>
+                      {canDeleteStockRecords ? (
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => openStockDeleteDialog(row)}
+                        >
+                          Delete stock
+                        </button>
+                      ) : null}
+                    </>
                   ) : null}
                 </td>
               </tr>
@@ -8489,6 +8591,35 @@ function StockPage({
               </button>
               <button type="button" onClick={confirmSilageLabelPrint}>
                 Print labels
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {stockDeleteDialog ? (
+        <div className="dialog-backdrop" role="presentation" onClick={() => setStockDeleteDialog(null)}>
+          <div
+            className="dialog-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="stock-delete-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 id="stock-delete-dialog-title">Delete stock</h3>
+            <p>
+              Permanently delete {stockDeleteDialog.count}{' '}
+              {stockDeleteDialog.stockForm === 'Silage' ? 'bag(s)' : 'bale(s)'} from{' '}
+              <strong>{stockDeleteDialog.stockCode}</strong> (numbers {stockDeleteDialog.start} to{' '}
+              {stockDeleteDialog.end})?
+            </p>
+            <p className="inline-hint">This cannot be undone.</p>
+            <div className="dialog-actions">
+              <button type="button" onClick={() => setStockDeleteDialog(null)}>
+                Cancel
+              </button>
+              <button type="button" className="secondary-button" onClick={confirmStockDelete}>
+                Delete stock
               </button>
             </div>
           </div>
@@ -10619,6 +10750,58 @@ function App() {
     ])
   }
 
+  function handleDeleteBaledStock(baleSeriesCode, startSerial, endSerial) {
+    if (!canDeleteStock(currentUser, dataEntryPermissionOverrides, employees)) {
+      return { ok: false, message: 'You do not have permission to delete stock.' }
+    }
+    const idsToDelete = new Set(
+      balingRecords
+        .filter((record) => record.baleSeriesCode === baleSeriesCode)
+        .filter((record) => {
+          const serial = getBaleSerialFromCode(record.baleCode)
+          return serial >= startSerial && serial <= endSerial
+        })
+        .map((record) => record.id),
+    )
+    if (idsToDelete.size === 0) {
+      return {
+        ok: false,
+        message: `No bales found in ${baleSeriesCode} for numbers ${startSerial} to ${endSerial}.`,
+      }
+    }
+    setBalingRecords((prev) => prev.filter((record) => !idsToDelete.has(record.id)))
+    return {
+      ok: true,
+      message: `Deleted ${idsToDelete.size} bale(s) from ${baleSeriesCode}.`,
+    }
+  }
+
+  function handleDeleteSilageStock(seriesCode, startSerial, endSerial) {
+    if (!canDeleteStock(currentUser, dataEntryPermissionOverrides, employees)) {
+      return { ok: false, message: 'You do not have permission to delete stock.' }
+    }
+    const idsToDelete = new Set(
+      silageRecords
+        .filter((record) => getSilageBagSeriesCode(record) === seriesCode)
+        .filter((record) => {
+          const serial = getSilageRecordSerial(record)
+          return serial >= startSerial && serial <= endSerial
+        })
+        .map((record) => record.id),
+    )
+    if (idsToDelete.size === 0) {
+      return {
+        ok: false,
+        message: `No silage bags found in ${seriesCode} for numbers ${startSerial} to ${endSerial}.`,
+      }
+    }
+    setSilageRecords((prev) => prev.filter((record) => !idsToDelete.has(record.id)))
+    return {
+      ok: true,
+      message: `Deleted ${idsToDelete.size} silage bag(s) from ${seriesCode}.`,
+    }
+  }
+
   function handleCreateInvoiceDocument(input) {
     if (!canMutateAppData(currentUser)) {
       return null
@@ -11310,11 +11493,16 @@ function App() {
             path="/stock"
             element={
               <StockPage
+                currentUser={currentUser}
+                employees={employees}
+                dataEntryPermissionOverrides={dataEntryPermissionOverrides}
                 dryingRecords={dryingRecords}
                 brushingStockMovements={brushingStockMovements}
                 brushingDailyRecords={brushingDailyRecords}
                 balingRecords={balingRecords}
                 silageRecords={silageRecords}
+                onDeleteBaledStock={handleDeleteBaledStock}
+                onDeleteSilageStock={handleDeleteSilageStock}
                 dateFrom={stockDateFrom}
                 dateTo={stockDateTo}
                 onDateFromChange={setStockDateFrom}
