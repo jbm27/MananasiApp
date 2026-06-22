@@ -479,6 +479,45 @@ function getEffectiveDataEntryPermissions(employeeId, overrides, employees) {
   return new Set(getBaseDataEntryPermissionsForEditor(employeeId, overrides, employees))
 }
 
+function mergeEffectivePagePermissions(employeeIds, overrides, employees) {
+  const merged = new Set()
+  for (const employeeId of employeeIds) {
+    if (!employeeId) {
+      continue
+    }
+    for (const pageId of getEffectivePagePermissions(employeeId, overrides, employees)) {
+      merged.add(pageId)
+    }
+  }
+  return merged
+}
+
+function mergeEffectiveDataEntryPermissions(employeeIds, overrides, employees) {
+  const merged = new Set()
+  for (const employeeId of employeeIds) {
+    if (!employeeId) {
+      continue
+    }
+    for (const permissionId of getEffectiveDataEntryPermissions(employeeId, overrides, employees)) {
+      merged.add(permissionId)
+    }
+  }
+  return merged
+}
+
+function getClockedInEmployeesWithDataEntryPermission(
+  employees,
+  clockedInIds,
+  permissionId,
+  overrides,
+) {
+  return employees.filter(
+    (employee) =>
+      clockedInIds.includes(employee.id) &&
+      getEffectiveDataEntryPermissions(employee.id, overrides, employees).has(permissionId),
+  )
+}
+
 function isSeasonalOrSupplementaryEmployee(employee) {
   return (
     employee?.contractType === 'seasonal' || employee?.contractType === 'supplementary'
@@ -7628,6 +7667,7 @@ function BalingPage({
 function SilageProductionPage({
   currentUser,
   currentUserDataEntryPermissions,
+  dataEntryPermissionOverrides,
   employees,
   clockedInIds,
   silageRecords,
@@ -7648,8 +7688,71 @@ function SilageProductionPage({
   const [bagMassKg, setBagMassKg] = useState('75')
   const [bagCount, setBagCount] = useState('')
   const [dryMatterPercent, setDryMatterPercent] = useState('35')
+  const [selectedSupervisorId, setSelectedSupervisorId] = useState('')
 
   const canManageSilage = currentUserDataEntryPermissions.has('silage-entry')
+  const clockedInSilageEntryStaff = useMemo(
+    () =>
+      getClockedInEmployeesWithDataEntryPermission(
+        employees,
+        clockedInIds,
+        'silage-entry',
+        dataEntryPermissionOverrides,
+      ),
+    [employees, clockedInIds, dataEntryPermissionOverrides],
+  )
+  const loggedInSilageActor =
+    currentUser &&
+    getEffectiveDataEntryPermissions(
+      currentUser.id,
+      dataEntryPermissionOverrides,
+      employees,
+    ).has('silage-entry') &&
+    (isAppAdmin(currentUser) || clockedInIds.includes(currentUser.id))
+      ? currentUser
+      : null
+  const actingSupervisor = useMemo(() => {
+    if (loggedInSilageActor) {
+      return loggedInSilageActor
+    }
+    const selected = employees.find((employee) => employee.id === selectedSupervisorId)
+    if (
+      selected &&
+      clockedInIds.includes(selected.id) &&
+      getEffectiveDataEntryPermissions(
+        selected.id,
+        dataEntryPermissionOverrides,
+        employees,
+      ).has('silage-entry')
+    ) {
+      return selected
+    }
+    if (clockedInSilageEntryStaff.length === 1) {
+      return clockedInSilageEntryStaff[0]
+    }
+    return null
+  }, [
+    loggedInSilageActor,
+    employees,
+    selectedSupervisorId,
+    clockedInIds,
+    dataEntryPermissionOverrides,
+    clockedInSilageEntryStaff,
+  ])
+
+  useEffect(() => {
+    if (loggedInSilageActor) {
+      setSelectedSupervisorId(loggedInSilageActor.id)
+      return
+    }
+    if (
+      selectedSupervisorId &&
+      clockedInSilageEntryStaff.some((employee) => employee.id === selectedSupervisorId)
+    ) {
+      return
+    }
+    setSelectedSupervisorId(clockedInSilageEntryStaff[0]?.id ?? '')
+  }, [loggedInSilageActor, clockedInSilageEntryStaff, selectedSupervisorId])
 
   const filteredSilageRecords =
     selectedBatchFilter === 'all'
@@ -7708,8 +7811,12 @@ function SilageProductionPage({
       setEntryStatus('You do not have permission to create silage stock.')
       return
     }
-    if (!clockedInIds.includes(currentUser.id)) {
-      setEntryStatus('You must be clocked in before creating stock.')
+    if (!actingSupervisor) {
+      setEntryStatus('Select a clocked-in silage supervisor to create stock.')
+      return
+    }
+    if (!isAppAdmin(actingSupervisor) && !clockedInIds.includes(actingSupervisor.id)) {
+      setEntryStatus('The selected supervisor must be clocked in before creating stock.')
       return
     }
     const mass = Number(bagMassKg)
@@ -7750,8 +7857,8 @@ function SilageProductionPage({
         massKg: Number(mass.toFixed(1)),
         dryMatterPercent: dm,
         bagCode,
-        supervisorId: currentUser.id,
-        supervisorName: currentUser.name,
+        supervisorId: actingSupervisor.id,
+        supervisorName: actingSupervisor.name,
         operatorIds,
         operatorNames,
       }
@@ -7880,17 +7987,35 @@ function SilageProductionPage({
           </label>
           <label>
             Entered By (Silage Supervisor)
-            <input
-              value={
-                currentUser?.role === 'silage-supervisor'
-                  ? `${currentUser.name} (${currentUser.id})`
-                  : 'Only Silage Supervisor can create silage stock'
-              }
-              disabled
-            />
+            {loggedInSilageActor ? (
+              <input
+                value={`${loggedInSilageActor.name} (${loggedInSilageActor.id})`}
+                disabled
+              />
+            ) : (
+              <select
+                value={selectedSupervisorId}
+                onChange={(event) => setSelectedSupervisorId(event.target.value)}
+              >
+                <option value="">Select supervisor (clocked in)</option>
+                {clockedInSilageEntryStaff.map((person) => (
+                  <option key={person.id} value={person.id}>
+                    {person.name}
+                  </option>
+                ))}
+              </select>
+            )}
           </label>
-          <button type="submit">Create Silage Stock</button>
+          <button type="submit" disabled={!actingSupervisor}>
+            Create Silage Stock
+          </button>
         </form>
+        {!actingSupervisor && canManageSilage ? (
+          <div className="placeholder">
+            A clocked-in employee with silage entry permission must be selected before stock can be
+            created.
+          </div>
+        ) : null}
         <p className="helper-text">
           If two bag sizes are produced on the same day, save the first size, then submit a second
           entry for the other size.
@@ -9558,20 +9683,26 @@ function App() {
       .catch(() => setAttendanceEvents([]))
   }, [ready])
 
+  const permissionEmployeeIds = useMemo(() => {
+    const ids = [...clockedInIds]
+    if (currentUser?.id) {
+      ids.push(currentUser.id)
+    }
+    return [...new Set(ids)]
+  }, [clockedInIds, currentUser])
   const allowedPages = useMemo(
-    () =>
-      currentUser
-        ? getEffectivePagePermissions(currentUser.id, pagePermissionOverrides, employees)
-        : new Set(),
-    [currentUser, pagePermissionOverrides, employees],
+    () => mergeEffectivePagePermissions(permissionEmployeeIds, pagePermissionOverrides, employees),
+    [permissionEmployeeIds, pagePermissionOverrides, employees],
   )
   const readOnlyMode = !canMutateAppData(currentUser)
   const currentUserDataEntryPermissions = useMemo(
     () =>
-      currentUser
-        ? getEffectiveDataEntryPermissions(currentUser.id, dataEntryPermissionOverrides, employees)
-        : new Set(),
-    [currentUser, dataEntryPermissionOverrides, employees],
+      mergeEffectiveDataEntryPermissions(
+        permissionEmployeeIds,
+        dataEntryPermissionOverrides,
+        employees,
+      ),
+    [permissionEmployeeIds, dataEntryPermissionOverrides, employees],
   )
 
   const signInEmployees = useMemo(
@@ -11119,6 +11250,7 @@ function App() {
               <SilageProductionPage
                 currentUser={currentUser}
                 currentUserDataEntryPermissions={currentUserDataEntryPermissions}
+                dataEntryPermissionOverrides={dataEntryPermissionOverrides}
                 employees={employees}
                 clockedInIds={clockedInIds}
                 silageRecords={silageRecords}
