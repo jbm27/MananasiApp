@@ -55,6 +55,14 @@ import {
 } from './employeeFields.js'
 import { sanitizePersistedAppState } from './appStateSanitize.js'
 import {
+  applyInvoiceFinalizeStockReduction,
+  computeAbsoluteStockCatalog,
+  filterStockOptionsForProduct,
+  findStockOption,
+  productRequiresStock,
+  validateInvoiceStockLines,
+} from './invoiceStock.js'
+import {
   findDuplicateDecorticationShift,
   formatDecorticationShiftConflictMessage,
 } from './decortication.js'
@@ -781,6 +789,8 @@ function mapDocumentItemsToLineItems(items) {
       quantityKg: String(item.quantityKg),
       rate: String(item.rate),
       vatEnabled: Boolean(item.vatEnabled),
+      stockCode: item.stockCode ?? '',
+      stockForm: item.stockForm ?? '',
     }
   })
 }
@@ -1261,6 +1271,7 @@ function CustomersPage({ customers, onAddCustomer, readOnly = false }) {
 function InvoicingPage({
   customers,
   invoiceDocuments,
+  invoiceStockCatalog,
   onCreateDocument,
   onUpdateDocument,
   onFinalizeDocument,
@@ -1313,6 +1324,8 @@ function InvoicingPage({
           quantityKg: '',
           rate: '',
           vatEnabled: false,
+          stockCode: '',
+          stockForm: '',
         },
       ])
     }
@@ -1356,6 +1369,8 @@ function InvoicingPage({
         quantityKg: '',
         rate: '',
         vatEnabled: false,
+        stockCode: '',
+        stockForm: '',
       },
     ])
   }
@@ -1372,6 +1387,17 @@ function InvoicingPage({
         }
         if (field === 'customDescription') {
           return { ...item, customDescription: String(value).slice(0, CUSTOM_INVOICE_DESCRIPTION_LIMIT) }
+        }
+        if (field === 'product') {
+          return { ...item, product: value, stockCode: '', stockForm: '' }
+        }
+        if (field === 'stockCode') {
+          const option = findStockOption(invoiceStockCatalog, value)
+          return {
+            ...item,
+            stockCode: value,
+            stockForm: option?.stockForm ?? '',
+          }
         }
         return { ...item, [field]: value }
       }),
@@ -1437,6 +1463,8 @@ function InvoicingPage({
         subtotal: item.subtotal,
         vatAmount: item.vatAmount,
         amount: item.total,
+        stockCode: productRequiresStock(item.product) ? String(item.stockCode ?? '').trim() : null,
+        stockForm: productRequiresStock(item.product) ? String(item.stockForm ?? '').trim() : null,
       })),
       hsCode: hsCode.trim(),
       paymentTerms: paymentTerms.trim(),
@@ -1471,6 +1499,27 @@ function InvoicingPage({
     }
     if (!invoiceDate || computedLineItems.length === 0 || hasInvalidLine) {
       setFormStatus('Complete all product lines with valid quantity and price before saving.')
+      return
+    }
+    const stockValidationErrors = validateInvoiceStockLines(
+      computedLineItems.map((item) => ({
+        product: item.product,
+        stockCode: item.stockCode,
+        quantityKg: Number(item.quantityKg),
+      })),
+      invoiceStockCatalog,
+    )
+    const missingStockLines = computedLineItems.filter(
+      (item) => productRequiresStock(item.product) && !String(item.stockCode ?? '').trim(),
+    )
+    if (missingStockLines.length > 0) {
+      setFormStatus(
+        'Select stock for each product line. Custom (CUS) lines do not require stock allocation.',
+      )
+      return
+    }
+    if (stockValidationErrors.length > 0) {
+      setFormStatus(stockValidationErrors[0])
       return
     }
     if (editingDocumentId) {
@@ -1830,8 +1879,9 @@ function InvoicingPage({
         {formStatus ? <div className="placeholder">{formStatus}</div> : null}
         {!editingDocumentId ? (
           <div className="placeholder">
-            New documents are saved as drafts. Proforma invoices can be converted to an invoice when
-            ready. Invoices should be finalized once confirmed.
+            New documents are saved as drafts. Link each product line to a stock code; custom (CUS)
+            lines do not need stock. Stock is only reduced when an invoice is finalized — proforma
+            drafts do not affect inventory.
           </div>
         ) : null}
         <button type="button" onClick={handleAddProductLine}>
@@ -1842,6 +1892,7 @@ function InvoicingPage({
             <thead>
               <tr>
                 <th>Product</th>
+                <th>Stock</th>
                 <th>Quantity (kg)</th>
                 <th>Price ({currency}/kg)</th>
                 <th>VAT</th>
@@ -1850,7 +1901,10 @@ function InvoicingPage({
               </tr>
             </thead>
             <tbody>
-              {computedLineItems.map((item) => (
+              {computedLineItems.map((item) => {
+                const stockOptions = filterStockOptionsForProduct(item.product, invoiceStockCatalog)
+                const selectedStock = findStockOption(invoiceStockCatalog, item.stockCode)
+                return (
                 <tr key={item.id}>
                   <td>
                     <select
@@ -1879,6 +1933,36 @@ function InvoicingPage({
                           : 'Auto-mapped description'
                       }
                     />
+                  </td>
+                  <td>
+                    {productRequiresStock(item.product) ? (
+                      <>
+                        <select
+                          value={item.stockCode}
+                          onChange={(event) =>
+                            handleLineItemChange(item.id, 'stockCode', event.target.value)
+                          }
+                        >
+                          <option value="">Select stock code</option>
+                          {stockOptions.map((option) => (
+                            <option key={`${option.stockForm}-${option.stockCode}`} value={option.stockCode}>
+                              {option.stockCode} ({option.totalKg} kg
+                              {option.quantityLabel != null ? `, ${option.quantityLabel} units` : ''})
+                            </option>
+                          ))}
+                        </select>
+                        {item.stockCode && selectedStock ? (
+                          <span className="inline-hint">
+                            {selectedStock.stockForm} stock · {selectedStock.totalKg} kg available
+                          </span>
+                        ) : null}
+                        {productRequiresStock(item.product) && stockOptions.length === 0 ? (
+                          <span className="inline-hint">No matching stock available for this product.</span>
+                        ) : null}
+                      </>
+                    ) : (
+                      <span className="inline-hint">Not required for custom lines</span>
+                    )}
                   </td>
                   <td>
                     <input
@@ -1922,10 +2006,10 @@ function InvoicingPage({
                     </button>
                   </td>
                 </tr>
-              ))}
+              )})}
               {computedLineItems.length === 0 && (
                 <tr>
-                  <td colSpan="6">No product lines. Click "Add Product" to start.</td>
+                  <td colSpan="7">No product lines. Click "Add Product" to start.</td>
                 </tr>
               )}
             </tbody>
@@ -8095,6 +8179,7 @@ function StockPage({
   brushingDailyRecords,
   balingRecords,
   silageRecords,
+  invoiceStockIssues,
   onDeleteBaledStock,
   onDeleteSilageStock,
   dateFrom,
@@ -8192,6 +8277,19 @@ function StockPage({
     }
     stockMap[sourceCode].totalKg -= item.baleWeightKg
     stockMap[sourceCode].movements += 1
+  })
+  invoiceStockIssues.forEach((issue) => {
+    const code = issue.stockCode
+    if (!stockMap[code]) {
+      stockMap[code] = {
+        stockCode: code,
+        batchNumber: normalizeBatchNumber(issue.batchNumber ?? code.split('-').slice(0, 2).join('-')),
+        totalKg: 0,
+        movements: 0,
+      }
+    }
+    stockMap[code].totalKg -= issue.quantityKg
+    stockMap[code].movements += 1
   })
 
   const looseStockRows = Object.values(stockMap)
@@ -9614,6 +9712,9 @@ function hydrateAppState(data, setters) {
   if (Array.isArray(sanitized.invoiceDocuments)) {
     setters.setInvoiceDocuments(sanitized.invoiceDocuments)
   }
+  if (Array.isArray(sanitized.invoiceStockIssues)) {
+    setters.setInvoiceStockIssues(sanitized.invoiceStockIssues)
+  }
   if (Array.isArray(sanitized.suppliers)) {
     setters.setSuppliers(sanitized.suppliers)
   }
@@ -9688,6 +9789,7 @@ function App() {
   const [silageRecords, setSilageRecords] = useState([])
   const [attendanceEvents, setAttendanceEvents] = useState([])
   const [invoiceDocuments, setInvoiceDocuments] = useState([])
+  const [invoiceStockIssues, setInvoiceStockIssues] = useState([])
   const [suppliers, setSuppliers] = useState([])
   const [purchaseOrders, setPurchaseOrders] = useState([])
   const [poApprovalLimits, setPoApprovalLimits] = useState({})
@@ -9720,6 +9822,7 @@ function App() {
       setBalingRecords,
       setSilageRecords,
       setInvoiceDocuments,
+      setInvoiceStockIssues,
       setSuppliers,
       setPurchaseOrders,
       setPoApprovalLimits,
@@ -9755,6 +9858,7 @@ function App() {
         balingRecords,
         silageRecords,
         invoiceDocuments,
+        invoiceStockIssues,
         suppliers,
         purchaseOrders,
         poApprovalLimits,
@@ -9785,6 +9889,7 @@ function App() {
       balingRecords,
       silageRecords,
       invoiceDocuments,
+      invoiceStockIssues,
       suppliers,
       purchaseOrders,
       poApprovalLimits,
@@ -9914,11 +10019,41 @@ function App() {
       }
       stockMap[code].totalKg -= item.baleWeightKg
     })
+    invoiceStockIssues.forEach((issue) => {
+      const code = issue.stockCode
+      if (!stockMap[code]) {
+        stockMap[code] = {
+          stockCode: code,
+          batchNumber: normalizeBatchNumber(issue.batchNumber ?? code.split('-').slice(0, 2).join('-')),
+          totalKg: 0,
+        }
+      }
+      stockMap[code].totalKg -= issue.quantityKg
+    })
     return Object.values(stockMap)
       .map((item) => ({ ...item, totalKg: Number(item.totalKg.toFixed(1)) }))
       .filter((item) => item.totalKg > 0)
       .sort((a, b) => b.totalKg - a.totalKg)
-  }, [dryingRecords, brushingStockMovements, brushingDailyRecords, balingRecords])
+  }, [dryingRecords, brushingStockMovements, brushingDailyRecords, balingRecords, invoiceStockIssues])
+  const invoiceStockCatalog = useMemo(
+    () =>
+      computeAbsoluteStockCatalog({
+        dryingRecords,
+        brushingStockMovements,
+        brushingDailyRecords,
+        balingRecords,
+        silageRecords,
+        invoiceStockIssues,
+      }),
+    [
+      dryingRecords,
+      brushingStockMovements,
+      brushingDailyRecords,
+      balingRecords,
+      silageRecords,
+      invoiceStockIssues,
+    ],
+  )
   function handleAddEmployee(input) {
     const permissions = currentUser
       ? getEffectiveDataEntryPermissions(
@@ -10878,6 +11013,30 @@ function App() {
     if (!canFinalizeInvoiceDocument(document)) {
       return { ok: false, message: 'Only draft invoices can be finalized.' }
     }
+    const stockCatalog = computeAbsoluteStockCatalog({
+      dryingRecords,
+      brushingStockMovements,
+      brushingDailyRecords,
+      balingRecords,
+      silageRecords,
+      invoiceStockIssues,
+    })
+    const stockValidationErrors = validateInvoiceStockLines(document.items, stockCatalog)
+    if (stockValidationErrors.length > 0) {
+      return { ok: false, message: stockValidationErrors[0] }
+    }
+    const stockResult = applyInvoiceFinalizeStockReduction({
+      document,
+      balingRecords,
+      silageRecords,
+      invoiceStockIssues,
+    })
+    if (!stockResult.ok) {
+      return { ok: false, message: stockResult.message }
+    }
+    setBalingRecords(stockResult.balingRecords)
+    setSilageRecords(stockResult.silageRecords)
+    setInvoiceStockIssues(stockResult.invoiceStockIssues)
     setInvoiceDocuments((prev) =>
       prev.map((item) =>
         item.id === documentId
@@ -10891,7 +11050,7 @@ function App() {
     )
     return {
       ok: true,
-      message: `Invoice ${document.documentNumber} finalized. It can no longer be edited.`,
+      message: `Invoice ${document.documentNumber} finalized. Stock has been reduced and the invoice can no longer be edited.`,
     }
   }
 
@@ -11471,6 +11630,7 @@ function App() {
               <InvoicingPage
                 customers={customers}
                 invoiceDocuments={invoiceDocuments}
+                invoiceStockCatalog={invoiceStockCatalog}
                 onCreateDocument={handleCreateInvoiceDocument}
                 onUpdateDocument={handleUpdateInvoiceDocument}
                 onFinalizeDocument={handleFinalizeInvoiceDocument}
@@ -11518,6 +11678,7 @@ function App() {
                 brushingDailyRecords={brushingDailyRecords}
                 balingRecords={balingRecords}
                 silageRecords={silageRecords}
+                invoiceStockIssues={invoiceStockIssues}
                 onDeleteBaledStock={handleDeleteBaledStock}
                 onDeleteSilageStock={handleDeleteSilageStock}
                 dateFrom={stockDateFrom}

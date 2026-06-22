@@ -16,6 +16,7 @@ const MERGE_BY_ID_KEYS = [
   'brushingDailyRecords',
   'balingRecords',
   'silageRecords',
+  'invoiceStockIssues',
 ]
 
 function recordKey(item) {
