@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { getAppState, saveAppState } from '../stateStore.js'
+import { mergeIncomingAppState } from '../stateMerge.js'
 import { migrateLeadershipPasswordsFromMainState } from '../services/leadershipAuthStore.js'
 import { syncClockedInIdsToAppState } from '../services/attendanceAutoClockOut.js'
 
@@ -42,8 +43,10 @@ router.put('/', async (req, res) => {
     const current = await getAppState()
     const { _meta, leaderPasswordHashes: _ignored, clockedInIds: _clientClockedIn, ...incoming } = body
     const updatedAt = await saveAppState({
-      ...stripSensitiveStateFields(current?.data),
-      ...stripSensitiveStateFields(incoming),
+      ...mergeIncomingAppState(
+        stripSensitiveStateFields(current?.data),
+        stripSensitiveStateFields(incoming),
+      ),
       clockedInIds,
     })
     res.json({ ok: true, updatedAt })

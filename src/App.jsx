@@ -9631,7 +9631,8 @@ function hydrateAppState(data, setters) {
 }
 
 function App() {
-  const { ready, initialData, persist, syncError, syncing, lastSavedAt } = useBackendSync()
+  const { ready, initialData, loadStatus, persist, syncError, syncing, lastSavedAt } =
+    useBackendSync()
   const hydratedRef = useRef(false)
   const today = new Date().toISOString().slice(0, 10)
   const [employees, setEmployees] = useState(() => [...mananasiStaffEmployees])
@@ -9694,7 +9695,7 @@ function App() {
   const currentUser = employees.find((employee) => employee.id === authLeadershipId) ?? null
 
   useEffect(() => {
-    if (!ready || hydratedRef.current) {
+    if (!ready || hydratedRef.current || loadStatus === 'error') {
       return
     }
     hydrateAppState(initialData, {
@@ -9727,7 +9728,7 @@ function App() {
       setPayrollApprovals,
     })
     hydratedRef.current = true
-  }, [ready, initialData])
+  }, [ready, initialData, loadStatus])
 
   const persistedSnapshot = useMemo(
     () =>
@@ -11051,6 +11052,22 @@ function App() {
         <section className="panel login-panel">
           <h1>Mananasi Fibre App</h1>
           <p>Loading data from server...</p>
+        </section>
+      </div>
+    )
+  }
+
+  if (loadStatus === 'error') {
+    return (
+      <div className="login-layout">
+        <section className="panel login-panel">
+          <h1>Mananasi Fibre App</h1>
+          <p>Could not load data from the server.</p>
+          <p className="inline-hint">{syncError || 'Check your connection and try again.'}</p>
+          <p className="inline-hint">
+            The app will not save changes until data loads successfully, so your stored records stay
+            protected.
+          </p>
         </section>
       </div>
     )

@@ -4,6 +4,8 @@ import { fetchAppState, saveAppState } from '../api/client.js'
 export function useBackendSync() {
   const [ready, setReady] = useState(false)
   const [initialData, setInitialData] = useState(null)
+  /** 'loaded' | 'empty' when ready; 'error' when the initial fetch failed */
+  const [loadStatus, setLoadStatus] = useState('loading')
   const [syncError, setSyncError] = useState('')
   const [syncing, setSyncing] = useState(false)
   const [lastSavedAt, setLastSavedAt] = useState(null)
@@ -18,6 +20,7 @@ export function useBackendSync() {
           return
         }
         setInitialData(data)
+        setLoadStatus(data == null ? 'empty' : 'loaded')
         setReady(true)
       })
       .catch((error) => {
@@ -25,6 +28,7 @@ export function useBackendSync() {
           return
         }
         setSyncError(error.message)
+        setLoadStatus('error')
         setReady(true)
       })
 
@@ -56,6 +60,7 @@ export function useBackendSync() {
   return {
     ready,
     initialData,
+    loadStatus,
     persist,
     syncError,
     syncing,
