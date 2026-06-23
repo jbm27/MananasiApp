@@ -8,6 +8,7 @@ const logoPath = path.join(__dirname, '..', 'LogoStandard.png')
 const outPath = path.join(__dirname, '..', 'LogoPdf.jpg')
 
 const jpegBuffer = await sharp(logoPath)
+  .flatten({ background: '#ffffff' })
   .resize(480, 480, { fit: 'inside', withoutEnlargement: true })
   .jpeg({ quality: 90 })
   .toBuffer()
