@@ -29,6 +29,20 @@ import {
 } from './payroll.js'
 import { formatKenyaDateTime, toKenyaDateString } from './kenyaTime.js'
 import { drawMananasiCompanyHeader, drawPdfField as drawInvoicePdfField, PDF_PAGE_FORMAT } from './documentPdfHeader.js'
+import { drawMananasiStamp, isFinalizedCommercialDocument } from './documentPdfStamp.js'
+import {
+  buildPackingListFromInvoice,
+  buildPackingListInput,
+  canConvertInvoiceToPackingList,
+  canEditPackingList,
+  canFinalizePackingList,
+  computePackingListTotals,
+  getCommercialDocumentStatusLabel,
+  getCommercialDocumentTypeLabel,
+  mapPackingListItemsToFormLines,
+  validatePackingListItems,
+} from './packingList.js'
+import { printPackingListPdf } from './packingListPdf.js'
 import logoStandard from '../LogoStandard.png'
 import { mananasiStaffEmployees } from './mananasiStaffEmployees.js'
 import {
@@ -793,19 +807,7 @@ function canFinalizeInvoiceDocument(document) {
 }
 
 function getInvoiceDocumentStatusLabel(document) {
-  if (document?.status === 'converted') {
-    return 'Converted to invoice'
-  }
-  if (document?.documentType === 'proforma') {
-    return 'Draft'
-  }
-  if (document?.status === 'draft') {
-    return 'Draft'
-  }
-  if (document?.status === 'finalized' || document?.status === 'confirmed') {
-    return 'Finalized'
-  }
-  return document?.status ?? 'Unknown'
+  return getCommercialDocumentStatusLabel(document)
 }
 
 function mapDocumentItemsToLineItems(items) {
@@ -1292,6 +1294,9 @@ function InvoicingPage({
   onUpdateDocument,
   onFinalizeDocument,
   onConvertToInvoice,
+  onConvertToPackingList,
+  onUpdatePackingList,
+  onFinalizePackingList,
   readOnly = false,
   canEditFinalizedInvoices = false,
 }) {
@@ -1307,6 +1312,7 @@ function InvoicingPage({
   const [paymentTerms, setPaymentTerms] = useState('30% deposit, balance upon arrival at port')
   const [shippingTerms, setShippingTerms] = useState('CIF Nansha')
   const [notes, setNotes] = useState('')
+  const [packingLineItems, setPackingLineItems] = useState([])
   const [selectedDocumentId, setSelectedDocumentId] = useState('')
   const [editingDocumentId, setEditingDocumentId] = useState('')
   const [formStatus, setFormStatus] = useState('')
@@ -1319,6 +1325,9 @@ function InvoicingPage({
 
   const selectedDocument =
     sortedDocuments.find((item) => item.id === selectedDocumentId) ?? sortedDocuments[0] ?? null
+  const isEditingPackingList =
+    Boolean(editingDocumentId) &&
+    invoiceDocuments.find((item) => item.id === editingDocumentId)?.documentType === 'packing-list'
   const selectedCustomer = customers.find((item) => item.id === selectedCustomerId) ?? null
   const selectedCustomerAddress = selectedCustomer
     ? [
@@ -1497,11 +1506,25 @@ function InvoicingPage({
     setPaymentTerms('30% deposit, balance upon arrival at port')
     setShippingTerms('CIF Nansha')
     setNotes('')
+    resetPackingListForm()
     setFormStatus('')
   }
 
   function documentIsEditable(document) {
+    if (document?.documentType === 'packing-list') {
+      return canEditPackingList(document)
+    }
     return canEditInvoiceDocument(document, { canEditFinalized: canEditFinalizedInvoices })
+  }
+
+  function resetPackingListForm() {
+    setPackingLineItems([])
+  }
+
+  function handlePackingLineItemChange(lineId, field, value) {
+    setPackingLineItems((prev) =>
+      prev.map((item) => (item.id === lineId ? { ...item, [field]: value } : item)),
+    )
   }
 
   function startEditingDocument(document) {
@@ -1510,6 +1533,16 @@ function InvoicingPage({
     }
     if (!documentIsEditable(document)) {
       setFormStatus('This document cannot be edited.')
+      return
+    }
+    if (document.documentType === 'packing-list') {
+      setEditingDocumentId(document.id)
+      setInvoiceDate(document.invoiceDate)
+      setOrigin(document.origin)
+      setHsCode(document.hsCode)
+      setPackingLineItems(mapPackingListItemsToFormLines(document.items))
+      setFormStatus(`Editing packing list ${document.documentNumber}.`)
+      setSelectedDocumentId(document.id)
       return
     }
     const matchedCustomer =
@@ -1658,8 +1691,67 @@ function InvoicingPage({
     setFormStatus(result.message)
   }
 
+  function handleConvertToPackingList(documentId) {
+    if (readOnly) {
+      return
+    }
+    const result = onConvertToPackingList(documentId)
+    if (!result.ok) {
+      setFormStatus(result.message)
+      return
+    }
+    setSelectedDocumentId(result.document.id)
+    setFormStatus(result.message)
+  }
+
+  function handleFinalizePackingList(documentId) {
+    if (readOnly) {
+      return
+    }
+    const result = onFinalizePackingList(documentId)
+    if (!result.ok) {
+      setFormStatus(result.message)
+      return
+    }
+    if (editingDocumentId === documentId) {
+      resetCreateForm()
+    }
+    setFormStatus(result.message)
+  }
+
+  function handleSavePackingList(event) {
+    event.preventDefault()
+    if (readOnly || !editingDocumentId) {
+      return
+    }
+    const input = buildPackingListInput({
+      invoiceDate,
+      origin,
+      hsCode,
+      lineItems: packingLineItems,
+    })
+    const validationErrors = validatePackingListItems(input.items)
+    if (!invoiceDate || validationErrors.length > 0) {
+      setFormStatus(validationErrors[0] ?? 'Complete all packing list lines before saving.')
+      return
+    }
+    const updated = onUpdatePackingList(editingDocumentId, input)
+    if (!updated) {
+      setFormStatus('This packing list could not be updated.')
+      return
+    }
+    setSelectedDocumentId(updated.id)
+    setEditingDocumentId('')
+    resetPackingListForm()
+    setFormStatus(`Packing list ${updated.documentNumber} updated.`)
+  }
+
   async function handlePrintDocumentPdf() {
     if (!selectedDocument) {
+      return
+    }
+    if (selectedDocument.documentType === 'packing-list') {
+      await printPackingListPdf(selectedDocument)
       return
     }
     const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: PDF_PAGE_FORMAT })
@@ -1830,6 +1922,17 @@ function InvoicingPage({
       value: 'James Boyd-Moss (Managing Director)',
     })
 
+    if (isFinalizedCommercialDocument(selectedDocument)) {
+      const stampDate = selectedDocument.finalizedAt?.slice(0, 10) ?? selectedDocument.invoiceDate
+      drawMananasiStamp(pdf, {
+        x: right - 64,
+        y: footerY + 4,
+        width: 62,
+        height: 28,
+        stampDate,
+      })
+    }
+
     const filePrefix = selectedDocument.documentType === 'proforma' ? 'proforma' : 'invoice'
     pdf.save(`${filePrefix}-${selectedDocument.documentNumber}.pdf`)
   }
@@ -1839,11 +1942,121 @@ function InvoicingPage({
       <h2>Invoicing</h2>
       <p>
         Create a Proforma Invoice first, then convert it to an Invoice when the deal is confirmed.
-        Only invoices need to be finalized.
+        Finalized invoices can be converted to a packing list. Only invoices need to be finalized.
       </p>
 
       {readOnly ? (
         <p className="inline-hint">Director view: invoices and proformas are read-only. You can view and print documents.</p>
+      ) : isEditingPackingList ? (
+      <CollapsibleSection
+        title="Edit Packing List"
+        isOpen
+        onToggle={() => {}}
+      >
+        <form className="form-grid" onSubmit={handleSavePackingList}>
+          <label>
+            Date
+            <input
+              type="date"
+              value={invoiceDate}
+              onChange={(event) => setInvoiceDate(event.target.value)}
+            />
+          </label>
+          <label>
+            Origin
+            <input value={origin} onChange={(event) => setOrigin(event.target.value)} />
+          </label>
+          <label>
+            HS Code
+            <input value={hsCode} onChange={(event) => setHsCode(event.target.value)} />
+          </label>
+          <button type="submit">Save Packing List</button>
+          <button type="button" className="secondary-button" onClick={resetCreateForm}>
+            Cancel Edit
+          </button>
+        </form>
+        {formStatus ? <div className="placeholder">{formStatus}</div> : null}
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Description</th>
+                <th>No of bales</th>
+                <th>Total CBM</th>
+                <th>Gross (kg)</th>
+                <th>Net (kg)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {packingLineItems.map((item) => (
+                <tr key={item.id}>
+                  <td>
+                    <input
+                      value={item.product}
+                      onChange={(event) =>
+                        handlePackingLineItemChange(item.id, 'product', event.target.value)
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={item.description}
+                      onChange={(event) =>
+                        handlePackingLineItemChange(item.id, 'description', event.target.value)
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={item.baleCount}
+                      onChange={(event) =>
+                        handlePackingLineItemChange(item.id, 'baleCount', event.target.value)
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={item.totalCbm}
+                      onChange={(event) =>
+                        handlePackingLineItemChange(item.id, 'totalCbm', event.target.value)
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={item.grossKg}
+                      onChange={(event) =>
+                        handlePackingLineItemChange(item.id, 'grossKg', event.target.value)
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={item.netKg}
+                      onChange={(event) =>
+                        handlePackingLineItemChange(item.id, 'netKg', event.target.value)
+                      }
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CollapsibleSection>
       ) : (
       <CollapsibleSection
         title={editingDocumentId ? 'Edit Document' : 'Create Document'}
@@ -2185,12 +2398,14 @@ function InvoicingPage({
           <tbody>
             {sortedDocuments.map((doc) => (
               <tr key={doc.id}>
-                <td>{doc.documentType === 'proforma' ? 'Proforma' : 'Invoice'}</td>
+                <td>{getCommercialDocumentTypeLabel(doc)}</td>
                 <td>{doc.documentNumber}</td>
                 <td>{formatDisplayDate(doc.invoiceDate)}</td>
                 <td>{doc.customerName}</td>
                 <td>
-                  {doc.currency} {doc.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  {doc.documentType === 'packing-list'
+                    ? `${(doc.totals?.netKg ?? computePackingListTotals(doc.items).netKg).toLocaleString()} kg net`
+                    : `${doc.currency} ${doc.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
                 </td>
                 <td>{getInvoiceDocumentStatusLabel(doc)}</td>
                 <td>
@@ -2207,9 +2422,19 @@ function InvoicingPage({
                       Finalize
                     </button>
                   ) : null}
+                  {canFinalizePackingList(doc) && !readOnly ? (
+                    <button type="button" onClick={() => handleFinalizePackingList(doc.id)}>
+                      Finalize
+                    </button>
+                  ) : null}
                   {doc.documentType === 'proforma' && doc.status !== 'converted' && !readOnly ? (
                     <button type="button" onClick={() => handleConvertDocument(doc.id)}>
                       Convert to Invoice
+                    </button>
+                  ) : null}
+                  {canConvertInvoiceToPackingList(doc) && !readOnly ? (
+                    <button type="button" onClick={() => handleConvertToPackingList(doc.id)}>
+                      Convert to Packing List
                     </button>
                   ) : null}
                 </td>
@@ -2240,6 +2465,11 @@ function InvoicingPage({
                 Finalize
               </button>
             ) : null}
+            {canFinalizePackingList(selectedDocument) && !readOnly ? (
+              <button type="button" onClick={() => handleFinalizePackingList(selectedDocument.id)}>
+                Finalize
+              </button>
+            ) : null}
             {selectedDocument.documentType === 'proforma' &&
             selectedDocument.status !== 'converted' &&
             !readOnly ? (
@@ -2247,7 +2477,113 @@ function InvoicingPage({
                 Convert to Invoice
               </button>
             ) : null}
+            {canConvertInvoiceToPackingList(selectedDocument) && !readOnly ? (
+              <button
+                type="button"
+                onClick={() => handleConvertToPackingList(selectedDocument.id)}
+              >
+                Convert to Packing List
+              </button>
+            ) : null}
           </div>
+          {selectedDocument.documentType === 'packing-list' ? (
+          <article className="invoice-sheet">
+            <header className="invoice-top">
+              <div>
+                <h3>Mananasi Fibre Limited</h3>
+                <p><strong>Address:</strong> P.O Box 14483, Nairobi 00800, Kenya</p>
+                <p><strong>KRA PIN</strong> P052141076P</p>
+                <p><strong>Contact</strong> info@mananasi-fibre.com | +254717903799</p>
+              </div>
+              <div className="invoice-logo-block">
+                <img src={logoStandard} alt="Mananasi Fibre logo" className="invoice-logo-image" />
+                <div>MANANASI FIBRE LTD</div>
+              </div>
+            </header>
+
+            <section className="invoice-meta-grid">
+              <div>
+                <h4>Packing list for:</h4>
+                <p><strong>{selectedDocument.customerName}</strong></p>
+                <p>{selectedDocument.customerAddress}</p>
+                <p>Company registration: {selectedDocument.customerRegistration}</p>
+              </div>
+              <div>
+                <p><strong>Packing list no:</strong> {selectedDocument.documentNumber}</p>
+                <p><strong>Date:</strong> {formatDisplayDate(selectedDocument.invoiceDate)}</p>
+                <p><strong>Origin:</strong> {selectedDocument.origin}</p>
+              </div>
+            </section>
+
+            <table className="invoice-line-table">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>Description</th>
+                  <th>No of bales</th>
+                  <th>Total CBM</th>
+                  <th>Gross (kg)</th>
+                  <th>Net (kg)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {selectedDocument.items.map((item, index) => (
+                  <tr key={`${selectedDocument.id}-${index + 1}`}>
+                    <td>{item.product}</td>
+                    <td>{item.description}</td>
+                    <td>{Number(item.baleCount).toLocaleString()}</td>
+                    <td>{Number(item.totalCbm).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                    <td>{Number(item.grossKg).toLocaleString()}</td>
+                    <td>{Number(item.netKg).toLocaleString()}</td>
+                  </tr>
+                ))}
+                <tr>
+                  <td colSpan="2"><strong>Total</strong></td>
+                  <td>
+                    <strong>
+                      {(
+                        selectedDocument.totals?.baleCount ??
+                        computePackingListTotals(selectedDocument.items).baleCount
+                      ).toLocaleString()}
+                    </strong>
+                  </td>
+                  <td>
+                    <strong>
+                      {(
+                        selectedDocument.totals?.totalCbm ??
+                        computePackingListTotals(selectedDocument.items).totalCbm
+                      ).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </strong>
+                  </td>
+                  <td>
+                    <strong>
+                      {(
+                        selectedDocument.totals?.grossKg ??
+                        computePackingListTotals(selectedDocument.items).grossKg
+                      ).toLocaleString()}
+                    </strong>
+                  </td>
+                  <td>
+                    <strong>
+                      {(
+                        selectedDocument.totals?.netKg ??
+                        computePackingListTotals(selectedDocument.items).netKg
+                      ).toLocaleString()}
+                    </strong>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            <section className="invoice-foot-grid">
+              <p><strong>HS Code</strong> {selectedDocument.hsCode}</p>
+              <p><strong>Authorised by:</strong> James Boyd-Moss (Director)</p>
+              {isFinalizedCommercialDocument(selectedDocument) ? (
+                <p className="inline-hint">Mananasi stamp is included on the printed PDF.</p>
+              ) : null}
+            </section>
+          </article>
+          ) : (
           <article className="invoice-sheet">
             <header className="invoice-top">
               <div>
@@ -2332,8 +2668,13 @@ function InvoicingPage({
               ) : null}
               <InvoiceBankDetailsBlock currency={selectedDocument.currency} />
               <p><strong>Authorised by:</strong> James Boyd-Moss (Managing Director)</p>
+              {isFinalizedCommercialDocument(selectedDocument) &&
+              selectedDocument.documentType === 'invoice' ? (
+                <p className="inline-hint">Mananasi stamp is included on the printed PDF.</p>
+              ) : null}
             </section>
           </article>
+          )}
         </>
       )}
     </section>
@@ -11126,6 +11467,9 @@ function App() {
         if (!canEditInvoiceDocument(document, { canEditFinalized })) {
           return document
         }
+        if (document.documentType === 'packing-list') {
+          return document
+        }
         updatedDocument = {
           ...document,
           ...input,
@@ -11246,6 +11590,114 @@ function App() {
       ok: true,
       message: `Invoice ${converted.documentNumber} created from proforma ${source.documentNumber}. Review and finalize it when ready.`,
       document: converted,
+    }
+  }
+
+  function handleConvertInvoiceToPackingList(documentId) {
+    if (!canMutateAppData(currentUser)) {
+      return { ok: false, message: 'You have read-only access and cannot create packing lists.' }
+    }
+    const source = invoiceDocuments.find((item) => item.id === documentId)
+    if (!source || source.documentType !== 'invoice') {
+      return { ok: false, message: 'Only invoices can be converted to packing lists.' }
+    }
+    if (!canConvertInvoiceToPackingList(source)) {
+      return {
+        ok: false,
+        message: 'Only finalized invoices without an existing packing list can be converted.',
+      }
+    }
+    const draft = buildPackingListFromInvoice(source, balingRecords)
+    const converted = {
+      id: `PL-${Date.now()}`,
+      ...draft,
+      status: 'draft',
+      createdAt: new Date().toISOString(),
+      finalizedAt: null,
+      totals: computePackingListTotals(draft.items),
+    }
+    setInvoiceDocuments((prev) => [
+      converted,
+      ...prev.map((item) =>
+        item.id === documentId
+          ? {
+              ...item,
+              convertedPackingListId: converted.id,
+              convertedAt: new Date().toISOString(),
+            }
+          : item,
+      ),
+    ])
+    return {
+      ok: true,
+      message: `Packing list ${converted.documentNumber} created from invoice ${source.documentNumber}. Enter bale counts, CBM, and gross weights, then finalize.`,
+      document: converted,
+    }
+  }
+
+  function handleUpdatePackingList(documentId, input) {
+    if (!canMutateAppData(currentUser)) {
+      return null
+    }
+    let updatedDocument = null
+    setInvoiceDocuments((prev) =>
+      prev.map((document) => {
+        if (document.id !== documentId) {
+          return document
+        }
+        if (!canEditPackingList(document)) {
+          return document
+        }
+        updatedDocument = {
+          ...document,
+          ...input,
+          documentType: 'packing-list',
+          documentNumber: document.documentNumber,
+          status: document.status,
+          createdAt: document.createdAt,
+          sourceInvoiceId: document.sourceInvoiceId,
+          customerId: document.customerId,
+          customerName: document.customerName,
+          customerAddress: document.customerAddress,
+          customerRegistration: document.customerRegistration,
+          totals: computePackingListTotals(input.items),
+        }
+        return updatedDocument
+      }),
+    )
+    return updatedDocument
+  }
+
+  function handleFinalizePackingList(documentId) {
+    if (!canMutateAppData(currentUser)) {
+      return { ok: false, message: 'You have read-only access and cannot finalize packing lists.' }
+    }
+    const document = invoiceDocuments.find((item) => item.id === documentId)
+    if (!document || document.documentType !== 'packing-list') {
+      return { ok: false, message: 'Packing list could not be found.' }
+    }
+    if (!canFinalizePackingList(document)) {
+      return { ok: false, message: 'Only draft packing lists can be finalized.' }
+    }
+    const validationErrors = validatePackingListItems(document.items)
+    if (validationErrors.length > 0) {
+      return { ok: false, message: validationErrors[0] }
+    }
+    setInvoiceDocuments((prev) =>
+      prev.map((item) =>
+        item.id === documentId
+          ? {
+              ...item,
+              status: 'finalized',
+              finalizedAt: new Date().toISOString(),
+              totals: computePackingListTotals(item.items),
+            }
+          : item,
+      ),
+    )
+    return {
+      ok: true,
+      message: `Packing list ${document.documentNumber} finalized. The Mananasi stamp will appear on the printed PDF.`,
     }
   }
 
@@ -11781,6 +12233,9 @@ function App() {
                 onUpdateDocument={handleUpdateInvoiceDocument}
                 onFinalizeDocument={handleFinalizeInvoiceDocument}
                 onConvertToInvoice={handleConvertProformaToInvoice}
+                onConvertToPackingList={handleConvertInvoiceToPackingList}
+                onUpdatePackingList={handleUpdatePackingList}
+                onFinalizePackingList={handleFinalizePackingList}
                 readOnly={readOnlyMode}
                 canEditFinalizedInvoices={canEditFinalizedInvoices}
               />
