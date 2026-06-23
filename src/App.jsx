@@ -70,6 +70,7 @@ import {
 import { sanitizePersistedAppState } from './appStateSanitize.js'
 import {
   applyInvoiceFinalizeStockReduction,
+  restoreInvoiceFinalizeStock,
   computeAbsoluteStockCatalog,
   createEmptyStockAllocation,
   filterStockOptionsForProduct,
@@ -1646,6 +1647,10 @@ function InvoicingPage({
       return
     }
     if (editingDocumentId) {
+      const editingDocument = invoiceDocuments.find((item) => item.id === editingDocumentId)
+      const wasFinalized =
+        editingDocument?.documentType === 'invoice' &&
+        (editingDocument?.status === 'finalized' || editingDocument?.status === 'confirmed')
       const updated = onUpdateDocument(editingDocumentId, buildDocumentInput())
       if (!updated) {
         setFormStatus('This document could not be updated.')
@@ -1653,6 +1658,12 @@ function InvoicingPage({
       }
       setSelectedDocumentId(updated.id)
       setEditingDocumentId('')
+      if (wasFinalized) {
+        setFormStatus(
+          `Invoice ${updated.documentNumber} updated. Stock has been restored — finalize again to deduct stock with the new details.`,
+        )
+        return
+      }
       setFormStatus(`${updated.documentType === 'proforma' ? 'Proforma' : 'Invoice'} ${updated.documentNumber} updated.`)
       return
     }
@@ -11458,16 +11469,38 @@ function App() {
       dataEntryPermissionOverrides,
       employees,
     )
+    const existingDocument = invoiceDocuments.find((item) => item.id === documentId)
+    if (
+      !existingDocument ||
+      !canEditInvoiceDocument(existingDocument, { canEditFinalized }) ||
+      existingDocument.documentType === 'packing-list'
+    ) {
+      return null
+    }
+
+    const wasFinalized =
+      existingDocument.documentType === 'invoice' &&
+      (existingDocument.status === 'finalized' || existingDocument.status === 'confirmed')
+
+    if (wasFinalized) {
+      const restoreResult = restoreInvoiceFinalizeStock({
+        document: existingDocument,
+        balingRecords,
+        silageRecords,
+        invoiceStockIssues,
+      })
+      if (!restoreResult.ok) {
+        return null
+      }
+      setBalingRecords(restoreResult.balingRecords)
+      setSilageRecords(restoreResult.silageRecords)
+      setInvoiceStockIssues(restoreResult.invoiceStockIssues)
+    }
+
     let updatedDocument = null
     setInvoiceDocuments((prev) =>
       prev.map((document) => {
         if (document.id !== documentId) {
-          return document
-        }
-        if (!canEditInvoiceDocument(document, { canEditFinalized })) {
-          return document
-        }
-        if (document.documentType === 'packing-list') {
           return document
         }
         updatedDocument = {
@@ -11475,10 +11508,12 @@ function App() {
           ...input,
           documentType: document.documentType,
           documentNumber: document.documentNumber,
-          status: document.status,
           createdAt: document.createdAt,
           sourceProformaId: document.sourceProformaId,
           totalAmount: Number(input.items.reduce((sum, item) => sum + item.amount, 0).toFixed(2)),
+          status: wasFinalized ? 'draft' : document.status,
+          finalizedAt: wasFinalized ? null : document.finalizedAt,
+          finalizedStockSnapshot: wasFinalized ? null : document.finalizedStockSnapshot,
         }
         return updatedDocument
       }),
@@ -11534,13 +11569,14 @@ function App() {
               ...item,
               status: 'finalized',
               finalizedAt: new Date().toISOString(),
+              finalizedStockSnapshot: stockResult.stockSnapshot,
             }
           : item,
       ),
     )
     return {
       ok: true,
-      message: `Invoice ${document.documentNumber} finalized. Stock has been reduced and the invoice can no longer be edited.`,
+      message: `Invoice ${document.documentNumber} finalized. Stock has been reduced.`,
     }
   }
 

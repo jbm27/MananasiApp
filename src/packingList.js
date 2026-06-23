@@ -204,6 +204,9 @@ export function getCommercialDocumentStatusLabel(document) {
     return 'Converted to invoice'
   }
   if (document?.documentType === 'invoice' && document?.convertedPackingListId) {
+    if (document?.status === 'draft') {
+      return 'Draft — re-finalize required'
+    }
     return 'Packing list created'
   }
   if (document?.documentType === 'proforma') {

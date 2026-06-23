@@ -315,11 +315,13 @@ function consumeBaledStock(balingRecords, baleSeriesCode, quantityKg) {
     .sort((a, b) => getBaleSerialFromCode(a.baleCode) - getBaleSerialFromCode(b.baleCode))
   let remaining = quantityKg
   const idsToRemove = new Set()
+  const removedRecords = []
   for (const record of matching) {
     if (remaining <= 0) {
       break
     }
     idsToRemove.add(record.id)
+    removedRecords.push(record)
     remaining = Number((remaining - record.baleWeightKg).toFixed(2))
   }
   if (remaining > 0.05) {
@@ -328,11 +330,13 @@ function consumeBaledStock(balingRecords, baleSeriesCode, quantityKg) {
       ok: false,
       message: `Not enough baled stock in ${baleSeriesCode}. Need ${quantityKg} kg but only ${Number(available.toFixed(1))} kg is available.`,
       balingRecords,
+      removedRecords: [],
     }
   }
   return {
     ok: true,
     balingRecords: balingRecords.filter((record) => !idsToRemove.has(record.id)),
+    removedRecords,
   }
 }
 
@@ -342,11 +346,13 @@ function consumeSilageStock(silageRecords, seriesCode, quantityKg) {
     .sort((a, b) => getSilageRecordSerial(a) - getSilageRecordSerial(b))
   let remaining = quantityKg
   const idsToRemove = new Set()
+  const removedRecords = []
   for (const record of matching) {
     if (remaining <= 0) {
       break
     }
     idsToRemove.add(record.id)
+    removedRecords.push(record)
     remaining = Number((remaining - record.massKg).toFixed(2))
   }
   if (remaining > 0.05) {
@@ -355,11 +361,13 @@ function consumeSilageStock(silageRecords, seriesCode, quantityKg) {
       ok: false,
       message: `Not enough silage stock in ${seriesCode}. Need ${quantityKg} kg but only ${Number(available.toFixed(1))} kg is available.`,
       silageRecords,
+      removedRecords: [],
     }
   }
   return {
     ok: true,
     silageRecords: silageRecords.filter((record) => !idsToRemove.has(record.id)),
+    removedRecords,
   }
 }
 
@@ -372,6 +380,11 @@ export function applyInvoiceFinalizeStockReduction({
   let nextBalingRecords = balingRecords
   let nextSilageRecords = silageRecords
   const nextInvoiceStockIssues = [...invoiceStockIssues]
+  const stockSnapshot = {
+    looseIssues: [],
+    balingRecords: [],
+    silageRecords: [],
+  }
 
   for (const item of document.items) {
     if (!productRequiresStock(item.product)) {
@@ -397,7 +410,7 @@ export function applyInvoiceFinalizeStockReduction({
       }
 
       if (stockForm === 'Loose') {
-        nextInvoiceStockIssues.push({
+        const issue = {
           id: `INV-STK-${document.id}-${Date.now()}-${nextInvoiceStockIssues.length + 1}`,
           invoiceId: document.id,
           invoiceDocumentNumber: document.documentNumber,
@@ -406,7 +419,9 @@ export function applyInvoiceFinalizeStockReduction({
           quantityKg,
           batchNumber: stockCode.split('-').slice(0, 2).join('-'),
           date: document.invoiceDate,
-        })
+        }
+        nextInvoiceStockIssues.push(issue)
+        stockSnapshot.looseIssues.push(issue)
         continue
       }
 
@@ -416,6 +431,7 @@ export function applyInvoiceFinalizeStockReduction({
           return { ok: false, message: result.message }
         }
         nextBalingRecords = result.balingRecords
+        stockSnapshot.balingRecords.push(...result.removedRecords)
         continue
       }
 
@@ -425,6 +441,7 @@ export function applyInvoiceFinalizeStockReduction({
           return { ok: false, message: result.message }
         }
         nextSilageRecords = result.silageRecords
+        stockSnapshot.silageRecords.push(...result.removedRecords)
         continue
       }
 
@@ -433,6 +450,43 @@ export function applyInvoiceFinalizeStockReduction({
         message: `Unsupported stock form "${stockForm}" on line ${item.product}.`,
       }
     }
+  }
+
+  return {
+    ok: true,
+    balingRecords: nextBalingRecords,
+    silageRecords: nextSilageRecords,
+    invoiceStockIssues: nextInvoiceStockIssues,
+    stockSnapshot,
+  }
+}
+
+export function restoreInvoiceFinalizeStock({
+  document,
+  balingRecords,
+  silageRecords,
+  invoiceStockIssues,
+}) {
+  const snapshot = document?.finalizedStockSnapshot
+  let nextBalingRecords = [...balingRecords]
+  let nextSilageRecords = [...silageRecords]
+  let nextInvoiceStockIssues = [...invoiceStockIssues]
+
+  if (snapshot) {
+    const removedBaleIds = new Set((snapshot.balingRecords ?? []).map((record) => record.id))
+    const removedSilageIds = new Set((snapshot.silageRecords ?? []).map((record) => record.id))
+    nextBalingRecords = nextBalingRecords.filter((record) => !removedBaleIds.has(record.id))
+    nextSilageRecords = nextSilageRecords.filter((record) => !removedSilageIds.has(record.id))
+    nextBalingRecords = [...nextBalingRecords, ...(snapshot.balingRecords ?? [])].sort((a, b) =>
+      a.baleCode.localeCompare(b.baleCode),
+    )
+    nextSilageRecords = [...nextSilageRecords, ...(snapshot.silageRecords ?? [])].sort(
+      (a, b) => getSilageRecordSerial(a) - getSilageRecordSerial(b),
+    )
+    const snapshotIssueIds = new Set((snapshot.looseIssues ?? []).map((issue) => issue.id))
+    nextInvoiceStockIssues = nextInvoiceStockIssues.filter((issue) => !snapshotIssueIds.has(issue.id))
+  } else {
+    nextInvoiceStockIssues = nextInvoiceStockIssues.filter((issue) => issue.invoiceId !== document.id)
   }
 
   return {
