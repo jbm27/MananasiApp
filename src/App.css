@@ -1104,3 +1104,17 @@ th {
   border: 1px solid #a5f3fc;
   color: #0f4c5c;
 }
+
+.stock-allocation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 16rem;
+}
+
+.stock-allocation-row {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) 6rem auto;
+  gap: 0.35rem;
+  align-items: center;
+}

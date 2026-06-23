@@ -198,38 +198,114 @@ export function findStockOption(catalog, stockCode) {
   return catalog.find((option) => option.stockCode === stockCode) ?? null
 }
 
+export function createEmptyStockAllocation() {
+  return {
+    id: `ALLOC-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    stockCode: '',
+    stockForm: '',
+    quantityKg: '',
+  }
+}
+
+export function sumStockAllocationKg(allocations) {
+  return Number(
+    (allocations ?? []).reduce((sum, allocation) => sum + (Number(allocation.quantityKg) || 0), 0).toFixed(2),
+  )
+}
+
+export function normalizeItemStockAllocations(item) {
+  if (Array.isArray(item.stockAllocations) && item.stockAllocations.length > 0) {
+    return item.stockAllocations
+      .map((allocation) => ({
+        stockCode: String(allocation.stockCode ?? '').trim(),
+        stockForm: allocation.stockForm ?? '',
+        quantityKg: Number(allocation.quantityKg),
+      }))
+      .filter((allocation) => allocation.stockCode && allocation.quantityKg > 0)
+  }
+  const stockCode = String(item.stockCode ?? '').trim()
+  if (!stockCode) {
+    return []
+  }
+  return [
+    {
+      stockCode,
+      stockForm: item.stockForm ?? '',
+      quantityKg: Number(item.quantityKg),
+    },
+  ]
+}
+
 export function validateInvoiceStockLines(items, catalog) {
   const errors = []
+  const usageByStockCode = {}
+
   for (const item of items) {
     if (!productRequiresStock(item.product)) {
       continue
     }
-    const stockCode = String(item.stockCode ?? '').trim()
-    if (!stockCode) {
+    const allocations = Array.isArray(item.stockAllocations)
+      ? item.stockAllocations
+          .map((allocation) => ({
+            stockCode: String(allocation.stockCode ?? '').trim(),
+            stockForm: allocation.stockForm ?? '',
+            quantityKg: Number(allocation.quantityKg),
+          }))
+          .filter((allocation) => allocation.stockCode || allocation.quantityKg > 0)
+      : normalizeItemStockAllocations(item)
+
+    if (allocations.length === 0) {
       errors.push(
-        `${item.product}: select the stock code to ship for this line (custom items do not need stock).`,
+        `${item.product}: add one or more stock sources for this line (custom items do not need stock).`,
       )
       continue
     }
+
+    const lineQuantityKg = Number(item.quantityKg)
+    const allocatedKg = sumStockAllocationKg(allocations)
+    if (!Number.isNaN(lineQuantityKg) && lineQuantityKg > 0 && Math.abs(allocatedKg - lineQuantityKg) > 0.05) {
+      errors.push(
+        `${item.product}: stock sources total ${allocatedKg} kg but the line quantity is ${lineQuantityKg} kg.`,
+      )
+    }
+
+    for (const allocation of allocations) {
+      const stockCode = String(allocation.stockCode ?? '').trim()
+      const quantityKg = Number(allocation.quantityKg)
+      if (!stockCode) {
+        errors.push(`${item.product}: each stock source needs a stock code selected.`)
+        continue
+      }
+      if (Number.isNaN(quantityKg) || quantityKg <= 0) {
+        errors.push(`${item.product} (${stockCode}): enter a quantity greater than zero for each stock source.`)
+        continue
+      }
+      const option = findStockOption(catalog, stockCode)
+      if (!option) {
+        errors.push(`${item.product}: stock code ${stockCode} is no longer available.`)
+        continue
+      }
+      if (!stockOptionMatchesProduct(option, item.product)) {
+        errors.push(`${item.product}: stock code ${stockCode} does not match this product.`)
+        continue
+      }
+      usageByStockCode[stockCode] = Number(((usageByStockCode[stockCode] ?? 0) + quantityKg).toFixed(2))
+    }
+  }
+
+  for (const [stockCode, usedKg] of Object.entries(usageByStockCode)) {
     const option = findStockOption(catalog, stockCode)
     if (!option) {
-      errors.push(`${item.product}: stock code ${stockCode} is no longer available.`)
+      errors.push(`Stock code ${stockCode} is no longer available.`)
       continue
     }
-    if (!stockOptionMatchesProduct(option, item.product)) {
-      errors.push(`${item.product}: stock code ${stockCode} does not match this product.`)
-      continue
-    }
-    const quantityKg = Number(item.quantityKg)
-    if (Number.isNaN(quantityKg) || quantityKg <= 0) {
-      continue
-    }
-    if (quantityKg > option.totalKg + 0.05) {
+    if (usedKg > option.totalKg + 0.05) {
       errors.push(
-        `${item.product} (${stockCode}): requested ${quantityKg} kg but only ${option.totalKg} kg is available.`,
+        `${stockCode}: total allocated ${usedKg} kg exceeds ${option.totalKg} kg available.`,
       )
     }
   }
+
   return errors
 }
 
@@ -301,51 +377,61 @@ export function applyInvoiceFinalizeStockReduction({
     if (!productRequiresStock(item.product)) {
       continue
     }
-    const stockCode = String(item.stockCode ?? '').trim()
-    const stockForm = item.stockForm
-    const quantityKg = Number(item.quantityKg)
-    if (!stockCode || !stockForm || Number.isNaN(quantityKg) || quantityKg <= 0) {
+    const allocations = normalizeItemStockAllocations(item)
+    if (allocations.length === 0) {
       return {
         ok: false,
-        message: `Line ${item.product} is missing a valid stock allocation.`,
+        message: `Line ${item.product} is missing stock allocation.`,
       }
     }
 
-    if (stockForm === 'Loose') {
-      nextInvoiceStockIssues.push({
-        id: `INV-STK-${document.id}-${Date.now()}-${nextInvoiceStockIssues.length + 1}`,
-        invoiceId: document.id,
-        invoiceDocumentNumber: document.documentNumber,
-        stockCode,
-        stockForm: 'Loose',
-        quantityKg,
-        batchNumber: stockCode.split('-').slice(0, 2).join('-'),
-        date: document.invoiceDate,
-      })
-      continue
-    }
-
-    if (stockForm === 'Baled') {
-      const result = consumeBaledStock(nextBalingRecords, stockCode, quantityKg)
-      if (!result.ok) {
-        return { ok: false, message: result.message }
+    for (const allocation of allocations) {
+      const stockCode = allocation.stockCode
+      const stockForm = allocation.stockForm
+      const quantityKg = Number(allocation.quantityKg)
+      if (!stockCode || !stockForm || Number.isNaN(quantityKg) || quantityKg <= 0) {
+        return {
+          ok: false,
+          message: `Line ${item.product} has an invalid stock allocation.`,
+        }
       }
-      nextBalingRecords = result.balingRecords
-      continue
-    }
 
-    if (stockForm === 'Silage') {
-      const result = consumeSilageStock(nextSilageRecords, stockCode, quantityKg)
-      if (!result.ok) {
-        return { ok: false, message: result.message }
+      if (stockForm === 'Loose') {
+        nextInvoiceStockIssues.push({
+          id: `INV-STK-${document.id}-${Date.now()}-${nextInvoiceStockIssues.length + 1}`,
+          invoiceId: document.id,
+          invoiceDocumentNumber: document.documentNumber,
+          stockCode,
+          stockForm: 'Loose',
+          quantityKg,
+          batchNumber: stockCode.split('-').slice(0, 2).join('-'),
+          date: document.invoiceDate,
+        })
+        continue
       }
-      nextSilageRecords = result.silageRecords
-      continue
-    }
 
-    return {
-      ok: false,
-      message: `Unsupported stock form "${stockForm}" on line ${item.product}.`,
+      if (stockForm === 'Baled') {
+        const result = consumeBaledStock(nextBalingRecords, stockCode, quantityKg)
+        if (!result.ok) {
+          return { ok: false, message: result.message }
+        }
+        nextBalingRecords = result.balingRecords
+        continue
+      }
+
+      if (stockForm === 'Silage') {
+        const result = consumeSilageStock(nextSilageRecords, stockCode, quantityKg)
+        if (!result.ok) {
+          return { ok: false, message: result.message }
+        }
+        nextSilageRecords = result.silageRecords
+        continue
+      }
+
+      return {
+        ok: false,
+        message: `Unsupported stock form "${stockForm}" on line ${item.product}.`,
+      }
     }
   }
 

@@ -57,9 +57,12 @@ import { sanitizePersistedAppState } from './appStateSanitize.js'
 import {
   applyInvoiceFinalizeStockReduction,
   computeAbsoluteStockCatalog,
+  createEmptyStockAllocation,
   filterStockOptionsForProduct,
   findStockOption,
+  normalizeItemStockAllocations,
   productRequiresStock,
+  sumStockAllocationKg,
   validateInvoiceStockLines,
 } from './invoiceStock.js'
 import {
@@ -782,6 +785,7 @@ function getInvoiceDocumentStatusLabel(document) {
 function mapDocumentItemsToLineItems(items) {
   return items.map((item, index) => {
     const product = item.product === 'SLG' ? 'SLG35' : item.product
+    const savedAllocations = normalizeItemStockAllocations(item)
     return {
       id: `LINE-${Date.now()}-${index + 1}`,
       product,
@@ -789,8 +793,17 @@ function mapDocumentItemsToLineItems(items) {
       quantityKg: String(item.quantityKg),
       rate: String(item.rate),
       vatEnabled: Boolean(item.vatEnabled),
-      stockCode: item.stockCode ?? '',
-      stockForm: item.stockForm ?? '',
+      stockAllocations:
+        savedAllocations.length > 0
+          ? savedAllocations.map((allocation, allocationIndex) => ({
+              id: `ALLOC-${Date.now()}-${index + 1}-${allocationIndex + 1}`,
+              stockCode: allocation.stockCode,
+              stockForm: allocation.stockForm ?? '',
+              quantityKg: String(allocation.quantityKg),
+            }))
+          : productRequiresStock(product)
+            ? [createEmptyStockAllocation()]
+            : [],
     }
   })
 }
@@ -1324,8 +1337,7 @@ function InvoicingPage({
           quantityKg: '',
           rate: '',
           vatEnabled: false,
-          stockCode: '',
-          stockForm: '',
+          stockAllocations: [createEmptyStockAllocation()],
         },
       ])
     }
@@ -1369,8 +1381,7 @@ function InvoicingPage({
         quantityKg: '',
         rate: '',
         vatEnabled: false,
-        stockCode: '',
-        stockForm: '',
+        stockAllocations: [createEmptyStockAllocation()],
       },
     ])
   }
@@ -1389,18 +1400,83 @@ function InvoicingPage({
           return { ...item, customDescription: String(value).slice(0, CUSTOM_INVOICE_DESCRIPTION_LIMIT) }
         }
         if (field === 'product') {
-          return { ...item, product: value, stockCode: '', stockForm: '' }
-        }
-        if (field === 'stockCode') {
-          const option = findStockOption(invoiceStockCatalog, value)
           return {
             ...item,
-            stockCode: value,
-            stockForm: option?.stockForm ?? '',
+            product: value,
+            stockAllocations: productRequiresStock(value) ? [createEmptyStockAllocation()] : [],
           }
         }
         return { ...item, [field]: value }
       }),
+    )
+  }
+
+  function handleStockAllocationChange(lineId, allocationId, field, value) {
+    setLineItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== lineId) {
+          return item
+        }
+        return {
+          ...item,
+          stockAllocations: (item.stockAllocations ?? []).map((allocation) => {
+            if (allocation.id !== allocationId) {
+              return allocation
+            }
+            if (field === 'stockCode') {
+              const option = findStockOption(invoiceStockCatalog, value)
+              return {
+                ...allocation,
+                stockCode: value,
+                stockForm: option?.stockForm ?? '',
+              }
+            }
+            return { ...allocation, [field]: value }
+          }),
+        }
+      }),
+    )
+  }
+
+  function handleAddStockAllocation(lineId) {
+    setLineItems((prev) =>
+      prev.map((item) =>
+        item.id === lineId
+          ? {
+              ...item,
+              stockAllocations: [...(item.stockAllocations ?? []), createEmptyStockAllocation()],
+            }
+          : item,
+      ),
+    )
+  }
+
+  function handleRemoveStockAllocation(lineId, allocationId) {
+    setLineItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== lineId) {
+          return item
+        }
+        const nextAllocations = (item.stockAllocations ?? []).filter(
+          (allocation) => allocation.id !== allocationId,
+        )
+        return {
+          ...item,
+          stockAllocations:
+            nextAllocations.length > 0 ? nextAllocations : [createEmptyStockAllocation()],
+        }
+      }),
+    )
+  }
+
+  function getStockOptionsForAllocation(product, allocations, allocationId) {
+    const usedCodes = new Set(
+      (allocations ?? [])
+        .filter((allocation) => allocation.id !== allocationId && allocation.stockCode)
+        .map((allocation) => allocation.stockCode),
+    )
+    return filterStockOptionsForProduct(product, invoiceStockCatalog).filter(
+      (option) => !usedCodes.has(option.stockCode),
     )
   }
 
@@ -1463,8 +1539,19 @@ function InvoicingPage({
         subtotal: item.subtotal,
         vatAmount: item.vatAmount,
         amount: item.total,
-        stockCode: productRequiresStock(item.product) ? String(item.stockCode ?? '').trim() : null,
-        stockForm: productRequiresStock(item.product) ? String(item.stockForm ?? '').trim() : null,
+        stockAllocations: productRequiresStock(item.product)
+          ? (item.stockAllocations ?? [])
+              .filter(
+                (allocation) =>
+                  String(allocation.stockCode ?? '').trim() &&
+                  Number(allocation.quantityKg) > 0,
+              )
+              .map((allocation) => ({
+                stockCode: String(allocation.stockCode).trim(),
+                stockForm: allocation.stockForm,
+                quantityKg: Number(Number(allocation.quantityKg).toFixed(2)),
+              }))
+          : null,
       })),
       hsCode: hsCode.trim(),
       paymentTerms: paymentTerms.trim(),
@@ -1504,20 +1591,11 @@ function InvoicingPage({
     const stockValidationErrors = validateInvoiceStockLines(
       computedLineItems.map((item) => ({
         product: item.product,
-        stockCode: item.stockCode,
         quantityKg: Number(item.quantityKg),
+        stockAllocations: item.stockAllocations,
       })),
       invoiceStockCatalog,
     )
-    const missingStockLines = computedLineItems.filter(
-      (item) => productRequiresStock(item.product) && !String(item.stockCode ?? '').trim(),
-    )
-    if (missingStockLines.length > 0) {
-      setFormStatus(
-        'Select stock for each product line. Custom (CUS) lines do not require stock allocation.',
-      )
-      return
-    }
     if (stockValidationErrors.length > 0) {
       setFormStatus(stockValidationErrors[0])
       return
@@ -1879,9 +1957,9 @@ function InvoicingPage({
         {formStatus ? <div className="placeholder">{formStatus}</div> : null}
         {!editingDocumentId ? (
           <div className="placeholder">
-            New documents are saved as drafts. Link each product line to a stock code; custom (CUS)
-            lines do not need stock. Stock is only reduced when an invoice is finalized — proforma
-            drafts do not affect inventory.
+            New documents are saved as drafts. For each product line, split the quantity across one
+            or more stock codes (for example two SLG25 batches or bag sizes on a single line). Custom
+            (CUS) lines do not need stock. Stock is only reduced when an invoice is finalized.
           </div>
         ) : null}
         <button type="button" onClick={handleAddProductLine}>
@@ -1903,7 +1981,13 @@ function InvoicingPage({
             <tbody>
               {computedLineItems.map((item) => {
                 const stockOptions = filterStockOptionsForProduct(item.product, invoiceStockCatalog)
-                const selectedStock = findStockOption(invoiceStockCatalog, item.stockCode)
+                const allocatedKg = sumStockAllocationKg(item.stockAllocations)
+                const lineQuantityKg = Number(item.quantityKg)
+                const stockTotalMismatch =
+                  productRequiresStock(item.product) &&
+                  !Number.isNaN(lineQuantityKg) &&
+                  lineQuantityKg > 0 &&
+                  Math.abs(allocatedKg - lineQuantityKg) > 0.05
                 return (
                 <tr key={item.id}>
                   <td>
@@ -1936,30 +2020,102 @@ function InvoicingPage({
                   </td>
                   <td>
                     {productRequiresStock(item.product) ? (
-                      <>
-                        <select
-                          value={item.stockCode}
-                          onChange={(event) =>
-                            handleLineItemChange(item.id, 'stockCode', event.target.value)
+                      <div className="stock-allocation-list">
+                        {(item.stockAllocations ?? []).map((allocation) => {
+                          const allocationOptions = getStockOptionsForAllocation(
+                            item.product,
+                            item.stockAllocations,
+                            allocation.id,
+                          )
+                          const selectedStock = findStockOption(
+                            invoiceStockCatalog,
+                            allocation.stockCode,
+                          )
+                          return (
+                            <div key={allocation.id} className="stock-allocation-row">
+                              <select
+                                value={allocation.stockCode}
+                                onChange={(event) =>
+                                  handleStockAllocationChange(
+                                    item.id,
+                                    allocation.id,
+                                    'stockCode',
+                                    event.target.value,
+                                  )
+                                }
+                              >
+                                <option value="">Select stock code</option>
+                                {allocation.stockCode &&
+                                !allocationOptions.some(
+                                  (option) => option.stockCode === allocation.stockCode,
+                                ) &&
+                                selectedStock ? (
+                                  <option value={allocation.stockCode}>
+                                    {allocation.stockCode} ({selectedStock.totalKg} kg)
+                                  </option>
+                                ) : null}
+                                {allocationOptions.map((option) => (
+                                  <option
+                                    key={`${option.stockForm}-${option.stockCode}`}
+                                    value={option.stockCode}
+                                  >
+                                    {option.stockCode} ({option.totalKg} kg
+                                    {option.quantityLabel != null
+                                      ? `, ${option.quantityLabel} units`
+                                      : ''}
+                                    )
+                                  </option>
+                                ))}
+                              </select>
+                              <input
+                                type="number"
+                                min="0.1"
+                                step="0.1"
+                                className="table-inline-input"
+                                value={allocation.quantityKg}
+                                onChange={(event) =>
+                                  handleStockAllocationChange(
+                                    item.id,
+                                    allocation.id,
+                                    'quantityKg',
+                                    event.target.value,
+                                  )
+                                }
+                                placeholder="kg from this stock"
+                                aria-label={`Quantity from ${allocation.stockCode || 'stock'}`}
+                              />
+                              <button
+                                type="button"
+                                className="secondary-button"
+                                onClick={() => handleRemoveStockAllocation(item.id, allocation.id)}
+                                disabled={(item.stockAllocations ?? []).length <= 1}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          )
+                        })}
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => handleAddStockAllocation(item.id)}
+                          disabled={
+                            (item.stockAllocations ?? []).length >= stockOptions.length ||
+                            stockOptions.length === 0
                           }
                         >
-                          <option value="">Select stock code</option>
-                          {stockOptions.map((option) => (
-                            <option key={`${option.stockForm}-${option.stockCode}`} value={option.stockCode}>
-                              {option.stockCode} ({option.totalKg} kg
-                              {option.quantityLabel != null ? `, ${option.quantityLabel} units` : ''})
-                            </option>
-                          ))}
-                        </select>
-                        {item.stockCode && selectedStock ? (
-                          <span className="inline-hint">
-                            {selectedStock.stockForm} stock · {selectedStock.totalKg} kg available
-                          </span>
-                        ) : null}
-                        {productRequiresStock(item.product) && stockOptions.length === 0 ? (
+                          Add stock source
+                        </button>
+                        <span className={`inline-hint${stockTotalMismatch ? ' staffing-warning' : ''}`}>
+                          Allocated {allocatedKg} kg
+                          {!Number.isNaN(lineQuantityKg) && lineQuantityKg > 0
+                            ? ` of ${lineQuantityKg} kg on this line`
+                            : ''}
+                        </span>
+                        {stockOptions.length === 0 ? (
                           <span className="inline-hint">No matching stock available for this product.</span>
                         ) : null}
-                      </>
+                      </div>
                     ) : (
                       <span className="inline-hint">Not required for custom lines</span>
                     )}
