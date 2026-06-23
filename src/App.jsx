@@ -28,7 +28,7 @@ import {
   isPayrollSectionApproved,
 } from './payroll.js'
 import { formatKenyaDateTime, toKenyaDateString } from './kenyaTime.js'
-import { drawPdfField as drawInvoicePdfField, embedLogoInPdf, loadLogoImage, PDF_PAGE_FORMAT, PDF_PAGE_WIDTH_MM } from './documentPdfHeader.js'
+import { drawMananasiCompanyHeader, drawPdfField as drawInvoicePdfField, PDF_PAGE_FORMAT } from './documentPdfHeader.js'
 import logoStandard from '../LogoStandard.png'
 import { mananasiStaffEmployees } from './mananasiStaffEmployees.js'
 import {
@@ -848,8 +848,6 @@ function InvoiceBankDetailsBlock({ currency }) {
   )
 }
 
-const INVOICE_PDF_MARGIN_MM = 25.4
-
 function buildBarcodeBits(value) {
   const text = String(value ?? '')
   let bits = '1010'
@@ -1630,48 +1628,13 @@ function InvoicingPage({
       return
     }
     const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: PDF_PAGE_FORMAT })
-    const pageWidth = PDF_PAGE_WIDTH_MM
-    const left = INVOICE_PDF_MARGIN_MM
-    const top = INVOICE_PDF_MARGIN_MM
-    const contentWidth = pageWidth - INVOICE_PDF_MARGIN_MM * 2
-    const right = left + contentWidth
+    const { left, top, right, contentWidth } = await drawMananasiCompanyHeader(pdf)
     const labelX = left
     const valueX = left + 36
     const valueWidth = contentWidth - 36
     const metaLabelX = left + 92
     const metaValueX = left + 122
     const lineHeight = 5
-
-    try {
-      const logoImage = await loadLogoImage(logoStandard)
-      embedLogoInPdf(pdf, logoImage, { x: right - 81, y: top, width: 81, height: 51 })
-    } catch (error) {
-      // Keep PDF generation working even if logo loading fails.
-      console.error('Unable to load invoice logo for PDF export:', error)
-    }
-
-    pdf.setTextColor(0, 0, 0)
-    pdf.setFont('helvetica', 'bold')
-    pdf.setFontSize(12.5)
-    pdf.text('Mananasi Fibre Limited', left, top + 8)
-
-    pdf.setFontSize(9)
-    pdf.text('Address:', left, top + 15)
-    pdf.setFont('helvetica', 'normal')
-    pdf.text('P.O Box 14483', left + 28, top + 15)
-    pdf.text('Nairobi 00800', left + 28, top + 19.5)
-    pdf.text('Kenya', left + 28, top + 24)
-
-    pdf.setFont('helvetica', 'bold')
-    pdf.text('KRA PIN', left, top + 31)
-    pdf.setFont('helvetica', 'normal')
-    pdf.text('P052141076P', left + 28, top + 31)
-
-    pdf.setFont('helvetica', 'bold')
-    pdf.text('Contact', left, top + 38)
-    pdf.setFont('helvetica', 'normal')
-    pdf.text('info@mananasi-fibre.com', left + 28, top + 38)
-    pdf.text('+254717903799', left + 28, top + 42.5)
 
     const label = selectedDocument.documentType === 'proforma' ? 'Proforma number:' : 'Invoice number:'
     const invoiceToLabel =

@@ -1,11 +1,14 @@
+import logoPdfAsset from '../LogoPdf.jpg'
+
 export const PDF_MARGIN_MM = 25.4
 
 export const PDF_PAGE_FORMAT = 'a4'
 export const PDF_PAGE_WIDTH_MM = 210
 export const PDF_PAGE_HEIGHT_MM = 297
 
-/** Enough for ~81 mm logo width at ~150 DPI; source asset is 4500+ px and must be downscaled. */
+/** PDFs must never embed LogoStandard.png (4500+ px); this asset is pre-sized for print. */
 const PDF_LOGO_EXPORT_MAX_PX = 480
+const PDF_LOGO_JPEG_QUALITY = 0.9
 
 export function formatDisplayDate(isoDate) {
   if (!isoDate) {
@@ -16,6 +19,19 @@ export function formatDisplayDate(isoDate) {
     return String(isoDate)
   }
   return `${day}/${month}/${year}`
+}
+
+function dataUrlToBytes(dataUrl) {
+  const base64 = String(dataUrl).split(',')[1]
+  if (!base64) {
+    return null
+  }
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return bytes
 }
 
 /** Same logo treatment as invoice PDFs, exported at print resolution (not full source pixels). */
@@ -146,15 +162,28 @@ export function prepareLogoForPdf(sourceImage, options = {}) {
   exportCtx.fillStyle = '#ffffff'
   exportCtx.fillRect(0, 0, width, height)
   exportCtx.drawImage(canvas, 0, 0)
+  const dataUrl = exportCanvas.toDataURL('image/jpeg', PDF_LOGO_JPEG_QUALITY)
+  if (!dataUrl.startsWith('data:image/jpeg')) {
+    return null
+  }
   return {
-    dataUrl: exportCanvas.toDataURL('image/jpeg', 0.9),
+    dataUrl,
+    bytes: dataUrlToBytes(dataUrl),
     format: 'JPEG',
+    width,
+    height,
   }
 }
 
-export async function loadLogoImage(logoStandard) {
-  const response = await fetch(logoStandard)
+export async function loadLogoImage(logoAsset = logoPdfAsset) {
+  const response = await fetch(logoAsset)
+  if (!response.ok) {
+    throw new Error(`Unable to fetch PDF logo asset (${response.status})`)
+  }
   const blob = await response.blob()
+  if (blob.type && !blob.type.includes('jpeg') && !blob.type.includes('jpg')) {
+    throw new Error(`PDF logo asset must be JPEG, received ${blob.type || 'unknown type'}`)
+  }
   const logoDataUrl = await new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onloadend = () => resolve(reader.result)
@@ -171,10 +200,10 @@ export async function loadLogoImage(logoStandard) {
 
 export function embedLogoInPdf(pdf, logoImage, logoBox) {
   const prepared = prepareLogoForPdf(logoImage)
-  if (!prepared) {
+  if (!prepared?.bytes) {
     return
   }
-  const logoAspectRatio = logoImage.naturalWidth / logoImage.naturalHeight
+  const logoAspectRatio = prepared.width / prepared.height
   let logoWidth = logoBox.width
   let logoHeight = logoWidth / logoAspectRatio
   if (logoHeight > logoBox.height) {
@@ -183,7 +212,16 @@ export function embedLogoInPdf(pdf, logoImage, logoBox) {
   }
   const logoX = logoBox.x + (logoBox.width - logoWidth) / 2
   const logoY = logoBox.y + (logoBox.height - logoHeight) / 2
-  pdf.addImage(prepared.dataUrl, prepared.format, logoX, logoY, logoWidth, logoHeight)
+  pdf.addImage(
+    prepared.bytes,
+    prepared.format,
+    logoX,
+    logoY,
+    logoWidth,
+    logoHeight,
+    undefined,
+    'FAST',
+  )
 }
 
 export function drawPdfField(pdf, options) {
@@ -207,7 +245,7 @@ export function drawPdfField(pdf, options) {
   return y + Math.max(valueLines.length, 1) * lineHeight
 }
 
-export async function drawMananasiCompanyHeader(pdf, logoStandard) {
+export async function drawMananasiCompanyHeader(pdf) {
   const pageWidth = PDF_PAGE_WIDTH_MM
   const left = PDF_MARGIN_MM
   const top = PDF_MARGIN_MM
@@ -215,7 +253,7 @@ export async function drawMananasiCompanyHeader(pdf, logoStandard) {
   const right = left + contentWidth
 
   try {
-    const logoImage = await loadLogoImage(logoStandard)
+    const logoImage = await loadLogoImage()
     embedLogoInPdf(pdf, logoImage, { x: right - 81, y: top, width: 81, height: 51 })
   } catch (error) {
     console.error('Unable to load logo for PDF export:', error)

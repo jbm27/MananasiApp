@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { jsPDF } from 'jspdf'
-import logoStandard from '../LogoStandard.png'
 import { formatKenyaDateTime } from './kenyaTime.js'
 import {
   drawMananasiCompanyHeader,
@@ -61,7 +60,7 @@ function mapPoItemsToLineItems(items) {
 
 async function printPurchaseOrderPdf(purchaseOrder, supplier) {
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-  const { left, top, right, contentWidth } = await drawMananasiCompanyHeader(pdf, logoStandard)
+  const { left, top, right, contentWidth } = await drawMananasiCompanyHeader(pdf)
   const metaLabelX = left + 92
   const metaValueX = left + 122
   const labelX = left
