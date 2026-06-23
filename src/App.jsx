@@ -28,7 +28,7 @@ import {
   isPayrollSectionApproved,
 } from './payroll.js'
 import { formatKenyaDateTime, toKenyaDateString } from './kenyaTime.js'
-import { prepareLogoForPdf } from './documentPdfHeader.js'
+import { drawPdfField as drawInvoicePdfField, embedLogoInPdf, loadLogoImage, PDF_PAGE_FORMAT, PDF_PAGE_WIDTH_MM } from './documentPdfHeader.js'
 import logoStandard from '../LogoStandard.png'
 import { mananasiStaffEmployees } from './mananasiStaffEmployees.js'
 import {
@@ -850,27 +850,6 @@ function InvoiceBankDetailsBlock({ currency }) {
 
 const INVOICE_PDF_MARGIN_MM = 25.4
 
-function drawInvoicePdfField(pdf, options) {
-  const {
-    labelX,
-    valueX,
-    valueWidth,
-    y,
-    lineHeight,
-    label,
-    value,
-    labelBold = true,
-  } = options
-  const valueLines = pdf.splitTextToSize(String(value ?? ''), valueWidth)
-  pdf.setFont('helvetica', labelBold ? 'bold' : 'normal')
-  pdf.text(label, labelX, y)
-  pdf.setFont('helvetica', 'normal')
-  valueLines.forEach((line, index) => {
-    pdf.text(line, valueX, y + index * lineHeight)
-  })
-  return y + Math.max(valueLines.length, 1) * lineHeight
-}
-
 function buildBarcodeBits(value) {
   const text = String(value ?? '')
   let bits = '1010'
@@ -1650,8 +1629,8 @@ function InvoicingPage({
     if (!selectedDocument) {
       return
     }
-    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-    const pageWidth = 210
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: PDF_PAGE_FORMAT })
+    const pageWidth = PDF_PAGE_WIDTH_MM
     const left = INVOICE_PDF_MARGIN_MM
     const top = INVOICE_PDF_MARGIN_MM
     const contentWidth = pageWidth - INVOICE_PDF_MARGIN_MM * 2
@@ -1664,32 +1643,8 @@ function InvoicingPage({
     const lineHeight = 5
 
     try {
-      const response = await fetch(logoStandard)
-      const blob = await response.blob()
-      const logoDataUrl = await new Promise((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onloadend = () => resolve(reader.result)
-        reader.onerror = reject
-        reader.readAsDataURL(blob)
-      })
-      const logoImage = await new Promise((resolve, reject) => {
-        const image = new Image()
-        image.onload = () => resolve(image)
-        image.onerror = reject
-        image.src = logoDataUrl
-      })
-      const enhancedLogoDataUrl = prepareLogoForPdf(logoImage) ?? logoDataUrl
-      const logoBox = { x: right - 81, y: top, width: 81, height: 51 }
-      const logoAspectRatio = logoImage.naturalWidth / logoImage.naturalHeight
-      let logoWidth = logoBox.width
-      let logoHeight = logoWidth / logoAspectRatio
-      if (logoHeight > logoBox.height) {
-        logoHeight = logoBox.height
-        logoWidth = logoHeight * logoAspectRatio
-      }
-      const logoX = logoBox.x + (logoBox.width - logoWidth) / 2
-      const logoY = logoBox.y + (logoBox.height - logoHeight) / 2
-      pdf.addImage(enhancedLogoDataUrl, 'PNG', logoX, logoY, logoWidth, logoHeight)
+      const logoImage = await loadLogoImage(logoStandard)
+      embedLogoInPdf(pdf, logoImage, { x: right - 81, y: top, width: 81, height: 51 })
     } catch (error) {
       // Keep PDF generation working even if logo loading fails.
       console.error('Unable to load invoice logo for PDF export:', error)
