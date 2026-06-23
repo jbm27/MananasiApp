@@ -108,14 +108,61 @@ export function computePackingListTotals(items) {
   }
 }
 
-export function canConvertInvoiceToPackingList(invoice) {
+export function findPackingListForInvoice(invoice, documents) {
+  if (!invoice || invoice.documentType !== 'invoice') {
+    return null
+  }
+  const allDocuments = Array.isArray(documents) ? documents : []
+  if (invoice.convertedPackingListId) {
+    const linked = allDocuments.find(
+      (document) =>
+        document.id === invoice.convertedPackingListId && document.documentType === 'packing-list',
+    )
+    if (linked) {
+      return linked
+    }
+  }
+  return (
+    allDocuments.find(
+      (document) =>
+        document.documentType === 'packing-list' && document.sourceInvoiceId === invoice.id,
+    ) ?? null
+  )
+}
+
+/** Backfill convertedPackingListId when a packing list exists but the invoice link is missing. */
+export function withRepairedInvoicePackingListLinks(documents) {
+  const allDocuments = Array.isArray(documents) ? documents : []
+  const packingLists = allDocuments.filter((document) => document.documentType === 'packing-list')
+  let changed = false
+  const repaired = allDocuments.map((document) => {
+    if (document.documentType !== 'invoice' || document.convertedPackingListId) {
+      return document
+    }
+    const linkedPackingList = packingLists.find(
+      (packingList) => packingList.sourceInvoiceId === document.id,
+    )
+    if (!linkedPackingList) {
+      return document
+    }
+    changed = true
+    return {
+      ...document,
+      convertedPackingListId: linkedPackingList.id,
+      convertedAt: document.convertedAt ?? linkedPackingList.createdAt ?? null,
+    }
+  })
+  return changed ? repaired : allDocuments
+}
+
+export function canConvertInvoiceToPackingList(invoice, documents) {
   if (invoice?.documentType !== 'invoice') {
     return false
   }
   if (invoice?.status !== 'finalized' && invoice?.status !== 'confirmed') {
     return false
   }
-  return !invoice?.convertedPackingListId
+  return !findPackingListForInvoice(invoice, documents)
 }
 
 export function canFinalizePackingList(document) {
@@ -199,11 +246,11 @@ export function getCommercialDocumentTypeLabel(document) {
   return 'Invoice'
 }
 
-export function getCommercialDocumentStatusLabel(document) {
+export function getCommercialDocumentStatusLabel(document, documents) {
   if (document?.documentType === 'proforma' && document?.status === 'converted') {
     return 'Converted to invoice'
   }
-  if (document?.documentType === 'invoice' && document?.convertedPackingListId) {
+  if (document?.documentType === 'invoice' && findPackingListForInvoice(document, documents)) {
     if (document?.status === 'draft') {
       return 'Draft — re-finalize required'
     }

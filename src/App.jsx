@@ -37,10 +37,12 @@ import {
   canEditPackingList,
   canFinalizePackingList,
   computePackingListTotals,
+  findPackingListForInvoice,
   getCommercialDocumentStatusLabel,
   getCommercialDocumentTypeLabel,
   mapPackingListItemsToFormLines,
   validatePackingListItems,
+  withRepairedInvoicePackingListLinks,
 } from './packingList.js'
 import { printPackingListPdf } from './packingListPdf.js'
 import logoStandard from '../LogoStandard.png'
@@ -807,8 +809,8 @@ function canFinalizeInvoiceDocument(document) {
   return document?.documentType === 'invoice' && document?.status === 'draft'
 }
 
-function getInvoiceDocumentStatusLabel(document) {
-  return getCommercialDocumentStatusLabel(document)
+function getInvoiceDocumentStatusLabel(document, documents) {
+  return getCommercialDocumentStatusLabel(document, documents)
 }
 
 function mapDocumentItemsToLineItems(items) {
@@ -2418,7 +2420,7 @@ function InvoicingPage({
                     ? `${(doc.totals?.netKg ?? computePackingListTotals(doc.items).netKg).toLocaleString()} kg net`
                     : `${doc.currency} ${doc.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
                 </td>
-                <td>{getInvoiceDocumentStatusLabel(doc)}</td>
+                <td>{getInvoiceDocumentStatusLabel(doc, invoiceDocuments)}</td>
                 <td>
                   <button type="button" onClick={() => setSelectedDocumentId(doc.id)}>
                     View
@@ -2443,7 +2445,7 @@ function InvoicingPage({
                       Convert to Invoice
                     </button>
                   ) : null}
-                  {canConvertInvoiceToPackingList(doc) && !readOnly ? (
+                  {canConvertInvoiceToPackingList(doc, invoiceDocuments) && !readOnly ? (
                     <button type="button" onClick={() => handleConvertToPackingList(doc.id)}>
                       Convert to Packing List
                     </button>
@@ -2488,7 +2490,7 @@ function InvoicingPage({
                 Convert to Invoice
               </button>
             ) : null}
-            {canConvertInvoiceToPackingList(selectedDocument) && !readOnly ? (
+            {canConvertInvoiceToPackingList(selectedDocument, invoiceDocuments) && !readOnly ? (
               <button
                 type="button"
                 onClick={() => handleConvertToPackingList(selectedDocument.id)}
@@ -10198,7 +10200,7 @@ function hydrateAppState(data, setters) {
   if (Array.isArray(sanitized.balingRecords)) setters.setBalingRecords(sanitized.balingRecords)
   if (Array.isArray(sanitized.silageRecords)) setters.setSilageRecords(sanitized.silageRecords)
   if (Array.isArray(sanitized.invoiceDocuments)) {
-    setters.setInvoiceDocuments(sanitized.invoiceDocuments)
+    setters.setInvoiceDocuments(withRepairedInvoicePackingListLinks(sanitized.invoiceDocuments))
   }
   if (Array.isArray(sanitized.invoiceStockIssues)) {
     setters.setInvoiceStockIssues(sanitized.invoiceStockIssues)
@@ -10320,6 +10322,13 @@ function App() {
     })
     hydratedRef.current = true
   }, [ready, initialData, loadStatus])
+
+  useEffect(() => {
+    if (!ready || !hydratedRef.current) {
+      return
+    }
+    setInvoiceDocuments((prev) => withRepairedInvoicePackingListLinks(prev))
+  }, [ready])
 
   const persistedSnapshot = useMemo(
     () =>
@@ -11637,13 +11646,44 @@ function App() {
     if (!source || source.documentType !== 'invoice') {
       return { ok: false, message: 'Only invoices can be converted to packing lists.' }
     }
-    if (!canConvertInvoiceToPackingList(source)) {
+    const existingPackingList = findPackingListForInvoice(source, invoiceDocuments)
+    if (existingPackingList) {
+      if (!source.convertedPackingListId) {
+        setInvoiceDocuments((prev) =>
+          withRepairedInvoicePackingListLinks(prev).map((item) =>
+            item.id === documentId
+              ? {
+                  ...item,
+                  convertedPackingListId: existingPackingList.id,
+                  convertedAt: item.convertedAt ?? existingPackingList.createdAt ?? null,
+                }
+              : item,
+          ),
+        )
+      }
+      return {
+        ok: false,
+        message: `Packing list ${existingPackingList.documentNumber} already exists for invoice ${source.documentNumber}.`,
+      }
+    }
+    if (!canConvertInvoiceToPackingList(source, invoiceDocuments)) {
       return {
         ok: false,
         message: 'Only finalized invoices without an existing packing list can be converted.',
       }
     }
     const draft = buildPackingListFromInvoice(source, balingRecords)
+    const duplicateNumber = invoiceDocuments.some(
+      (document) =>
+        document.documentType === 'packing-list' &&
+        String(document.documentNumber) === String(source.documentNumber),
+    )
+    if (duplicateNumber) {
+      return {
+        ok: false,
+        message: `Packing list ${source.documentNumber} already exists.`,
+      }
+    }
     const converted = {
       id: `PL-${Date.now()}`,
       ...draft,
