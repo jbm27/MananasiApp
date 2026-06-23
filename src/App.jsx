@@ -1306,6 +1306,7 @@ function InvoicingPage({
   const [hsCode, setHsCode] = useState('53050090')
   const [paymentTerms, setPaymentTerms] = useState('30% deposit, balance upon arrival at port')
   const [shippingTerms, setShippingTerms] = useState('CIF Nansha')
+  const [notes, setNotes] = useState('')
   const [selectedDocumentId, setSelectedDocumentId] = useState('')
   const [editingDocumentId, setEditingDocumentId] = useState('')
   const [formStatus, setFormStatus] = useState('')
@@ -1495,6 +1496,7 @@ function InvoicingPage({
     setHsCode('53050090')
     setPaymentTerms('30% deposit, balance upon arrival at port')
     setShippingTerms('CIF Nansha')
+    setNotes('')
     setFormStatus('')
   }
 
@@ -1523,6 +1525,7 @@ function InvoicingPage({
     setHsCode(document.hsCode)
     setPaymentTerms(document.paymentTerms)
     setShippingTerms(document.shippingTerms)
+    setNotes(document.notes ?? '')
     setFormStatus(`Editing ${document.documentType === 'proforma' ? 'proforma' : 'invoice'} ${document.documentNumber}.`)
     setSelectedDocumentId(document.id)
   }
@@ -1564,6 +1567,7 @@ function InvoicingPage({
       hsCode: hsCode.trim(),
       paymentTerms: paymentTerms.trim(),
       shippingTerms: shippingTerms.trim(),
+      notes: notes.trim(),
     }
   }
 
@@ -1796,6 +1800,18 @@ function InvoicingPage({
       label: 'Shipping:',
       value: selectedDocument.shippingTerms,
     })
+    if (String(selectedDocument.notes ?? '').trim()) {
+      footerY += 3
+      footerY = drawInvoicePdfField(pdf, {
+        labelX,
+        valueX,
+        valueWidth,
+        y: footerY,
+        lineHeight,
+        label: 'Notes:',
+        value: selectedDocument.notes,
+      })
+    }
     footerY += 3
     pdf.setFont('helvetica', 'bold')
     pdf.text('Bank details:', labelX, footerY)
@@ -1891,6 +1907,15 @@ function InvoicingPage({
           <label>
             Shipping
             <input value={shippingTerms} onChange={(event) => setShippingTerms(event.target.value)} />
+          </label>
+          <label className="full-width">
+            Notes
+            <textarea
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              rows={4}
+              placeholder="Optional notes to appear on the document..."
+            />
           </label>
           <button type="submit">
             {editingDocumentId
@@ -2299,6 +2324,12 @@ function InvoicingPage({
               <p><strong>HS Code</strong> {selectedDocument.hsCode}</p>
               <p><strong>Payment terms:</strong> {selectedDocument.paymentTerms}</p>
               <p><strong>Shipping:</strong> {selectedDocument.shippingTerms}</p>
+              {String(selectedDocument.notes ?? '').trim() ? (
+                <div className="invoice-notes">
+                  <p><strong>Notes:</strong></p>
+                  <p>{selectedDocument.notes}</p>
+                </div>
+              ) : null}
               <InvoiceBankDetailsBlock currency={selectedDocument.currency} />
               <p><strong>Authorised by:</strong> James Boyd-Moss (Managing Director)</p>
             </section>

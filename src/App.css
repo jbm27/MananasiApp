@@ -449,6 +449,11 @@ th {
   margin-top: 1rem;
 }
 
+.invoice-notes p {
+  margin: 0.15rem 0;
+  white-space: pre-wrap;
+}
+
 .login-layout {
   min-height: 100vh;
   display: flex;
