@@ -200,6 +200,7 @@ const DATA_ENTRY_PERMISSION_IDS = [
   'baling-entry',
   'silage-entry',
   'stock-delete',
+  'invoice-edit-finalized',
   'employee-role-seasonal',
   'employee-role-all',
   'employee-wage-rates',
@@ -220,6 +221,7 @@ const DATA_ENTRY_PERMISSION_LABELS = {
   'baling-entry': 'Baling creation',
   'silage-entry': 'Silage bag creation',
   'stock-delete': 'Delete stock records',
+  'invoice-edit-finalized': 'Edit finalized invoices',
   'employee-role-seasonal': 'Edit roles for seasonal and supplementary employees',
   'employee-role-all': 'Edit roles for all employees (including permanent)',
   'employee-wage-rates': 'Edit daily wage rate settings',
@@ -228,10 +230,10 @@ const DATA_ENTRY_PERMISSION_LABELS = {
   'procurement-approval-limits': 'Set purchase order approval limits for sign-in employees',
 }
 
-/** Policy defaults from organisation roles; James (1019) receives stock-delete separately. */
-const RESTRICTED_DATA_ENTRY_PERMISSIONS = ['stock-delete']
+/** Policy defaults from organisation roles; James (1019) receives these separately. */
+const RESTRICTED_DATA_ENTRY_PERMISSIONS = ['stock-delete', 'invoice-edit-finalized']
 const DEFAULT_EXCLUSIVE_DATA_ENTRY_PERMISSIONS_BY_EMPLOYEE_ID = {
-  '1019': ['stock-delete'],
+  '1019': ['stock-delete', 'invoice-edit-finalized'],
 }
 const DEFAULT_PAGE_ACCESS_BY_EMPLOYEE_ID = {
   '1002': ['dashboard', 'employees', 'payroll'],
@@ -514,6 +516,15 @@ function canDeleteStock(currentUser, overrides, employees) {
   return getEffectiveDataEntryPermissions(currentUser.id, overrides, employees).has('stock-delete')
 }
 
+function canEditFinalizedInvoice(currentUser, overrides, employees) {
+  if (!currentUser || !canMutateAppData(currentUser)) {
+    return false
+  }
+  return getEffectiveDataEntryPermissions(currentUser.id, overrides, employees).has(
+    'invoice-edit-finalized',
+  )
+}
+
 function mergeEffectivePagePermissions(employeeIds, overrides, employees) {
   const merged = new Set()
   for (const employeeId of employeeIds) {
@@ -755,11 +766,26 @@ function getInvoiceDescriptionFromProductCode(productCode) {
 
 const FIRST_INVOICE_NUMBER = 1096
 
-function isInvoiceDocumentEditable(document) {
+function canEditInvoiceDocument(document, options = {}) {
+  const { canEditFinalized = false } = options
   if (document?.documentType === 'proforma') {
     return document?.status !== 'converted'
   }
-  return document?.status === 'draft'
+  if (document?.status === 'draft') {
+    return true
+  }
+  if (
+    canEditFinalized &&
+    document?.documentType === 'invoice' &&
+    (document?.status === 'finalized' || document?.status === 'confirmed')
+  ) {
+    return true
+  }
+  return false
+}
+
+function isInvoiceDocumentEditable(document) {
+  return canEditInvoiceDocument(document)
 }
 
 function canFinalizeInvoiceDocument(document) {
@@ -1267,6 +1293,7 @@ function InvoicingPage({
   onFinalizeDocument,
   onConvertToInvoice,
   readOnly = false,
+  canEditFinalizedInvoices = false,
 }) {
   const [documentType, setDocumentType] = useState('proforma')
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10))
@@ -1471,12 +1498,16 @@ function InvoicingPage({
     setFormStatus('')
   }
 
+  function documentIsEditable(document) {
+    return canEditInvoiceDocument(document, { canEditFinalized: canEditFinalizedInvoices })
+  }
+
   function startEditingDocument(document) {
     if (readOnly) {
       return
     }
-    if (!isInvoiceDocumentEditable(document)) {
-      setFormStatus('Only draft documents can be edited.')
+    if (!documentIsEditable(document)) {
+      setFormStatus('This document cannot be edited.')
       return
     }
     const matchedCustomer =
@@ -1580,7 +1611,7 @@ function InvoicingPage({
     if (editingDocumentId) {
       const updated = onUpdateDocument(editingDocumentId, buildDocumentInput())
       if (!updated) {
-        setFormStatus('This document could not be updated. Only draft documents can be edited.')
+        setFormStatus('This document could not be updated.')
         return
       }
       setSelectedDocumentId(updated.id)
@@ -2141,7 +2172,7 @@ function InvoicingPage({
                   <button type="button" onClick={() => setSelectedDocumentId(doc.id)}>
                     View
                   </button>
-                  {isInvoiceDocumentEditable(doc) && !readOnly ? (
+                  {documentIsEditable(doc) && !readOnly ? (
                     <button type="button" onClick={() => startEditingDocument(doc)}>
                       Edit
                     </button>
@@ -2174,7 +2205,7 @@ function InvoicingPage({
             <button type="button" onClick={handlePrintDocumentPdf}>
               Print Document
             </button>
-            {isInvoiceDocumentEditable(selectedDocument) && !readOnly ? (
+            {documentIsEditable(selectedDocument) && !readOnly ? (
               <button type="button" onClick={() => startEditingDocument(selectedDocument)}>
                 Edit
               </button>
@@ -10006,6 +10037,11 @@ function App() {
     [permissionEmployeeIds, pagePermissionOverrides, employees],
   )
   const readOnlyMode = !canMutateAppData(currentUser)
+  const canEditFinalizedInvoices = canEditFinalizedInvoice(
+    currentUser,
+    dataEntryPermissionOverrides,
+    employees,
+  )
   const currentUserDataEntryPermissions = useMemo(
     () =>
       mergeEffectiveDataEntryPermissions(
@@ -11045,13 +11081,18 @@ function App() {
     if (!canMutateAppData(currentUser)) {
       return null
     }
+    const canEditFinalized = canEditFinalizedInvoice(
+      currentUser,
+      dataEntryPermissionOverrides,
+      employees,
+    )
     let updatedDocument = null
     setInvoiceDocuments((prev) =>
       prev.map((document) => {
         if (document.id !== documentId) {
           return document
         }
-        if (!isInvoiceDocumentEditable(document)) {
+        if (!canEditInvoiceDocument(document, { canEditFinalized })) {
           return document
         }
         updatedDocument = {
@@ -11710,6 +11751,7 @@ function App() {
                 onFinalizeDocument={handleFinalizeInvoiceDocument}
                 onConvertToInvoice={handleConvertProformaToInvoice}
                 readOnly={readOnlyMode}
+                canEditFinalizedInvoices={canEditFinalizedInvoices}
               />
             }
           />
