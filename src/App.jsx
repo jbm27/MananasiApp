@@ -1126,6 +1126,7 @@ function CustomersPage({ customers, onAddCustomer, readOnly = false }) {
   const [phone, setPhone] = useState('')
   const [companyRegistration, setCompanyRegistration] = useState('')
   const [submitStatus, setSubmitStatus] = useState('')
+  const [customerFormOpen, setCustomerFormOpen] = useState(false)
 
   function handleSubmit(event) {
     event.preventDefault()
@@ -1181,7 +1182,11 @@ function CustomersPage({ customers, onAddCustomer, readOnly = false }) {
       {readOnly ? (
         <p className="inline-hint">Director view: customer records are read-only.</p>
       ) : (
-      <CollapsibleSection title="Add Customer" isOpen onToggle={() => {}}>
+      <CollapsibleSection
+        title="Add Customer"
+        isOpen={customerFormOpen}
+        onToggle={() => setCustomerFormOpen((open) => !open)}
+      >
         <form className="stacked-form" onSubmit={handleSubmit}>
           <label>
             Customer Name (required)
@@ -1320,6 +1325,8 @@ function InvoicingPage({
   const [selectedDocumentId, setSelectedDocumentId] = useState('')
   const [editingDocumentId, setEditingDocumentId] = useState('')
   const [formStatus, setFormStatus] = useState('')
+  const [invoiceFormOpen, setInvoiceFormOpen] = useState(false)
+  const [documentRegisterOpen, setDocumentRegisterOpen] = useState(false)
 
   const sortedDocuments = [...invoiceDocuments].sort((a, b) =>
     a.createdAt === b.createdAt
@@ -1511,6 +1518,7 @@ function InvoicingPage({
     setShippingTerms('CIF Nansha')
     setNotes('')
     resetPackingListForm()
+    setInvoiceFormOpen(false)
     setFormStatus('')
   }
 
@@ -1547,6 +1555,7 @@ function InvoicingPage({
       setPackingLineItems(mapPackingListItemsToFormLines(document.items))
       setFormStatus(`Editing packing list ${document.documentNumber}.`)
       setSelectedDocumentId(document.id)
+      setInvoiceFormOpen(true)
       return
     }
     const matchedCustomer =
@@ -1565,6 +1574,7 @@ function InvoicingPage({
     setNotes(document.notes ?? '')
     setFormStatus(`Editing ${document.documentType === 'proforma' ? 'proforma' : 'invoice'} ${document.documentNumber}.`)
     setSelectedDocumentId(document.id)
+    setInvoiceFormOpen(true)
   }
 
   function buildDocumentInput() {
@@ -1961,11 +1971,15 @@ function InvoicingPage({
 
       {readOnly ? (
         <p className="inline-hint">Director view: invoices and proformas are read-only. You can view and print documents.</p>
-      ) : isEditingPackingList ? (
+      ) : null}
+
+      {formStatus ? <div className="placeholder">{formStatus}</div> : null}
+
+      {readOnly ? null : isEditingPackingList ? (
       <CollapsibleSection
         title="Edit Packing List"
-        isOpen
-        onToggle={() => {}}
+        isOpen={invoiceFormOpen}
+        onToggle={() => setInvoiceFormOpen((open) => !open)}
       >
         <form className="form-grid" onSubmit={handleSavePackingList}>
           <label>
@@ -1989,7 +2003,6 @@ function InvoicingPage({
             Cancel Edit
           </button>
         </form>
-        {formStatus ? <div className="placeholder">{formStatus}</div> : null}
         <div className="table-wrap">
           <table>
             <thead>
@@ -2074,8 +2087,8 @@ function InvoicingPage({
       ) : (
       <CollapsibleSection
         title={editingDocumentId ? 'Edit Document' : 'Create Document'}
-        isOpen
-        onToggle={() => {}}
+        isOpen={invoiceFormOpen}
+        onToggle={() => setInvoiceFormOpen((open) => !open)}
       >
         <form className="form-grid" onSubmit={handleCreateDocument}>
           <label>
@@ -2155,7 +2168,6 @@ function InvoicingPage({
             </button>
           ) : null}
         </form>
-        {formStatus ? <div className="placeholder">{formStatus}</div> : null}
         {!editingDocumentId ? (
           <div className="placeholder">
             New documents are saved as drafts. For each product line, split the quantity across one
@@ -2395,7 +2407,11 @@ function InvoicingPage({
       </CollapsibleSection>
       )}
 
-      <h3>Document Register</h3>
+      <CollapsibleSection
+        title="Document register"
+        isOpen={documentRegisterOpen}
+        onToggle={() => setDocumentRegisterOpen((open) => !open)}
+      >
       <div className="table-wrap">
         <table>
           <thead>
@@ -2691,6 +2707,7 @@ function InvoicingPage({
           )}
         </>
       )}
+      </CollapsibleSection>
     </section>
   )
 }
@@ -3373,22 +3390,20 @@ function EmployeesPage({
     currentUserDataEntryPermissions.has('employee-role-seasonal')
   const canEditDailyWageRates = currentUserDataEntryPermissions.has('employee-wage-rates')
   const dailyWageRates = getDailyWageRatesFromCompensation(compensationRules)
+  const [showSearchResults, setShowSearchResults] = useState(false)
   const [showRecentEvents, setShowRecentEvents] = useState(false)
   const [employeeSearch, setEmployeeSearch] = useState('')
   const [selectedWageRateKey, setSelectedWageRateKey] = useState(DAILY_WAGE_RATE_KEYS[0])
   const [wageRateInput, setWageRateInput] = useState(String(dailyWageRates[DAILY_WAGE_RATE_KEYS[0]]))
   const [wageRateStatus, setWageRateStatus] = useState('')
-  const [showDailyWageRates, setShowDailyWageRates] = useState(true)
+  const [showDailyWageRates, setShowDailyWageRates] = useState(false)
   const clockedInCount = clockedInIds.length
   const recentClockEvents = attendanceEvents.slice(0, RECENT_CLOCK_EVENTS_LIMIT)
   const roleDefinitions = useMemo(
     () => employeeRoleOptions.map((option) => ({ id: option.value, name: option.label })),
     [],
   )
-  const [openRoles, setOpenRoles] = useState(() => ({
-    admin: true,
-    'harvesting-manager': true,
-  }))
+  const [openRoles, setOpenRoles] = useState(() => ({}))
   const employeesByRole = useMemo(
     () =>
       employees.reduce((grouped, employee) => {
@@ -3645,7 +3660,12 @@ function EmployeesPage({
           <input
             type="search"
             value={employeeSearch}
-            onChange={(event) => setEmployeeSearch(event.target.value)}
+            onChange={(event) => {
+              setEmployeeSearch(event.target.value)
+              if (event.target.value.trim()) {
+                setShowSearchResults(true)
+              }
+            }}
             placeholder="Name, work no, phone, email, position, or role"
           />
         </label>
@@ -3659,8 +3679,8 @@ function EmployeesPage({
       {isSearchingEmployees ? (
         <CollapsibleSection
           title={`Search results (${employeeSearchResults.length})`}
-          isOpen
-          onToggle={() => {}}
+          isOpen={showSearchResults}
+          onToggle={() => setShowSearchResults((open) => !open)}
         >
           <div className="table-wrap">
             <table>

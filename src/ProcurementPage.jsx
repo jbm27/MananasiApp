@@ -233,8 +233,10 @@ export default function ProcurementPage({
   onMarkPoItemReceived,
   onSetPoApprovalLimit,
 }) {
-  const [supplierFormOpen, setSupplierFormOpen] = useState(true)
-  const [poFormOpen, setPoFormOpen] = useState(true)
+  const [supplierFormOpen, setSupplierFormOpen] = useState(false)
+  const [poFormOpen, setPoFormOpen] = useState(false)
+  const [poRegisterOpen, setPoRegisterOpen] = useState(false)
+  const [costSummaryOpen, setCostSummaryOpen] = useState(false)
   const [limitsFormOpen, setLimitsFormOpen] = useState(false)
 
   const [supplierName, setSupplierName] = useState('')
@@ -620,6 +622,8 @@ export default function ProcurementPage({
         <p className="inline-hint">Director view: procurement records are read-only. You can view and print authorised purchase orders.</p>
       ) : null}
 
+      {formStatus ? <div className="placeholder">{formStatus}</div> : null}
+
       <CollapsibleSection
         title={editingSupplierId ? 'Edit supplier' : 'Add supplier'}
         isOpen={supplierFormOpen}
@@ -954,9 +958,11 @@ export default function ProcurementPage({
         ) : null}
       </CollapsibleSection>
 
-      <h3>Purchase order register</h3>
-      {formStatus ? <div className="placeholder">{formStatus}</div> : null}
-
+      <CollapsibleSection
+        title="Purchase order register"
+        isOpen={poRegisterOpen}
+        onToggle={() => setPoRegisterOpen((open) => !open)}
+      >
       <div className="table-wrap">
         <table>
           <thead>
@@ -1086,9 +1092,13 @@ export default function ProcurementPage({
           </div>
         </section>
       ) : null}
+      </CollapsibleSection>
 
-      <section className="panel nested-panel">
-        <h3>Cost allocation summary</h3>
+      <CollapsibleSection
+        title="Cost allocation summary"
+        isOpen={costSummaryOpen}
+        onToggle={() => setCostSummaryOpen((open) => !open)}
+      >
         <p className="inline-hint">
           Totals from authorised and finalised purchase orders, grouped by line-item cost allocation.
         </p>
@@ -1186,7 +1196,7 @@ export default function ProcurementPage({
             </tbody>
           </table>
         </div>
-      </section>
+      </CollapsibleSection>
     </section>
   )
 }

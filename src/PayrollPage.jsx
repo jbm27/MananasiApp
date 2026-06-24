@@ -154,7 +154,7 @@ export default function PayrollPage({
   const [selectedYear, setSelectedYear] = useState(currentFiscalYear)
   const [selectedPeriodId, setSelectedPeriodId] = useState(getDefaultPayPeriodId())
   const [contractTypeFilter, setContractTypeFilter] = useState('all')
-  const [showAdvances, setShowAdvances] = useState(true)
+  const [showAdvances, setShowAdvances] = useState(false)
   const [showWages, setShowWages] = useState(false)
   const [showSalaries, setShowSalaries] = useState(false)
   const [showAttendanceExceptions, setShowAttendanceExceptions] = useState(false)
