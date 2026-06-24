@@ -19,6 +19,7 @@ import {
   buildPoItemsFromInput,
   canEmployeeAuthorizePo,
   isPurchaseOrderEditable,
+  migratePurchaseOrder,
   nextPurchaseOrderNumber,
   nextSupplierId,
 } from './procurement.js'
@@ -10209,7 +10210,7 @@ function hydrateAppState(data, setters) {
     setters.setSuppliers(sanitized.suppliers)
   }
   if (Array.isArray(sanitized.purchaseOrders)) {
-    setters.setPurchaseOrders(sanitized.purchaseOrders)
+    setters.setPurchaseOrders(sanitized.purchaseOrders.map(migratePurchaseOrder))
   }
   if (sanitized.poApprovalLimits && typeof sanitized.poApprovalLimits === 'object') {
     setters.setPoApprovalLimits(sanitized.poApprovalLimits)

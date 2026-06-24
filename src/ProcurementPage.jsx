@@ -11,10 +11,21 @@ import {
   canEmployeeAuthorizePo,
   computePoLineAmount,
   computePoTotal,
+  DEFAULT_PO_COST_CATEGORY,
   getEmployeeApprovalLimitDisplay,
+  getPoCostCategoryLabel,
   getPoStatusLabel,
   isPurchaseOrderEditable,
+  PO_COST_CATEGORY_IDS,
+  PO_COST_CATEGORY_LABELS,
+  PO_COST_SUMMARY_CATEGORY_IDS,
+  summarizePoCostsByCategory,
 } from './procurement.js'
+import {
+  build445PayPeriods,
+  getDefaultPayPeriodId,
+  getFiscalYearForDate,
+} from './payPeriods.js'
 
 function CollapsibleSection({ title, isOpen, onToggle, children }) {
   return (
@@ -35,6 +46,7 @@ function emptyLineItem(signInEmployees) {
     quantity: '',
     unit: 'each',
     unitPrice: '',
+    costCategory: DEFAULT_PO_COST_CATEGORY,
     receiverEmployeeId: signInEmployees[0]?.id ?? '',
     received: false,
     receivedAt: null,
@@ -50,6 +62,7 @@ function mapPoItemsToLineItems(items) {
     quantity: String(item.quantity ?? ''),
     unit: item.unit ?? 'each',
     unitPrice: String(item.unitPrice ?? ''),
+    costCategory: item.costCategory ?? DEFAULT_PO_COST_CATEGORY,
     receiverEmployeeId: item.receiverEmployeeId ?? '',
     received: Boolean(item.received),
     receivedAt: item.receivedAt ?? null,
@@ -247,6 +260,45 @@ export default function ProcurementPage({
   const [limitDrafts, setLimitDrafts] = useState({})
   const [limitsStatus, setLimitsStatus] = useState('')
 
+  const [costSummaryFilterMode, setCostSummaryFilterMode] = useState('period')
+  const [costSummaryPeriodId, setCostSummaryPeriodId] = useState(() =>
+    getDefaultPayPeriodId(new Date().toISOString().slice(0, 10)),
+  )
+  const [costSummaryDateFrom, setCostSummaryDateFrom] = useState('')
+  const [costSummaryDateTo, setCostSummaryDateTo] = useState('')
+
+  const payPeriodOptions = useMemo(() => {
+    const fiscalYear = getFiscalYearForDate(new Date().toISOString().slice(0, 10))
+    return [
+      ...build445PayPeriods(fiscalYear - 1),
+      ...build445PayPeriods(fiscalYear),
+      ...build445PayPeriods(fiscalYear + 1),
+    ]
+  }, [])
+
+  const costSummary = useMemo(() => {
+    if (costSummaryFilterMode === 'period') {
+      return summarizePoCostsByCategory(purchaseOrders, {
+        periodId: costSummaryPeriodId,
+        payPeriods: payPeriodOptions,
+      })
+    }
+    return summarizePoCostsByCategory(purchaseOrders, {
+      startDate: costSummaryDateFrom || null,
+      endDate: costSummaryDateTo || null,
+    })
+  }, [
+    purchaseOrders,
+    costSummaryFilterMode,
+    costSummaryPeriodId,
+    costSummaryDateFrom,
+    costSummaryDateTo,
+    payPeriodOptions,
+  ])
+
+  const selectedCostPeriod =
+    payPeriodOptions.find((period) => period.id === costSummaryPeriodId) ?? null
+
   const sortedPurchaseOrders = useMemo(
     () =>
       [...purchaseOrders].sort((a, b) =>
@@ -439,6 +491,7 @@ export default function ProcurementPage({
         unitPrice: Number(Number(item.unitPrice).toFixed(2)),
         amount: item.amount,
         receiverEmployeeId: item.receiverEmployeeId,
+        costCategory: item.costCategory,
         received: item.received,
         receivedAt: item.receivedAt,
         receivedById: item.receivedById,
@@ -463,6 +516,7 @@ export default function ProcurementPage({
       return (
         !item.description.trim() ||
         !item.receiverEmployeeId ||
+        !PO_COST_CATEGORY_IDS.includes(item.costCategory) ||
         Number.isNaN(quantityValue) ||
         Number.isNaN(unitPriceValue) ||
         quantityValue <= 0 ||
@@ -471,7 +525,7 @@ export default function ProcurementPage({
       )
     })
     if (!orderDate || computedLineItems.length === 0 || hasInvalidLine) {
-      setFormStatus('Complete all lines with description, quantity, unit price, unit, and receiver.')
+      setFormStatus('Complete all lines with description, quantity, unit price, unit, cost category, and receiver.')
       return
     }
     if (editingPoId) {
@@ -834,6 +888,22 @@ export default function ProcurementPage({
                   />
                 </label>
                 <label>
+                  Cost allocation
+                  <select
+                    value={item.costCategory}
+                    onChange={(event) =>
+                      handleLineItemChange(item.id, 'costCategory', event.target.value)
+                    }
+                    required
+                  >
+                    {PO_COST_CATEGORY_IDS.map((categoryId) => (
+                      <option key={categoryId} value={categoryId}>
+                        {PO_COST_CATEGORY_LABELS[categoryId]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
                   Receiver (sign-in account)
                   <select
                     value={item.receiverEmployeeId}
@@ -960,6 +1030,7 @@ export default function ProcurementPage({
                   <th>Unit</th>
                   <th>Unit price</th>
                   <th>Amount</th>
+                  <th>Cost allocation</th>
                   <th>Receiver</th>
                   <th>Received</th>
                 </tr>
@@ -972,6 +1043,7 @@ export default function ProcurementPage({
                     <td>{item.unit}</td>
                     <td>{item.unitPrice.toFixed(2)}</td>
                     <td>{item.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                    <td>{getPoCostCategoryLabel(item.costCategory)}</td>
                     <td>{item.receiverEmployeeName || '—'}</td>
                     <td>
                       {item.received ? (
@@ -1014,6 +1086,107 @@ export default function ProcurementPage({
           </div>
         </section>
       ) : null}
+
+      <section className="panel nested-panel">
+        <h3>Cost allocation summary</h3>
+        <p className="inline-hint">
+          Totals from authorised and finalised purchase orders, grouped by line-item cost allocation.
+        </p>
+        <div className="form-grid">
+          <label>
+            Filter by
+            <select
+              value={costSummaryFilterMode}
+              onChange={(event) => setCostSummaryFilterMode(event.target.value)}
+            >
+              <option value="period">4-4-5 pay period</option>
+              <option value="date-range">Date range</option>
+            </select>
+          </label>
+          {costSummaryFilterMode === 'period' ? (
+            <label>
+              Pay period
+              <select
+                value={costSummaryPeriodId}
+                onChange={(event) => setCostSummaryPeriodId(event.target.value)}
+              >
+                {payPeriodOptions.map((period) => (
+                  <option key={period.id} value={period.id}>
+                    {period.label} ({formatDisplayDate(period.startDate)} –{' '}
+                    {formatDisplayDate(period.endDate)})
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <>
+              <label>
+                From
+                <input
+                  type="date"
+                  value={costSummaryDateFrom}
+                  onChange={(event) => setCostSummaryDateFrom(event.target.value)}
+                />
+              </label>
+              <label>
+                To
+                <input
+                  type="date"
+                  value={costSummaryDateTo}
+                  onChange={(event) => setCostSummaryDateTo(event.target.value)}
+                />
+              </label>
+            </>
+          )}
+        </div>
+        {costSummaryFilterMode === 'period' && selectedCostPeriod ? (
+          <p className="inline-hint">
+            Period: {formatDisplayDate(selectedCostPeriod.startDate)} –{' '}
+            {formatDisplayDate(selectedCostPeriod.endDate)}
+          </p>
+        ) : null}
+
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th>Amount (KES)</th>
+                <th>Share</th>
+              </tr>
+            </thead>
+            <tbody>
+              {PO_COST_SUMMARY_CATEGORY_IDS.map((categoryId) => {
+                const amount = costSummary.totals[categoryId] ?? 0
+                const share =
+                  costSummary.grandTotal > 0
+                    ? `${((amount / costSummary.grandTotal) * 100).toFixed(1)}%`
+                    : '—'
+                return (
+                  <tr key={categoryId}>
+                    <td>{PO_COST_CATEGORY_LABELS[categoryId]}</td>
+                    <td>{amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                    <td>{share}</td>
+                  </tr>
+                )
+              })}
+              <tr>
+                <td>
+                  <strong>Total</strong>
+                </td>
+                <td>
+                  <strong>
+                    {costSummary.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </strong>
+                </td>
+                <td>
+                  <strong>{costSummary.grandTotal > 0 ? '100%' : '—'}</strong>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </section>
   )
 }

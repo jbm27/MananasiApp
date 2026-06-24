@@ -1,5 +1,106 @@
 export const FIRST_PO_NUMBER = 1001
 
+export const PO_COST_CATEGORY_IDS = [
+  'harvesting',
+  'haulage',
+  'decortication',
+  'drying',
+  'brushing',
+  'baling',
+  'silage',
+  'staff-transport',
+  'overheads',
+  'assets',
+]
+
+export const PO_DEPARTMENT_COST_CATEGORY_IDS = [
+  'harvesting',
+  'haulage',
+  'decortication',
+  'drying',
+  'brushing',
+  'baling',
+  'silage',
+  'staff-transport',
+]
+
+export const PO_COST_SUMMARY_CATEGORY_IDS = [
+  ...PO_DEPARTMENT_COST_CATEGORY_IDS,
+  'overheads',
+  'assets',
+]
+
+export const PO_COST_CATEGORY_LABELS = {
+  harvesting: 'Harvesting',
+  haulage: 'Haulage',
+  decortication: 'Decortication',
+  drying: 'Drying',
+  brushing: 'Brushing',
+  baling: 'Baling',
+  silage: 'Silage',
+  'staff-transport': 'Staff transport',
+  overheads: 'Overheads',
+  assets: 'Assets',
+}
+
+export const DEFAULT_PO_COST_CATEGORY = 'overheads'
+
+export function normalizePoCostCategory(category) {
+  const normalized = String(category ?? '').trim()
+  return PO_COST_CATEGORY_IDS.includes(normalized) ? normalized : DEFAULT_PO_COST_CATEGORY
+}
+
+export function getPoCostCategoryLabel(category) {
+  return PO_COST_CATEGORY_LABELS[normalizePoCostCategory(category)] ?? String(category ?? '—')
+}
+
+export function migratePurchaseOrderItem(item) {
+  if (!item || typeof item !== 'object') {
+    return item
+  }
+  return {
+    ...item,
+    costCategory: normalizePoCostCategory(item.costCategory),
+  }
+}
+
+const PO_COST_SUMMARY_STATUSES = new Set(['authorized', 'received'])
+
+export function summarizePoCostsByCategory(purchaseOrders, options = {}) {
+  const { startDate, endDate, periodId, payPeriods } = options
+  const totals = Object.fromEntries(PO_COST_SUMMARY_CATEGORY_IDS.map((id) => [id, 0]))
+  let period = null
+  if (periodId && Array.isArray(payPeriods)) {
+    period = payPeriods.find((entry) => entry.id === periodId) ?? null
+  }
+
+  for (const po of purchaseOrders ?? []) {
+    if (!po?.orderDate || !PO_COST_SUMMARY_STATUSES.has(po.status)) {
+      continue
+    }
+    if (period && (po.orderDate < period.startDate || po.orderDate > period.endDate)) {
+      continue
+    }
+    if (!period) {
+      if (startDate && po.orderDate < startDate) {
+        continue
+      }
+      if (endDate && po.orderDate > endDate) {
+        continue
+      }
+    }
+    for (const item of po.items ?? []) {
+      const category = normalizePoCostCategory(item.costCategory)
+      totals[category] = Number((totals[category] + Number(item.amount ?? 0)).toFixed(2))
+    }
+  }
+
+  const grandTotal = Number(
+    PO_COST_SUMMARY_CATEGORY_IDS.reduce((sum, categoryId) => sum + totals[categoryId], 0).toFixed(2),
+  )
+  return { totals, grandTotal, categories: PO_COST_SUMMARY_CATEGORY_IDS }
+}
+
 export function nextSupplierId(suppliers) {
   const maxNumber = (suppliers ?? []).reduce((max, supplier) => {
     const match = String(supplier.id ?? '').match(/^SUP-(\d+)$/)
@@ -33,6 +134,7 @@ export function migratePurchaseOrder(po) {
   return {
     ...po,
     poNumber: normalizePurchaseOrderNumber(po.poNumber),
+    items: Array.isArray(po.items) ? po.items.map(migratePurchaseOrderItem) : [],
   }
 }
 
@@ -112,6 +214,7 @@ export function buildPoItemsFromInput(lineItems, signInEmployeesById) {
       unit: String(item.unit ?? '').trim(),
       unitPrice,
       amount,
+      costCategory: normalizePoCostCategory(item.costCategory),
       receiverEmployeeId: receiver?.id ?? '',
       receiverEmployeeName: receiver?.name ?? '',
       received: Boolean(item.received),
