@@ -12,6 +12,7 @@ const MERGE_BY_ID_KEYS = [
   'decorticationRecords',
   'dryingAssignments',
   'dryingRecords',
+  'balingAssignments',
   'brushingStockMovements',
   'brushingDailyRecords',
   'balingRecords',

@@ -3761,6 +3761,7 @@ function EmployeeRecordPage({
   dryingRecords,
   brushingStockMovements,
   brushingDailyRecords,
+  balingAssignments,
   balingRecords,
   silageRecords,
 }) {
@@ -3789,6 +3790,7 @@ function EmployeeRecordPage({
     ...dryingRecords.map((item) => item.weighedDate),
     ...brushingStockMovements.map((item) => item.date),
     ...brushingDailyRecords.map((item) => item.date),
+    ...balingAssignments.map((item) => item.date),
     ...balingRecords.map((item) => item.date),
     ...silageRecords.map((item) => item.date),
   ]
@@ -3849,9 +3851,26 @@ function EmployeeRecordPage({
   const balingAsSupervisor = balingRecords.filter(
     (item) => item.supervisorIds?.includes(employee.id) && isWithinRange(item.date),
   )
+  const balingTeamAssignments = balingAssignments.filter(
+    (item) => item.balerIds?.includes(employee.id) && isWithinRange(item.date),
+  )
   const balingAsBaler = balingRecords.filter(
     (item) => item.balerIds?.includes(employee.id) && isWithinRange(item.date),
   )
+  const balingAsBalerWithTeam = [
+    ...balingTeamAssignments.map((item) => ({
+      id: `team-${item.id}`,
+      date: item.date,
+      baleCode: 'Team assignment',
+      sourceStockCode: '—',
+      baleWeightKg: 0,
+    })),
+    ...balingAsBaler,
+  ]
+  const balingAttendanceDays =
+    balingTeamAssignments.length > 0
+      ? balingTeamAssignments.length
+      : new Set(balingAsBaler.map((item) => item.date)).size
   const silageAsSupervisor = silageRecords.filter(
     (item) => item.supervisorId === employee.id && isWithinRange(item.date),
   )
@@ -3878,7 +3897,7 @@ function EmployeeRecordPage({
     { key: 'brushing-supervisor', area: 'Brushing', role: 'Supervisor', records: brushingAsSupervisor.length },
     { key: 'brushing-brusher', area: 'Brushing', role: 'Brusher', records: brushingAsBrusher.length },
     { key: 'baling-supervisor', area: 'Baling', role: 'Supervisor', records: balingAsSupervisor.length },
-    { key: 'baling-baler', area: 'Baling', role: 'Baler', records: balingAsBaler.length },
+    { key: 'baling-baler', area: 'Baling', role: 'Baler', records: balingAttendanceDays },
     { key: 'silage-supervisor', area: 'Silage', role: 'Supervisor', records: silageAsSupervisor.length },
     { key: 'silage-operator', area: 'Silage', role: 'Operator', records: silageAsOperator.length },
   ]
@@ -4105,7 +4124,7 @@ function EmployeeRecordPage({
                           : selectedRoleView === 'brushing-supervisor' ? brushingAsSupervisor
                           : selectedRoleView === 'brushing-brusher' ? brushingAsBrusher
                           : selectedRoleView === 'baling-supervisor' ? balingAsSupervisor
-                          : selectedRoleView === 'baling-baler' ? balingAsBaler
+                          : selectedRoleView === 'baling-baler' ? balingAsBalerWithTeam
                           : selectedRoleView === 'silage-supervisor' ? silageAsSupervisor
                           : selectedRoleView === 'silage-operator' ? silageAsOperator
                           : []
@@ -4130,7 +4149,7 @@ function EmployeeRecordPage({
                 : selectedRoleView === 'brushing-supervisor' ? brushingAsSupervisor
                 : selectedRoleView === 'brushing-brusher' ? brushingAsBrusher
                 : selectedRoleView === 'baling-supervisor' ? balingAsSupervisor
-                : selectedRoleView === 'baling-baler' ? balingAsBaler
+                : selectedRoleView === 'baling-baler' ? balingAsBalerWithTeam
                 : selectedRoleView === 'silage-supervisor' ? silageAsSupervisor
                 : selectedRoleView === 'silage-operator' ? silageAsOperator
                 : []
@@ -4163,7 +4182,7 @@ function EmployeeRecordPage({
                   (selectedRoleView === 'brushing-supervisor' && brushingAsSupervisor.length === 0) ||
                   (selectedRoleView === 'brushing-brusher' && brushingAsBrusher.length === 0) ||
                   (selectedRoleView === 'baling-supervisor' && balingAsSupervisor.length === 0) ||
-                  (selectedRoleView === 'baling-baler' && balingAsBaler.length === 0) ||
+                  (selectedRoleView === 'baling-baler' && balingAsBalerWithTeam.length === 0) ||
                   (selectedRoleView === 'silage-supervisor' && silageAsSupervisor.length === 0) ||
                   (selectedRoleView === 'silage-operator' && silageAsOperator.length === 0))) && (
                 <tr>
@@ -7932,8 +7951,10 @@ function BalingPage({
   employees,
   clockedInIds,
   availableLooseStockOptions,
+  balingAssignments,
   balingRecords,
   onCreateBales,
+  onSaveBalingTeamAssignment,
   dateFrom,
   dateTo,
   onDateFromChange,
@@ -7948,19 +7969,35 @@ function BalingPage({
   const [sourceStockCode, setSourceStockCode] = useState('')
   const [baleWeightKg, setBaleWeightKg] = useState('100')
   const [baleCount, setBaleCount] = useState('1')
-  const [selectedBalerIds, setSelectedBalerIds] = useState([])
   const [entryStatus, setEntryStatus] = useState('')
   const [lastCreatedBaleCode, setLastCreatedBaleCode] = useState('')
   const [attendanceViewingEmployeeId, setAttendanceViewingEmployeeId] = useState('')
+  const [teamAssignmentDate, setTeamAssignmentDate] = useState(dateTo)
+  const [selectedTeamBalerIds, setSelectedTeamBalerIds] = useState([])
+  const [teamAssignmentStatus, setTeamAssignmentStatus] = useState('')
 
   const canManageBaling = currentUserDataEntryPermissions.has('baling-entry')
   const canViewBaling = canManageBaling || currentUser?.role === 'baler'
+  const canAssignBalingTeam = canManageBaling
   const canSubmitBaleEntry =
     canManageBaling && (isAppAdmin(currentUser) || clockedInIds.includes(currentUser?.id))
 
   const clockedInBalers = employees.filter(
     (employee) => employee.role === 'baler' && clockedInIds.includes(employee.id),
   )
+
+  const filteredBalingAssignments = balingAssignments.filter(
+    (assignment) => assignment.date >= dateFrom && assignment.date <= dateTo,
+  )
+  const teamAssignmentOptions = [...filteredBalingAssignments]
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .map((assignment) => assignment.date)
+    .filter((date, index, dates) => dates.indexOf(date) === index)
+
+  useEffect(() => {
+    const existing = balingAssignments.find((assignment) => assignment.date === teamAssignmentDate)
+    setSelectedTeamBalerIds(existing?.balerIds ?? [])
+  }, [teamAssignmentDate, balingAssignments])
 
   const visibleLooseStockOptions =
     selectedBatchFilter === 'all'
@@ -7982,31 +8019,96 @@ function BalingPage({
   const totalBaledKg = sortedRecords.reduce((sum, record) => sum + record.baleWeightKg, 0)
 
   const attendanceRows = Object.values(
-    filteredRecords.reduce((map, record) => {
-      record.supervisorIds.forEach((id, index) => {
-        if (!map[id]) {
-          map[id] = { id, name: record.supervisorNames[index] ?? id, role: 'Baling Supervisor', dates: new Set(), bales: 0 }
-        }
-        map[id].dates.add(record.date)
-        map[id].bales += 1
+    (() => {
+      const map = {}
+      filteredBalingAssignments.forEach((assignment) => {
+        assignment.balerIds.forEach((balerId, index) => {
+          if (!map[balerId]) {
+            map[balerId] = {
+              id: balerId,
+              name:
+                assignment.balerNames?.[index] ??
+                employees.find((employee) => employee.id === balerId)?.name ??
+                'Unknown',
+              role: 'Baler',
+              assignedDays: new Set(),
+              bales: 0,
+            }
+          }
+          map[balerId].assignedDays.add(assignment.date)
+        })
       })
-      record.balerIds.forEach((id, index) => {
-        if (!map[id]) {
-          map[id] = { id, name: record.balerNames[index] ?? id, role: 'Baler', dates: new Set(), bales: 0 }
-        }
-        map[id].dates.add(record.date)
-        map[id].bales += 1
+      filteredRecords.forEach((record) => {
+        record.supervisorIds.forEach((id, index) => {
+          if (!map[id]) {
+            map[id] = {
+              id,
+              name: record.supervisorNames[index] ?? id,
+              role: 'Baling Supervisor',
+              assignedDays: new Set(),
+              bales: 0,
+            }
+          }
+          map[id].assignedDays.add(record.date)
+          map[id].bales += 1
+        })
+        record.balerIds.forEach((id, index) => {
+          if (!map[id]) {
+            map[id] = {
+              id,
+              name: record.balerNames[index] ?? id,
+              role: 'Baler',
+              assignedDays: new Set(),
+              bales: 0,
+            }
+          }
+          map[id].assignedDays.add(record.date)
+          map[id].bales += 1
+        })
       })
       return map
-    }, {}),
+    })(),
   )
-    .map((item) => ({ id: item.id, name: item.name, role: item.role, daysWorked: item.dates.size, balesHandled: item.bales }))
-    .sort((a, b) => b.balesHandled - a.balesHandled)
+    .map((item) => ({
+      id: item.id,
+      name: item.name,
+      role: item.role,
+      daysWorked: item.assignedDays.size,
+      balesHandled: item.bales,
+    }))
+    .sort((a, b) => b.balesHandled - a.balesHandled || b.daysWorked - a.daysWorked)
 
-  function handleBalerToggle(employeeId) {
-    setSelectedBalerIds((prev) =>
-      prev.includes(employeeId) ? prev.filter((id) => id !== employeeId) : [...prev, employeeId],
+  function handleTeamBalerToggle(balerId) {
+    setSelectedTeamBalerIds((prev) =>
+      prev.includes(balerId) ? prev.filter((id) => id !== balerId) : [...prev, balerId],
     )
+  }
+
+  function handleSaveTeamAssignment(event) {
+    event.preventDefault()
+    if (!canAssignBalingTeam) {
+      setTeamAssignmentStatus('You do not have permission to assign the baling team.')
+      return
+    }
+    if (!teamAssignmentDate) {
+      setTeamAssignmentStatus('Select a team date.')
+      return
+    }
+    if (selectedTeamBalerIds.length === 0) {
+      setTeamAssignmentStatus('Select at least one clocked-in baler for the team.')
+      return
+    }
+    const balerNames = selectedTeamBalerIds
+      .map((id) => employees.find((employee) => employee.id === id)?.name)
+      .filter(Boolean)
+    onSaveBalingTeamAssignment({
+      date: teamAssignmentDate,
+      balerIds: selectedTeamBalerIds,
+      balerNames,
+      assignedById: currentUser?.id ?? '',
+      assignedByName: currentUser?.name ?? '',
+    })
+    setTeamAssignmentStatus('Baling team assignment saved. Attendance summary updated.')
   }
 
   function handleCreateBales(event) {
@@ -8025,10 +8127,12 @@ function BalingPage({
       setEntryStatus('Enter a valid date, source stock code, bale weight, and bale count.')
       return
     }
-    if (selectedBalerIds.length === 0) {
-      setEntryStatus('Select at least one baler assisting with this bale.')
+    const teamAssignment = balingAssignments.find((assignment) => assignment.date === balingDate)
+    if (!teamAssignment || teamAssignment.balerIds.length === 0) {
+      setEntryStatus('Save a baling team assignment for this date before creating bales.')
       return
     }
+    const selectedBalerIds = teamAssignment.balerIds
     const sourceBatchNumber = sourceStockCode.split('-').slice(0, 2).join('-')
     const seriesCode = buildBaleSeriesCode(sourceStockCode, weight)
     const existingSerials = balingRecords
@@ -8050,9 +8154,11 @@ function BalingPage({
         supervisorIds: [currentUser.id],
         supervisorNames: [currentUser.name],
         balerIds: selectedBalerIds,
-        balerNames: selectedBalerIds
-          .map((id) => employees.find((employee) => employee.id === id)?.name)
-          .filter(Boolean),
+        balerNames: teamAssignment.balerNames?.length
+          ? teamAssignment.balerNames
+          : selectedBalerIds
+              .map((id) => employees.find((employee) => employee.id === id)?.name)
+              .filter(Boolean),
       }
     })
     onCreateBales(nextRecords)
@@ -8168,21 +8274,6 @@ function BalingPage({
               disabled
             />
           </label>
-          <label>
-            Balers (clocked in)
-            <div className="checklist">
-              {clockedInBalers.map((person) => (
-                <label key={person.id} className="check-item">
-                  <span>{person.name}</span>
-                  <input
-                    type="checkbox"
-                    checked={selectedBalerIds.includes(person.id)}
-                    onChange={() => handleBalerToggle(person.id)}
-                  />
-                </label>
-              ))}
-            </div>
-          </label>
           <button type="submit" disabled={!canSubmitBaleEntry}>
             Create Bale(s)
           </button>
@@ -8192,6 +8283,10 @@ function BalingPage({
             You must be clocked in to create bales. Admin can enter bale data without clocking in.
           </div>
         ) : null}
+        <div className="placeholder">
+          Balers are taken from the saved team assignment for the selected date. Assign the team in
+          the Employee Attendance Summary section below before creating bales.
+        </div>
         {entryStatus && <div className="placeholder">{entryStatus}</div>}
         {lastCreatedBaleCode && <BaleLabel baleCode={lastCreatedBaleCode} baleWeightKg={Number(baleWeightKg) || 0} />}
       </CollapsibleSection>
@@ -8203,6 +8298,65 @@ function BalingPage({
         canExpand={canViewBaling}
         deniedMessage="Only Admin, Production Manager, Baling Supervisor, or Baler can open this section."
       >
+        {canAssignBalingTeam ? (
+          <form className="form-grid" onSubmit={handleSaveTeamAssignment}>
+            <label>
+              Load saved team assignment
+              <select
+                value={teamAssignmentOptions.includes(teamAssignmentDate) ? teamAssignmentDate : ''}
+                onChange={(event) => {
+                  if (event.target.value) {
+                    setTeamAssignmentDate(event.target.value)
+                  }
+                }}
+              >
+                <option value="">Select saved assignment...</option>
+                {teamAssignmentOptions.map((date) => (
+                  <option key={date} value={date}>
+                    {formatDisplayDate(date)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Team date
+              <input
+                type="date"
+                value={teamAssignmentDate}
+                onChange={(event) => setTeamAssignmentDate(event.target.value)}
+              />
+            </label>
+            <label>
+              Balers on team (clocked in)
+              <div className="checklist">
+                {clockedInBalers.map((baler) => (
+                  <label key={baler.id} className="check-item">
+                    <span>{baler.name}</span>
+                    <input
+                      type="checkbox"
+                      checked={selectedTeamBalerIds.includes(baler.id)}
+                      onChange={() => handleTeamBalerToggle(baler.id)}
+                    />
+                  </label>
+                ))}
+              </div>
+            </label>
+            <button type="submit" disabled={!canAssignBalingTeam}>
+              Save Team Assignment
+            </button>
+          </form>
+        ) : null}
+        {canAssignBalingTeam ? (
+          <div className="placeholder">
+            At the start of each day, assign the baling team from clocked-in balers. Bales created
+            that day are automatically attributed to this team.
+          </div>
+        ) : null}
+        {teamAssignmentStatus ? <div className="placeholder">{teamAssignmentStatus}</div> : null}
+        <div className="placeholder">
+          Clocked-in Balers today:{' '}
+          {clockedInBalers.length > 0 ? clockedInBalers.map((item) => item.name).join(', ') : 'None'}
+        </div>
         <div className="table-wrap">
           <table>
             <thead>
@@ -8236,6 +8390,17 @@ function BalingPage({
                   {attendanceViewingEmployeeId === row.id && (
                     <tr>
                       <td colSpan="5">
+                        {filteredBalingAssignments.some((assignment) =>
+                          assignment.balerIds.includes(row.id),
+                        ) ? (
+                          <div className="placeholder">
+                            Team days:{' '}
+                            {filteredBalingAssignments
+                              .filter((assignment) => assignment.balerIds.includes(row.id))
+                              .map((assignment) => formatDisplayDate(assignment.date))
+                              .join(', ')}
+                          </div>
+                        ) : null}
                         <div className="table-wrap">
                           <table>
                             <thead>
@@ -10219,6 +10384,9 @@ function hydrateAppState(data, setters) {
     setters.setBrushingDailyRecords(sanitized.brushingDailyRecords)
   }
   if (Array.isArray(sanitized.balingRecords)) setters.setBalingRecords(sanitized.balingRecords)
+  if (Array.isArray(sanitized.balingAssignments)) {
+    setters.setBalingAssignments(sanitized.balingAssignments)
+  }
   if (Array.isArray(sanitized.silageRecords)) setters.setSilageRecords(sanitized.silageRecords)
   if (Array.isArray(sanitized.invoiceDocuments)) {
     setters.setInvoiceDocuments(withRepairedInvoicePackingListLinks(sanitized.invoiceDocuments))
@@ -10297,6 +10465,7 @@ function App() {
   const [brushingStockMovements, setBrushingStockMovements] = useState([])
   const [brushingDailyRecords, setBrushingDailyRecords] = useState([])
   const [balingRecords, setBalingRecords] = useState([])
+  const [balingAssignments, setBalingAssignments] = useState([])
   const [silageRecords, setSilageRecords] = useState([])
   const [attendanceEvents, setAttendanceEvents] = useState([])
   const [invoiceDocuments, setInvoiceDocuments] = useState([])
@@ -10331,6 +10500,7 @@ function App() {
       setBrushingStockMovements,
       setBrushingDailyRecords,
       setBalingRecords,
+      setBalingAssignments,
       setSilageRecords,
       setInvoiceDocuments,
       setInvoiceStockIssues,
@@ -10374,6 +10544,7 @@ function App() {
         brushingStockMovements,
         brushingDailyRecords,
         balingRecords,
+        balingAssignments,
         silageRecords,
         invoiceDocuments,
         invoiceStockIssues,
@@ -10405,6 +10576,7 @@ function App() {
       brushingStockMovements,
       brushingDailyRecords,
       balingRecords,
+      balingAssignments,
       silageRecords,
       invoiceDocuments,
       invoiceStockIssues,
@@ -10565,6 +10737,7 @@ function App() {
         brushingStockMovements,
         brushingDailyRecords,
         balingRecords,
+        balingAssignments,
         silageRecords,
         invoiceStockIssues,
       }),
@@ -11900,6 +12073,23 @@ function App() {
     })
   }
 
+  function handleSaveBalingTeamAssignment(input) {
+    setBalingAssignments((prev) => {
+      const withoutDate = prev.filter((item) => item.date !== input.date)
+      return [
+        {
+          id: `BAL-ASG-${input.date}`,
+          date: input.date,
+          balerIds: input.balerIds,
+          balerNames: input.balerNames,
+          assignedById: input.assignedById,
+          assignedByName: input.assignedByName,
+        },
+        ...withoutDate,
+      ]
+    })
+  }
+
   if (!ready) {
     return (
       <div className="login-layout">
@@ -12072,6 +12262,7 @@ function App() {
                 dryingRecords={dryingRecords}
                 brushingStockMovements={brushingStockMovements}
                 brushingDailyRecords={brushingDailyRecords}
+                balingAssignments={balingAssignments}
                 balingRecords={balingRecords}
                 silageRecords={silageRecords}
               />
@@ -12286,8 +12477,10 @@ function App() {
                 employees={employees}
                 clockedInIds={clockedInIds}
                 availableLooseStockOptions={availableLooseStockOptions}
+                balingAssignments={balingAssignments}
                 balingRecords={balingRecords}
                 onCreateBales={handleCreateBales}
+                onSaveBalingTeamAssignment={handleSaveBalingTeamAssignment}
                 dateFrom={balingDateFrom}
                 dateTo={balingDateTo}
                 onDateFromChange={setBalingDateFrom}
