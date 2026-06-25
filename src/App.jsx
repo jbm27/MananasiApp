@@ -5674,7 +5674,9 @@ function DecorticationPage({
         )
       : decorticationRecords.filter((record) => record.batchNumber === selectedBatchFilter)
   const dryingByDecorticationRecordId = dryingRecords.reduce((map, record) => {
-    map[record.decorticationRecordId] = (map[record.decorticationRecordId] ?? 0) + record.totalDriedKg
+    if (map[record.decorticationRecordId] == null) {
+      map[record.decorticationRecordId] = record.totalDriedKg
+    }
     return map
   }, {})
   const recordsWithDrying = filteredRecords.map((record) => {
@@ -6886,7 +6888,7 @@ function DryingPage({
       }
       return
     }
-    onAddDryingRecord({
+    const result = onAddDryingRecord({
       decorticationRecordId: sourceRecord.id,
       decorticationDate: sourceRecord.date,
       weighedDate,
@@ -6899,7 +6901,11 @@ function DryingPage({
       dryerId: currentUser?.id ?? 'SYSTEM',
       dryerName: currentUser?.name ?? 'System',
     })
-    resetEntryForm('Drying output saved and synced to Decortication.')
+    if (!result.ok) {
+      setEntryStatus(result.message)
+      return
+    }
+    resetEntryForm(result.message)
     setShowDryingRecords(true)
   }
 
@@ -11493,7 +11499,19 @@ function App() {
   }
 
   function handleAddDryingRecord(input) {
-    setDryingRecords((prev) => [{ id: `DRY-${Date.now()}`, ...input }, ...prev])
+    if (dryingRecords.some((item) => item.decorticationRecordId === input.decorticationRecordId)) {
+      return {
+        ok: false,
+        message: 'This decorticator shift already has drying output recorded.',
+      }
+    }
+    setDryingRecords((prev) => {
+      if (prev.some((item) => item.decorticationRecordId === input.decorticationRecordId)) {
+        return prev
+      }
+      return [{ id: `DRY-${Date.now()}`, ...input }, ...prev]
+    })
+    return { ok: true, message: 'Drying output saved and synced to Decortication.' }
   }
 
   function handleUpdateDryingRecord(recordId, input) {

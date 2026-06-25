@@ -36,13 +36,8 @@ export function mergeRecordsById(currentItems, incomingItems, getKey = recordKey
     return current.length > 0 ? current : incoming
   }
 
+  // Hydrated clients send a full snapshot; incoming is authoritative so deletions persist.
   const merged = new Map()
-  for (const item of current) {
-    const key = getKey(item)
-    if (key != null) {
-      merged.set(key, item)
-    }
-  }
   for (const item of incoming) {
     const key = getKey(item)
     if (key != null) {

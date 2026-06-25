@@ -61,6 +61,27 @@ function migrateInvoiceDocument(document) {
   }
 }
 
+/** Keep one drying record per decorticator shift (earliest id wins). */
+export function dedupeDryingRecords(records) {
+  if (!Array.isArray(records)) {
+    return records
+  }
+  const bestByDecorticationId = new Map()
+  const withoutKey = []
+  for (const record of records) {
+    const key = record.decorticationRecordId
+    if (!key) {
+      withoutKey.push(record)
+      continue
+    }
+    const existing = bestByDecorticationId.get(key)
+    if (!existing || String(record.id) < String(existing.id)) {
+      bestByDecorticationId.set(key, record)
+    }
+  }
+  return [...withoutKey, ...bestByDecorticationId.values()]
+}
+
 export function sanitizePersistedAppState(data, { forPersist = false } = {}) {
   if (!data || typeof data !== 'object') {
     return data
@@ -78,9 +99,11 @@ export function sanitizePersistedAppState(data, { forPersist = false } = {}) {
   const decorticationAssignments = Array.isArray(data.decorticationAssignments)
     ? data.decorticationAssignments.filter((assignment) => !isSeedDecorticationAssignment(assignment))
     : data.decorticationAssignments
-  const dryingRecords = Array.isArray(data.dryingRecords)
-    ? data.dryingRecords.filter((record) => !isSeedDryingRecord(record))
-    : data.dryingRecords
+  const dryingRecords = dedupeDryingRecords(
+    Array.isArray(data.dryingRecords)
+      ? data.dryingRecords.filter((record) => !isSeedDryingRecord(record))
+      : data.dryingRecords,
+  )
   const brushingStockMovements = Array.isArray(data.brushingStockMovements)
     ? data.brushingStockMovements.filter((record) => !hasSeedMarker(record.id))
     : data.brushingStockMovements
