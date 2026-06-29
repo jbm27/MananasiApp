@@ -1,4 +1,5 @@
 import { toKenyaDateString } from './kenyaTime.js'
+import { normalizeEmployeeName } from './employeeWorkNumberAssignments.js'
 
 export const CONTRACT_TYPE_OPTIONS = [
   { value: 'regular', label: 'Regular' },
@@ -65,13 +66,22 @@ export function employeeRecordsNeedSeedMerge(employees) {
 
 export function mergeEmployeesWithSeed(storedEmployees, seedEmployees) {
   const seedById = new Map(seedEmployees.map((employee) => [employee.id, employee]))
+  const seedByName = new Map(
+    seedEmployees.map((employee) => [normalizeEmployeeName(employee.name), employee]),
+  )
+  const mergedNames = new Set()
   const merged = storedEmployees.map((employee) => {
-    const seed = seedById.get(employee.id)
+    const seed =
+      seedById.get(employee.id) ?? seedByName.get(normalizeEmployeeName(employee.name)) ?? null
     if (!seed) {
       return { ...createEmptyEmployeeDetails(), ...employee }
     }
+    mergedNames.add(normalizeEmployeeName(seed.name))
     const next = { ...seed }
     for (const [key, value] of Object.entries(employee)) {
+      if (key === 'id') {
+        continue
+      }
       if (value !== undefined && value !== null && value !== '') {
         next[key] = value
       }
@@ -79,13 +89,18 @@ export function mergeEmployeesWithSeed(storedEmployees, seedEmployees) {
     if (employee.role) {
       next.role = employee.role
     }
+    next.id = seed.id
     return next
   })
 
   for (const seed of seedEmployees) {
-    if (!merged.some((employee) => employee.id === seed.id)) {
-      merged.push(seed)
+    if (
+      merged.some((employee) => employee.id === seed.id) ||
+      mergedNames.has(normalizeEmployeeName(seed.name))
+    ) {
+      continue
     }
+    merged.push(seed)
   }
 
   return merged.sort((a, b) => Number(a.id) - Number(b.id))

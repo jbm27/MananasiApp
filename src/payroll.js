@@ -9,8 +9,8 @@ const NSSF_RATE = 0.06
 const AHL_RATE = 0.015
 const OVERTIME_MULTIPLIER = 1.5
 
-export const PAYROLL_EDITOR_EMPLOYEE_IDS = new Set(['1002', '1010', '1019'])
-export const PAYROLL_APPROVER_EMPLOYEE_ID = '1019'
+export const PAYROLL_EDITOR_EMPLOYEE_IDS = new Set(['0001', '0008', '0014'])
+export const PAYROLL_APPROVER_EMPLOYEE_ID = '0014'
 
 export function canEditPayroll(user) {
   if (!user || user.role === 'director') {

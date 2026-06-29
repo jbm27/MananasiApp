@@ -70,6 +70,10 @@ import {
   mergeEmployeesWithSeed,
   parseEmployeeProfileFromForm,
 } from './employeeFields.js'
+import {
+  buildEmployeeIdMapFromNameMatch,
+  remapEmployeeIdsInAppState,
+} from './employeeIdMigration.js'
 import { sanitizePersistedAppState } from './appStateSanitize.js'
 import {
   applyInvoiceFinalizeStockReduction,
@@ -111,12 +115,11 @@ import {
 } from './api/client.js'
 
 function nextEmployeeWorkNumber(employees) {
-  return (
-    employees.reduce((max, employee) => {
-      const digits = Number(String(employee.id).replace(/\D/g, ''))
-      return Number.isFinite(digits) ? Math.max(max, digits) : max
-    }, 1000) + 1
-  )
+  const maxNumber = employees.reduce((max, employee) => {
+    const digits = Number(String(employee.id).replace(/\D/g, ''))
+    return Number.isFinite(digits) ? Math.max(max, digits) : max
+  }, 0)
+  return String(maxNumber + 1).padStart(4, '0')
 }
 
 const activityModules = [
@@ -248,17 +251,17 @@ const DATA_ENTRY_PERMISSION_LABELS = {
   'procurement-approval-limits': 'Set purchase order approval limits for sign-in employees',
 }
 
-/** Policy defaults from organisation roles; James (1019) receives these separately. */
+/** Policy defaults from organisation roles; James (0014) receives these separately. */
 const RESTRICTED_DATA_ENTRY_PERMISSIONS = ['stock-delete', 'invoice-edit-finalized']
 const DEFAULT_EXCLUSIVE_DATA_ENTRY_PERMISSIONS_BY_EMPLOYEE_ID = {
-  '1019': ['stock-delete', 'invoice-edit-finalized'],
+  '0014': ['stock-delete', 'invoice-edit-finalized'],
 }
 const DEFAULT_PAGE_ACCESS_BY_EMPLOYEE_ID = {
-  '1002': ['dashboard', 'employees', 'payroll'],
-  '1010': ['dashboard', 'employees', 'invoicing', 'customers', 'procurement', 'stock', 'payroll'],
-  '1018': ['dashboard', 'stock'],
-  '1019': [...PAGE_ACCESS_IDS],
-  '1004': [
+  '0001': ['dashboard', 'employees', 'payroll'],
+  '0008': ['dashboard', 'employees', 'invoicing', 'customers', 'procurement', 'stock', 'payroll'],
+  '0013': ['dashboard', 'stock'],
+  '0014': [...PAGE_ACCESS_IDS],
+  '0002': [
     'dashboard',
     'stock',
     'decortication',
@@ -267,7 +270,7 @@ const DEFAULT_PAGE_ACCESS_BY_EMPLOYEE_ID = {
     'baling',
     'drying',
   ],
-  '1005': [
+  '0003': [
     'dashboard',
     'stock',
     'decortication',
@@ -276,8 +279,8 @@ const DEFAULT_PAGE_ACCESS_BY_EMPLOYEE_ID = {
     'baling',
     'drying',
   ],
-  '1009': ['dashboard', 'harvesting', 'haulage', 'worker-transport'],
-  '1017': ['dashboard', 'harvesting'],
+  '0007': ['dashboard', 'harvesting', 'haulage', 'worker-transport'],
+  '0012': ['dashboard', 'harvesting'],
 }
 
 function readPagePermissionOverrides() {
@@ -2739,12 +2742,12 @@ function CollapsibleSection({
 
 /** Shown under Leadership & Administration regardless of app role (from staff roster). */
 const leadershipTeamEmployeeIds = new Set([
-  '1002',
-  '1010',
-  '1018',
-  '1005',
-  '1017',
-]) // Naomi, Doreen, Cosmus, David, Francis
+  '0001',
+  '0008',
+  '0013',
+  '0003',
+  '0012',
+]) // Naomi, Doreen, Cosmas, David, Francis
 
 const AUTH_SESSION_KEY = 'mananasiAuthLeadershipUserId'
 
@@ -10335,85 +10338,88 @@ function hydrateAppState(data, setters) {
     return
   }
   const sanitized = mergeOpeningStockRecords(sanitizePersistedAppState(data))
-  if (Array.isArray(sanitized.employees)) {
-    setters.setEmployees(
-      mergeEmployeesWithSeed(
-        sanitized.employees.length > 0 ? sanitized.employees : [],
-        mananasiStaffEmployees,
-      ),
-    )
+  const storedEmployees = Array.isArray(sanitized.employees) ? sanitized.employees : []
+  const mergedEmployees = mergeEmployeesWithSeed(storedEmployees, mananasiStaffEmployees)
+  const employeeIdMap = buildEmployeeIdMapFromNameMatch(storedEmployees, mergedEmployees)
+  const hydratedData =
+    employeeIdMap.size > 0
+      ? { ...remapEmployeeIdsInAppState(sanitized, employeeIdMap), employees: mergedEmployees }
+      : { ...sanitized, employees: mergedEmployees }
+
+  if (Array.isArray(hydratedData.employees)) {
+    setters.setEmployees(hydratedData.employees)
   }
-  if (Array.isArray(sanitized.customers)) setters.setCustomers(sanitized.customers)
-  if (typeof sanitized.activeBatchNumber === 'string') {
-    setters.setActiveBatchNumber(sanitized.activeBatchNumber)
+  if (Array.isArray(hydratedData.customers)) setters.setCustomers(hydratedData.customers)
+  if (typeof hydratedData.activeBatchNumber === 'string') {
+    setters.setActiveBatchNumber(hydratedData.activeBatchNumber)
   }
-  if (Array.isArray(sanitized.clockedInIds)) setters.setClockedInIds(sanitized.clockedInIds)
-  if (Array.isArray(sanitized.records)) setters.setRecords(sanitized.records)
-  if (sanitized.compensationRules) {
+  if (Array.isArray(hydratedData.clockedInIds)) setters.setClockedInIds(hydratedData.clockedInIds)
+  if (Array.isArray(hydratedData.records)) setters.setRecords(hydratedData.records)
+  if (hydratedData.compensationRules) {
     setters.setCompensationRules({
-      incentiveThresholdKg: sanitized.compensationRules.incentiveThresholdKg ?? 250,
-      incentiveRateKesPerKg: sanitized.compensationRules.incentiveRateKesPerKg ?? 1,
-      dailyWageRates: normalizeDailyWageRates(sanitized.compensationRules.dailyWageRates),
+      incentiveThresholdKg: hydratedData.compensationRules.incentiveThresholdKg ?? 250,
+      incentiveRateKesPerKg: hydratedData.compensationRules.incentiveRateKesPerKg ?? 1,
+      dailyWageRates: normalizeDailyWageRates(hydratedData.compensationRules.dailyWageRates),
     })
   }
-  if (sanitized.pagePermissionOverrides && typeof sanitized.pagePermissionOverrides === 'object') {
-    setters.setPagePermissionOverrides(sanitized.pagePermissionOverrides)
-    writePagePermissionOverrides(sanitized.pagePermissionOverrides)
+  if (hydratedData.pagePermissionOverrides && typeof hydratedData.pagePermissionOverrides === 'object') {
+    setters.setPagePermissionOverrides(hydratedData.pagePermissionOverrides)
+    writePagePermissionOverrides(hydratedData.pagePermissionOverrides)
   }
   if (
-    sanitized.dataEntryPermissionOverrides &&
-    typeof sanitized.dataEntryPermissionOverrides === 'object'
+    hydratedData.dataEntryPermissionOverrides &&
+    typeof hydratedData.dataEntryPermissionOverrides === 'object'
   ) {
-    setters.setDataEntryPermissionOverrides(sanitized.dataEntryPermissionOverrides)
-    writeDataEntryPermissionOverrides(sanitized.dataEntryPermissionOverrides)
+    setters.setDataEntryPermissionOverrides(hydratedData.dataEntryPermissionOverrides)
+    writeDataEntryPermissionOverrides(hydratedData.dataEntryPermissionOverrides)
   }
-  if (Array.isArray(sanitized.haulageTrips)) setters.setHaulageTrips(sanitized.haulageTrips)
-  if (sanitized.mileageByDate) setters.setMileageByDate(sanitized.mileageByDate)
-  if (Array.isArray(sanitized.fuelEntries)) setters.setFuelEntries(sanitized.fuelEntries)
-  if (Array.isArray(sanitized.maintenanceEntries)) {
-    setters.setMaintenanceEntries(sanitized.maintenanceEntries)
+  if (Array.isArray(hydratedData.haulageTrips)) setters.setHaulageTrips(hydratedData.haulageTrips)
+  if (hydratedData.mileageByDate) setters.setMileageByDate(hydratedData.mileageByDate)
+  if (Array.isArray(hydratedData.fuelEntries)) setters.setFuelEntries(hydratedData.fuelEntries)
+  if (Array.isArray(hydratedData.maintenanceEntries)) {
+    setters.setMaintenanceEntries(hydratedData.maintenanceEntries)
   }
-  if (Array.isArray(sanitized.decorticationAssignments)) {
-    setters.setDecorticationAssignments(sanitized.decorticationAssignments)
+  if (Array.isArray(hydratedData.decorticationAssignments)) {
+    setters.setDecorticationAssignments(hydratedData.decorticationAssignments)
   }
-  if (Array.isArray(sanitized.decorticationRecords)) {
-    setters.setDecorticationRecords(sanitized.decorticationRecords)
+  if (Array.isArray(hydratedData.decorticationRecords)) {
+    setters.setDecorticationRecords(hydratedData.decorticationRecords)
   }
-  if (Array.isArray(sanitized.dryingRecords)) setters.setDryingRecords(sanitized.dryingRecords)
-  if (Array.isArray(sanitized.dryingAssignments)) {
-    setters.setDryingAssignments(sanitized.dryingAssignments)
+  if (Array.isArray(hydratedData.dryingRecords)) setters.setDryingRecords(hydratedData.dryingRecords)
+  if (Array.isArray(hydratedData.dryingAssignments)) {
+    setters.setDryingAssignments(hydratedData.dryingAssignments)
   }
-  if (Array.isArray(sanitized.brushingStockMovements)) {
-    setters.setBrushingStockMovements(sanitized.brushingStockMovements)
+  if (Array.isArray(hydratedData.brushingStockMovements)) {
+    setters.setBrushingStockMovements(hydratedData.brushingStockMovements)
   }
-  if (Array.isArray(sanitized.brushingDailyRecords)) {
-    setters.setBrushingDailyRecords(sanitized.brushingDailyRecords)
+  if (Array.isArray(hydratedData.brushingDailyRecords)) {
+    setters.setBrushingDailyRecords(hydratedData.brushingDailyRecords)
   }
-  if (Array.isArray(sanitized.balingRecords)) setters.setBalingRecords(sanitized.balingRecords)
-  if (Array.isArray(sanitized.balingAssignments)) {
-    setters.setBalingAssignments(sanitized.balingAssignments)
+  if (Array.isArray(hydratedData.balingRecords)) setters.setBalingRecords(hydratedData.balingRecords)
+  if (Array.isArray(hydratedData.balingAssignments)) {
+    setters.setBalingAssignments(hydratedData.balingAssignments)
   }
-  if (Array.isArray(sanitized.silageRecords)) setters.setSilageRecords(sanitized.silageRecords)
-  if (Array.isArray(sanitized.invoiceDocuments)) {
-    setters.setInvoiceDocuments(withRepairedInvoicePackingListLinks(sanitized.invoiceDocuments))
+  if (Array.isArray(hydratedData.silageRecords)) setters.setSilageRecords(hydratedData.silageRecords)
+  if (Array.isArray(hydratedData.invoiceDocuments)) {
+    setters.setInvoiceDocuments(withRepairedInvoicePackingListLinks(hydratedData.invoiceDocuments))
   }
-  if (Array.isArray(sanitized.invoiceStockIssues)) {
-    setters.setInvoiceStockIssues(sanitized.invoiceStockIssues)
+  if (Array.isArray(hydratedData.invoiceStockIssues)) {
+    setters.setInvoiceStockIssues(hydratedData.invoiceStockIssues)
   }
-  if (Array.isArray(sanitized.suppliers)) {
-    setters.setSuppliers(sanitized.suppliers)
+  if (Array.isArray(hydratedData.suppliers)) {
+    setters.setSuppliers(hydratedData.suppliers)
   }
-  if (Array.isArray(sanitized.purchaseOrders)) {
-    setters.setPurchaseOrders(sanitized.purchaseOrders.map(migratePurchaseOrder))
+  if (Array.isArray(hydratedData.purchaseOrders)) {
+    setters.setPurchaseOrders(hydratedData.purchaseOrders.map(migratePurchaseOrder))
   }
-  if (sanitized.poApprovalLimits && typeof sanitized.poApprovalLimits === 'object') {
-    setters.setPoApprovalLimits(sanitized.poApprovalLimits)
+  if (hydratedData.poApprovalLimits && typeof hydratedData.poApprovalLimits === 'object') {
+    setters.setPoApprovalLimits(hydratedData.poApprovalLimits)
   }
-  if (sanitized.payrollAdjustments) setters.setPayrollAdjustments(sanitized.payrollAdjustments)
-  if (sanitized.salaryPayrollAdjustments) {
-    setters.setSalaryPayrollAdjustments(sanitized.salaryPayrollAdjustments)
+  if (hydratedData.payrollAdjustments) setters.setPayrollAdjustments(hydratedData.payrollAdjustments)
+  if (hydratedData.salaryPayrollAdjustments) {
+    setters.setSalaryPayrollAdjustments(hydratedData.salaryPayrollAdjustments)
   }
-  if (sanitized.payrollApprovals) setters.setPayrollApprovals(sanitized.payrollApprovals)
+  if (hydratedData.payrollApprovals) setters.setPayrollApprovals(hydratedData.payrollApprovals)
 }
 
 function App() {

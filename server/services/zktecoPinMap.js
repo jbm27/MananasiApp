@@ -14,6 +14,16 @@ export async function resolveEmployeeIdFromDevicePin(pin) {
     return direct.id
   }
 
+  const pinWithoutLeadingZeros = raw.replace(/^0+/, '') || '0'
+  const fromNumericPin = employees.find((employee) => {
+    const id = String(employee.id).trim()
+    const idWithoutLeadingZeros = id.replace(/^0+/, '') || '0'
+    return idWithoutLeadingZeros === pinWithoutLeadingZeros
+  })
+  if (fromNumericPin) {
+    return fromNumericPin.id
+  }
+
   const legacyBiometric = employees.find(
     (employee) => String(employee.biometricPin ?? '').trim() === raw,
   )

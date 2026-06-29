@@ -1,7 +1,7 @@
 /** Mananasi staff imported from Employee Database App - Contract Dates Filled.xlsx — run `node scripts/buildStaffFromXlsx.mjs` after updating the spreadsheet. */
 export const mananasiStaffEmployees = [
   {
-    "id": "1002",
+    "id": "0001",
     "name": "Naomi Wanjiku Mbugua",
     "role": "general-staff",
     "contractType": "regular",
@@ -32,7 +32,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0743 166 092"
   },
   {
-    "id": "1004",
+    "id": "0002",
     "name": "Bonface Stephanie Ochieng",
     "role": "production-manager",
     "contractType": "regular",
@@ -63,7 +63,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0714 060 027"
   },
   {
-    "id": "1005",
+    "id": "0003",
     "name": "David Omondi Manya",
     "role": "decortication-supervisor",
     "contractType": "regular",
@@ -94,7 +94,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0702 158 452"
   },
   {
-    "id": "1006",
+    "id": "0004",
     "name": "Julius Muia Wanjiku",
     "role": "general-staff",
     "contractType": "regular",
@@ -125,7 +125,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0790 465 218"
   },
   {
-    "id": "1007",
+    "id": "0005",
     "name": "Stacy Kamonya Chagusia",
     "role": "decorticator-operator",
     "contractType": "regular",
@@ -156,7 +156,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0726 873 299"
   },
   {
-    "id": "1008",
+    "id": "0006",
     "name": "Peterlis Ochieng Osiro",
     "role": "decorticator-operator",
     "contractType": "regular",
@@ -187,7 +187,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0719 238 249"
   },
   {
-    "id": "1009",
+    "id": "0007",
     "name": "Moses Omache Momanyi",
     "role": "harvesting-manager",
     "contractType": "regular",
@@ -218,7 +218,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0711 897 542"
   },
   {
-    "id": "1010",
+    "id": "0008",
     "name": "Doreen Gathoni Muriithi",
     "role": "general-staff",
     "contractType": "regular",
@@ -249,7 +249,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0712 281 479"
   },
   {
-    "id": "1013",
+    "id": "0009",
     "name": "Francis Kagai Njuguna",
     "role": "truck-driver",
     "contractType": "regular",
@@ -280,7 +280,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0725 618 801"
   },
   {
-    "id": "1015",
+    "id": "0010",
     "name": "Wilson Mwangi Karuga",
     "role": "truck-driver",
     "contractType": "regular",
@@ -311,7 +311,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0797 207 130"
   },
   {
-    "id": "1016",
+    "id": "0011",
     "name": "Paul Mbaluka Mwangi",
     "role": "general-staff",
     "contractType": "regular",
@@ -342,7 +342,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0718 043 774"
   },
   {
-    "id": "1017",
+    "id": "0012",
     "name": "Francis Denis Okomba",
     "role": "harvesting-supervisor",
     "contractType": "regular",
@@ -373,7 +373,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0719 162 484"
   },
   {
-    "id": "1018",
+    "id": "0013",
     "name": "Cosmus Kinyamasyo Monyi",
     "role": "general-staff",
     "contractType": "regular",
@@ -404,7 +404,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0724 284 466"
   },
   {
-    "id": "1019",
+    "id": "0014",
     "name": "James Lyall Boyd-Moss",
     "role": "admin",
     "contractType": "regular",
@@ -435,7 +435,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0724 255 302"
   },
   {
-    "id": "1020",
+    "id": "0015",
     "name": "Joseph Odhiambo Abong",
     "role": "decortication-supervisor",
     "contractType": "regular",
@@ -466,7 +466,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0727 295 568"
   },
   {
-    "id": "1021",
+    "id": "0016",
     "name": "Brian Kiganjo Mwangi",
     "role": "general-staff",
     "contractType": "regular",
@@ -652,7 +652,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": ""
   },
   {
-    "id": "2143",
+    "id": "0078",
     "name": "Makasi Mwendwa",
     "role": "harvester",
     "contractType": "supplementary",
@@ -683,7 +683,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0717 266 981"
   },
   {
-    "id": "2144",
+    "id": "0079",
     "name": "Nancy Akoth",
     "role": "harvester",
     "contractType": "supplementary",
@@ -714,7 +714,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0728 373 420"
   },
   {
-    "id": "2145",
+    "id": "0080",
     "name": "Doreen Magoi Nyabuto",
     "role": "harvester",
     "contractType": "supplementary",
@@ -745,7 +745,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0740 775 453"
   },
   {
-    "id": "2146",
+    "id": "0081",
     "name": "Protus Wafula Wekesa",
     "role": "harvester",
     "contractType": "supplementary",
@@ -776,7 +776,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0792 390 304"
   },
   {
-    "id": "2147",
+    "id": "0082",
     "name": "Phaustine Esenti Wanjala",
     "role": "silage-operator",
     "contractType": "supplementary",
@@ -807,7 +807,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0724 285 886"
   },
   {
-    "id": "2148",
+    "id": "0083",
     "name": "Alvin Denis Koome",
     "role": "silage-operator",
     "contractType": "supplementary",
@@ -838,7 +838,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0798 374 819"
   },
   {
-    "id": "2149",
+    "id": "0084",
     "name": "Dedan Gachumi Kinuthia",
     "role": "silage-operator",
     "contractType": "supplementary",
@@ -869,7 +869,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0795 194 159"
   },
   {
-    "id": "2150",
+    "id": "0085",
     "name": "Livingstone Wanyonyi Ameyo",
     "role": "harvester",
     "contractType": "supplementary",
@@ -900,7 +900,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0797 772 439"
   },
   {
-    "id": "2151",
+    "id": "0086",
     "name": "Charles Thuo Kamau",
     "role": "harvester",
     "contractType": "supplementary",
@@ -931,7 +931,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0702 118 917"
   },
   {
-    "id": "2152",
+    "id": "0087",
     "name": "Tobias Otieno Otunge",
     "role": "harvester",
     "contractType": "supplementary",
@@ -962,7 +962,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0768 792 767"
   },
   {
-    "id": "2153",
+    "id": "0088",
     "name": "Mwongela Kituku",
     "role": "harvester",
     "contractType": "supplementary",
@@ -993,7 +993,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0769 893 587"
   },
   {
-    "id": "2154",
+    "id": "0089",
     "name": "Mumo Samuel",
     "role": "harvester",
     "contractType": "supplementary",
@@ -1024,7 +1024,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0704 171 591"
   },
   {
-    "id": "2156",
+    "id": "0090",
     "name": "Ann Wanjiru Njihia",
     "role": "decorticator-operator",
     "contractType": "supplementary",
@@ -1055,7 +1055,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0768 829 454"
   },
   {
-    "id": "2157",
+    "id": "0091",
     "name": "Leonidah Bochaberi Mongare",
     "role": "decorticator-operator",
     "contractType": "supplementary",
@@ -1086,7 +1086,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0716 039 989"
   },
   {
-    "id": "2158",
+    "id": "0092",
     "name": "Samuel Mutuku Peter",
     "role": "decorticator-operator",
     "contractType": "supplementary",
@@ -1117,7 +1117,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0707 418 476"
   },
   {
-    "id": "2159",
+    "id": "0093",
     "name": "Scofia Njeri Wangui",
     "role": "harvester",
     "contractType": "supplementary",
@@ -1148,7 +1148,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0711 339 832"
   },
   {
-    "id": "2160",
+    "id": "0094",
     "name": "Akuom Ezekiel Odhiambo",
     "role": "harvester",
     "contractType": "supplementary",
@@ -1179,7 +1179,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0718 765 695"
   },
   {
-    "id": "2161",
+    "id": "0095",
     "name": "Brian Njagi Muriithi",
     "role": "harvester",
     "contractType": "supplementary",
@@ -1210,7 +1210,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0748 590 531"
   },
   {
-    "id": "2162",
+    "id": "0096",
     "name": "Carol Mbithe Mutuku",
     "role": "harvester",
     "contractType": "supplementary",
@@ -1241,7 +1241,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0702 096 015"
   },
   {
-    "id": "2163",
+    "id": "0097",
     "name": "Agnes Nyagoko Wangui",
     "role": "harvester",
     "contractType": "supplementary",
@@ -1272,7 +1272,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0758 217 594"
   },
   {
-    "id": "2164",
+    "id": "0098",
     "name": "Gedion Gicharu Kuria",
     "role": "harvester",
     "contractType": "supplementary",
@@ -1303,7 +1303,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0729 003 086"
   },
   {
-    "id": "2165",
+    "id": "0099",
     "name": "Patrick Maundu Muthui",
     "role": "harvester",
     "contractType": "supplementary",
@@ -1334,7 +1334,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0116 313 720"
   },
   {
-    "id": "2166",
+    "id": "0100",
     "name": "Francis Njuguna Kimani",
     "role": "decorticator-operator",
     "contractType": "supplementary",
@@ -1365,7 +1365,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0789 349 353"
   },
   {
-    "id": "2167",
+    "id": "0101",
     "name": "Peter Mutua Kyalo",
     "role": "decorticator-operator",
     "contractType": "supplementary",
@@ -1427,7 +1427,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0700 717 828"
   },
   {
-    "id": "5003",
+    "id": "0026",
     "name": "Daniel Mutua Mwendakau",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -1458,7 +1458,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0721314 203"
   },
   {
-    "id": "5004",
+    "id": "0027",
     "name": "Eucabeth Nyambeki Okemwa",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -1489,7 +1489,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0727 727 298"
   },
   {
-    "id": "5005",
+    "id": "0028",
     "name": "Viora Njeri Wanjiru",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -1520,7 +1520,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0762 354 377"
   },
   {
-    "id": "5006",
+    "id": "0029",
     "name": "Teresia Kemunto Wanza",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -1551,7 +1551,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0717 586 231"
   },
   {
-    "id": "5007",
+    "id": "0036",
     "name": "Julia Njoki Wainaina",
     "role": "brusher",
     "contractType": "seasonal",
@@ -1582,7 +1582,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0710 506 621"
   },
   {
-    "id": "5008",
+    "id": "0023",
     "name": "Kelvin Mutwiri Gitonga",
     "role": "harvesting-supervisor",
     "contractType": "seasonal",
@@ -1613,7 +1613,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0790 927 867"
   },
   {
-    "id": "5009",
+    "id": "0024",
     "name": "Francis Gitau Waweru",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -1644,7 +1644,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0759 381 113"
   },
   {
-    "id": "5010",
+    "id": "0031",
     "name": "Elizabeth Undisa Vitemo",
     "role": "harvester",
     "contractType": "seasonal",
@@ -1675,7 +1675,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0757 185 549"
   },
   {
-    "id": "5011",
+    "id": "0035",
     "name": "Erick Otsieno Oloto",
     "role": "loader",
     "contractType": "seasonal",
@@ -1706,7 +1706,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0759 532 582"
   },
   {
-    "id": "5012",
+    "id": "0040",
     "name": "Happy Mwende Kilonzo",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -1737,7 +1737,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0702 512 000"
   },
   {
-    "id": "5013",
+    "id": "0042",
     "name": "Fidel Castro Oyange",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -1768,7 +1768,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0797 215 279"
   },
   {
-    "id": "5014",
+    "id": "0043",
     "name": "Kevin Ndombi Kutoyi",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -1799,7 +1799,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0726 481 790"
   },
   {
-    "id": "5015",
+    "id": "0044",
     "name": "Denis Muthomi Njiru",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -1830,7 +1830,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0711 865 670"
   },
   {
-    "id": "5016",
+    "id": "0047",
     "name": "Hellen Ndinda Makoani",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -1861,7 +1861,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0117 077 873"
   },
   {
-    "id": "5017",
+    "id": "0048",
     "name": "Brian Mariera Monari",
     "role": "general-staff",
     "contractType": "seasonal",
@@ -1892,7 +1892,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0705 478 697"
   },
   {
-    "id": "5018",
+    "id": "0049",
     "name": "Mirriam Mumo Tom",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -1923,7 +1923,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0708 055 722"
   },
   {
-    "id": "5019",
+    "id": "0051",
     "name": "Chanai Mariita Ombati",
     "role": "brusher",
     "contractType": "seasonal",
@@ -1954,7 +1954,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0727 468 243"
   },
   {
-    "id": "5020",
+    "id": "0052",
     "name": "Janeffer Mwende Mwendwa",
     "role": "general-staff",
     "contractType": "seasonal",
@@ -1985,7 +1985,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0704 322 370"
   },
   {
-    "id": "5021",
+    "id": "0054",
     "name": "Franklin Sifuna",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -2016,7 +2016,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0719 385 016"
   },
   {
-    "id": "5022",
+    "id": "0065",
     "name": "Edmond Kwemoi Juma",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -2047,7 +2047,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0793 763 342"
   },
   {
-    "id": "5023",
+    "id": "0071",
     "name": "Cecilia Mwikali Mutua",
     "role": "general-staff",
     "contractType": "seasonal",
@@ -2078,7 +2078,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0710 516 843"
   },
   {
-    "id": "5024",
+    "id": "0074",
     "name": "Victoria Nduku Ndambo",
     "role": "brusher",
     "contractType": "seasonal",
@@ -2109,7 +2109,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0794 291 932"
   },
   {
-    "id": "5025",
+    "id": "0075",
     "name": "Esther Wairimu Mbugua",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -2140,7 +2140,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0743 166 092"
   },
   {
-    "id": "5026",
+    "id": "0046",
     "name": "Mary Munanie Titus",
     "role": "harvester",
     "contractType": "seasonal",
@@ -2171,7 +2171,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0795 507 405"
   },
   {
-    "id": "5027",
+    "id": "0063",
     "name": "Cosmus Musyoka Kanini",
     "role": "harvester",
     "contractType": "seasonal",
@@ -2202,7 +2202,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0706 208 595"
   },
   {
-    "id": "5028",
+    "id": "0064",
     "name": "Josphine Wairimu Njoki",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -2233,7 +2233,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0728 111 363"
   },
   {
-    "id": "5029",
+    "id": "0068",
     "name": "Jane Wawira Ndambiri",
     "role": "harvester",
     "contractType": "seasonal",
@@ -2264,7 +2264,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0789 180 028"
   },
   {
-    "id": "5030",
+    "id": "0070",
     "name": "David Mutembei Munyithya",
     "role": "harvester",
     "contractType": "seasonal",
@@ -2295,7 +2295,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0741 801 186"
   },
   {
-    "id": "5031",
+    "id": "0053",
     "name": "Francis Njau Njoroge",
     "role": "loader",
     "contractType": "seasonal",
@@ -2357,7 +2357,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0115 029 237"
   },
   {
-    "id": "5034",
+    "id": "0077",
     "name": "Lydia Mwelu Ngumu",
     "role": "harvester",
     "contractType": "seasonal",
@@ -2388,7 +2388,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0743 386 846"
   },
   {
-    "id": "5035",
+    "id": "0019",
     "name": "Everline Bisieri Keronga",
     "role": "brusher",
     "contractType": "seasonal",
@@ -2419,7 +2419,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0726 316 670"
   },
   {
-    "id": "5036",
+    "id": "0061",
     "name": "Beatrice Wanza Kingoo",
     "role": "harvester",
     "contractType": "seasonal",
@@ -2450,7 +2450,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0791 275 131"
   },
   {
-    "id": "5037",
+    "id": "0072",
     "name": "Simon Mulwa Karanja",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -2481,7 +2481,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0755 012 528"
   },
   {
-    "id": "5038",
+    "id": "0076",
     "name": "Jackson Muema Mutinda",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -2512,7 +2512,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0719 265 205"
   },
   {
-    "id": "5039",
+    "id": "0037",
     "name": "Samuel Kalanga Mukule",
     "role": "harvester",
     "contractType": "seasonal",
@@ -2543,7 +2543,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0723 334 711"
   },
   {
-    "id": "5040",
+    "id": "0032",
     "name": "Beth Wanjiku Guchu",
     "role": "harvester",
     "contractType": "seasonal",
@@ -2574,7 +2574,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0112 389 597"
   },
   {
-    "id": "5041",
+    "id": "0038",
     "name": "Hannah Wambui Karuri",
     "role": "harvester",
     "contractType": "seasonal",
@@ -2605,7 +2605,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0724 673 290"
   },
   {
-    "id": "5042",
+    "id": "0017",
     "name": "Agnes Kiloko Keeli",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -2636,7 +2636,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0716 246 393"
   },
   {
-    "id": "5043",
+    "id": "0018",
     "name": "Esther Ayuma Otoli",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -2667,7 +2667,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0728 801 172"
   },
   {
-    "id": "5044",
+    "id": "0021",
     "name": "Enock Masika Wamalwa",
     "role": "general-staff",
     "contractType": "seasonal",
@@ -2698,7 +2698,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0712592920"
   },
   {
-    "id": "5045",
+    "id": "0022",
     "name": "Zipporah Wanjiru Muthui",
     "role": "brusher",
     "contractType": "seasonal",
@@ -2729,7 +2729,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0724 831 696"
   },
   {
-    "id": "5047",
+    "id": "0033",
     "name": "Samson Thuo Wainaina",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -2760,7 +2760,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0745 618 679"
   },
   {
-    "id": "5048",
+    "id": "0039",
     "name": "Rebecca Kwamboka Okero",
     "role": "brusher",
     "contractType": "seasonal",
@@ -2791,7 +2791,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0724 396 111"
   },
   {
-    "id": "5049",
+    "id": "0041",
     "name": "Antony Obonyo Mariera",
     "role": "harvester",
     "contractType": "seasonal",
@@ -2822,7 +2822,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0707 140 012"
   },
   {
-    "id": "5050",
+    "id": "0055",
     "name": "Priscilla Wangui Mburu",
     "role": "harvester",
     "contractType": "seasonal",
@@ -2853,7 +2853,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0721 122 711"
   },
   {
-    "id": "5051",
+    "id": "0056",
     "name": "Jael Akatekit Okomoli",
     "role": "harvester",
     "contractType": "seasonal",
@@ -2884,7 +2884,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0707 904 676"
   },
   {
-    "id": "5053",
+    "id": "0057",
     "name": "Justin Marwa Mwaura",
     "role": "harvester",
     "contractType": "seasonal",
@@ -2915,7 +2915,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0705 805 201"
   },
   {
-    "id": "5054",
+    "id": "0025",
     "name": "Rosemary Moraa Makinya",
     "role": "general-staff",
     "contractType": "seasonal",
@@ -2946,7 +2946,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0726 550 609"
   },
   {
-    "id": "5055",
+    "id": "0045",
     "name": "Mary Wanjiku Kihara",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -2977,7 +2977,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0728 580 245"
   },
   {
-    "id": "5056",
+    "id": "0058",
     "name": "Joshua Marege Ariemo",
     "role": "harvester",
     "contractType": "seasonal",
@@ -3008,7 +3008,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0706 289 179"
   },
   {
-    "id": "5057",
+    "id": "0059",
     "name": "Mary Ndulu Muinde",
     "role": "harvester",
     "contractType": "seasonal",
@@ -3039,7 +3039,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0721 836 366"
   },
   {
-    "id": "5058",
+    "id": "0060",
     "name": "Ruth Wangari Kamau",
     "role": "harvester",
     "contractType": "seasonal",
@@ -3070,7 +3070,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0720 721 891"
   },
   {
-    "id": "5059",
+    "id": "0062",
     "name": "Rosemary Kabura Karanja",
     "role": "harvester",
     "contractType": "seasonal",
@@ -3101,7 +3101,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0720 221 529"
   },
   {
-    "id": "5060",
+    "id": "0066",
     "name": "David Kimonyi Mutune",
     "role": "loader",
     "contractType": "seasonal",
@@ -3132,7 +3132,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0710 690 212"
   },
   {
-    "id": "5061",
+    "id": "0020",
     "name": "Loice Nafula Wakhungu",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -3163,7 +3163,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0742 321 646"
   },
   {
-    "id": "5062",
+    "id": "0034",
     "name": "Mercyline Mutheu Kitonyi",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -3194,7 +3194,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0714 753 394"
   },
   {
-    "id": "5063",
+    "id": "0073",
     "name": "Selin Magoma Mangana",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -3225,7 +3225,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0725 903 661"
   },
   {
-    "id": "5064",
+    "id": "0069",
     "name": "Limnorah Abondo Otieno",
     "role": "harvester",
     "contractType": "seasonal",
@@ -3256,7 +3256,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0714 216 416"
   },
   {
-    "id": "5065",
+    "id": "0067",
     "name": "Cleophas Otunge Ombala",
     "role": "harvester",
     "contractType": "seasonal",
@@ -3287,7 +3287,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0714 340 728"
   },
   {
-    "id": "5066",
+    "id": "0030",
     "name": "Hanna Nduta Wambu",
     "role": "decorticator-operator",
     "contractType": "seasonal",
@@ -3318,7 +3318,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0725 310 799"
   },
   {
-    "id": "5067",
+    "id": "0050",
     "name": "Ali Kariuki Njuguna",
     "role": "decorticator-operator",
     "contractType": "seasonal",

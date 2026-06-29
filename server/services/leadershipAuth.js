@@ -5,7 +5,7 @@ import {
   setLeadershipPasswordHash,
 } from './leadershipAuthStore.js'
 
-const leadershipTeamEmployeeIds = new Set(['1002', '1010', '1018', '1005', '1017'])
+const leadershipTeamEmployeeIds = new Set(['0001', '0008', '0013', '0003', '0012'])
 
 export function buildLoginUsername(displayName) {
   return String(displayName ?? '')
