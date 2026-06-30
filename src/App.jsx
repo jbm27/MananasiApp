@@ -12,6 +12,7 @@ import {
 } from 'react-router-dom'
 import { jsPDF } from 'jspdf'
 import './App.css'
+import AttendancePage from './AttendancePage.jsx'
 import PayrollPage from './PayrollPage.jsx'
 import ProcurementPage from './ProcurementPage.jsx'
 import {
@@ -25,7 +26,6 @@ import {
 } from './procurement.js'
 import {
   canApprovePayroll,
-  countDaysWorkedFromAttendance,
   createPayrollApproval,
   isPayrollSectionApproved,
 } from './payroll.js'
@@ -111,7 +111,6 @@ import {
   changeLeadershipPassword,
   fetchAppState,
   fetchAttendanceEvents,
-  fetchAttendanceEventsForPeriod,
   fetchLeadershipAccounts,
   leadershipLogin,
   setLeadershipPassword,
@@ -179,6 +178,7 @@ const DATA_ENTRY_PERMISSIONS_STORAGE_KEY = 'mananasiDataEntryPermissions'
 const PAGE_ACCESS_IDS = [
   'dashboard',
   'employees',
+  'attendance',
   'customers',
   'stock',
   'harvesting',
@@ -197,6 +197,7 @@ const PAGE_ACCESS_IDS = [
 const PAGE_ACCESS_LABELS = {
   dashboard: 'Dashboard',
   employees: 'Employees',
+  attendance: 'Attendance',
   customers: 'Customers',
   stock: 'Stock',
   harvesting: 'Harvesting',
@@ -260,8 +261,8 @@ const DEFAULT_EXCLUSIVE_DATA_ENTRY_PERMISSIONS_BY_EMPLOYEE_ID = {
   '0014': ['stock-delete', 'invoice-edit-finalized'],
 }
 const DEFAULT_PAGE_ACCESS_BY_EMPLOYEE_ID = {
-  '0001': ['dashboard', 'employees', 'payroll'],
-  '0008': ['dashboard', 'employees', 'invoicing', 'customers', 'procurement', 'stock', 'payroll'],
+  '0001': ['dashboard', 'employees', 'attendance', 'payroll'],
+  '0008': ['dashboard', 'employees', 'attendance', 'invoicing', 'customers', 'procurement', 'stock', 'payroll'],
   '0013': ['dashboard', 'stock'],
   '0014': [...PAGE_ACCESS_IDS],
   '0002': [
@@ -375,6 +376,9 @@ function pathnameToRequiredPageId(pathname) {
   const path = pathname || ''
   if (path === '/' || path === '') {
     return null
+  }
+  if (path.startsWith('/attendance')) {
+    return 'attendance'
   }
   if (path.startsWith('/employees')) {
     return 'employees'
@@ -3389,8 +3393,6 @@ function EmployeesPage({
   harvestingDateTo,
   clockedInIds,
   attendanceEvents,
-  onRefreshAttendance,
-  attendanceRefreshing,
   onUpdateEmployeeRole,
 }) {
   const navigate = useNavigate()
@@ -3409,12 +3411,6 @@ function EmployeesPage({
   const [wageRateInput, setWageRateInput] = useState(String(dailyWageRates[DAILY_WAGE_RATE_KEYS[0]]))
   const [wageRateStatus, setWageRateStatus] = useState('')
   const [showDailyWageRates, setShowDailyWageRates] = useState(false)
-  const [showAttendance, setShowAttendance] = useState(false)
-  const [attendancePeriodFrom, setAttendancePeriodFrom] = useState(harvestingDateFrom)
-  const [attendancePeriodTo, setAttendancePeriodTo] = useState(harvestingDateTo)
-  const [periodAttendanceEvents, setPeriodAttendanceEvents] = useState([])
-  const [attendancePeriodLoading, setAttendancePeriodLoading] = useState(false)
-  const clockedInCount = clockedInIds.length
   const recentClockEvents = attendanceEvents.slice(0, RECENT_CLOCK_EVENTS_LIMIT)
   const roleDefinitions = useMemo(
     () => employeeRoleOptions.map((option) => ({ id: option.value, name: option.label })),
@@ -3461,62 +3457,6 @@ function EmployeesPage({
       })
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [employees, employeeSearchQuery])
-
-  const loadPeriodAttendance = useCallback(async () => {
-    if (!attendancePeriodFrom || !attendancePeriodTo) {
-      setPeriodAttendanceEvents([])
-      return
-    }
-    setAttendancePeriodLoading(true)
-    try {
-      const events = await fetchAttendanceEventsForPeriod(
-        attendancePeriodFrom,
-        attendancePeriodTo,
-      )
-      setPeriodAttendanceEvents(events)
-    } catch {
-      setPeriodAttendanceEvents([])
-    } finally {
-      setAttendancePeriodLoading(false)
-    }
-  }, [attendancePeriodFrom, attendancePeriodTo])
-
-  useEffect(() => {
-    if (!showAttendance) {
-      return
-    }
-    loadPeriodAttendance()
-  }, [showAttendance, loadPeriodAttendance])
-
-  const attendanceSummaryRows = useMemo(
-    () =>
-      employees
-        .map((employee) => ({
-          id: employee.id,
-          name: employee.name,
-          role: getEmployeeRoleLabel(employee.role),
-          clockedIn: clockedInIds.includes(employee.id),
-          daysWorked: countDaysWorkedFromAttendance(
-            periodAttendanceEvents,
-            employee.id,
-            attendancePeriodFrom,
-            attendancePeriodTo,
-          ),
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [
-      employees,
-      clockedInIds,
-      periodAttendanceEvents,
-      attendancePeriodFrom,
-      attendancePeriodTo,
-    ],
-  )
-
-  async function handleRefreshAttendanceSummary() {
-    await onRefreshAttendance()
-    await loadPeriodAttendance()
-  }
 
   useEffect(() => {
     setWageRateInput(String(dailyWageRates[selectedWageRateKey] ?? ''))
@@ -3617,82 +3557,6 @@ function EmployeesPage({
           </>
         ) : null}
       </p>
-
-      <CollapsibleSection
-        title="Attendance"
-        isOpen={showAttendance}
-        onToggle={() => setShowAttendance((prev) => !prev)}
-      >
-        <p className="inline-hint">
-          <strong>{clockedInCount}</strong> of {employees.length} employees are clocked in right now.
-          Days worked counts distinct clock-in days in the selected period (Kenya time).
-        </p>
-        <div className="form-grid">
-          <label>
-            From
-            <input
-              type="date"
-              value={attendancePeriodFrom}
-              onChange={(event) => setAttendancePeriodFrom(event.target.value)}
-            />
-          </label>
-          <label>
-            To
-            <input
-              type="date"
-              value={attendancePeriodTo}
-              onChange={(event) => setAttendancePeriodTo(event.target.value)}
-            />
-          </label>
-          <button
-            type="button"
-            onClick={handleRefreshAttendanceSummary}
-            disabled={attendanceRefreshing || attendancePeriodLoading}
-          >
-            {attendanceRefreshing || attendancePeriodLoading
-              ? 'Refreshing…'
-              : 'Refresh clock-in status'}
-          </button>
-        </div>
-        {attendancePeriodLoading ? (
-          <p className="inline-hint">Loading attendance for the selected period…</p>
-        ) : null}
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Work No</th>
-                <th>Name</th>
-                <th>Role</th>
-                <th>Clock-in status</th>
-                <th>Days worked</th>
-              </tr>
-            </thead>
-            <tbody>
-              {attendanceSummaryRows.map((row) => (
-                <tr key={row.id}>
-                  <td>
-                    <code>{row.id}</code>
-                  </td>
-                  <td>{row.name}</td>
-                  <td>{row.role}</td>
-                  <td>
-                    <span className={row.clockedIn ? 'badge badge-on' : 'badge badge-off'}>
-                      {row.clockedIn ? 'Clocked In' : 'Not Clocked In'}
-                    </span>
-                  </td>
-                  <td>{row.daysWorked}</td>
-                </tr>
-              ))}
-              {attendanceSummaryRows.length === 0 && (
-                <tr>
-                  <td colSpan="5">No employees found.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </CollapsibleSection>
 
       {canEditDailyWageRates ? (
         <CollapsibleSection
@@ -12324,6 +12188,7 @@ function App() {
         <nav>
           {allowedPages.has('dashboard') ? <NavLink to="/">Dashboard</NavLink> : null}
           {allowedPages.has('employees') ? <NavLink to="/employees">Employees</NavLink> : null}
+          {allowedPages.has('attendance') ? <NavLink to="/attendance">Attendance</NavLink> : null}
           {allowedPages.has('payroll') ? <NavLink to="/payroll">Payroll</NavLink> : null}
           {isAppAdmin(currentUser) ? (
             <NavLink to="/admin/sign-in-accounts">Sign-in accounts</NavLink>
@@ -12375,13 +12240,24 @@ function App() {
                 harvestingDateTo={harvestingDateTo}
                 clockedInIds={clockedInIds}
                 attendanceEvents={attendanceEvents}
-                onRefreshAttendance={handleRefreshAttendance}
-                attendanceRefreshing={attendanceRefreshing}
                 onUpdateEmployeeRole={handleUpdateEmployeeRole}
               />
             }
           />
-          <Route path="/attendance" element={<Navigate to="/employees" replace />} />
+          <Route
+            path="/attendance"
+            element={
+              <AttendancePage
+                employees={employees}
+                clockedInIds={clockedInIds}
+                onRefreshAttendance={handleRefreshAttendance}
+                attendanceRefreshing={attendanceRefreshing}
+                dateFrom={harvestingDateFrom}
+                dateTo={harvestingDateTo}
+                getRoleLabel={getEmployeeRoleLabel}
+              />
+            }
+          />
           <Route
             path="/account/password"
             element={<LeadershipChangePasswordPage currentUser={currentUser} />}
