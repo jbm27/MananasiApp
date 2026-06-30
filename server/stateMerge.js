@@ -18,6 +18,8 @@ const MERGE_BY_ID_KEYS = [
   'balingRecords',
   'silageRecords',
   'invoiceStockIssues',
+  'leaveRecords',
+  'publicHolidays',
 ]
 
 function recordKey(item) {

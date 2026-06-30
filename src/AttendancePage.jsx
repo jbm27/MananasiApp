@@ -1,6 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { fetchAttendanceEventsForPeriod } from './api/client.js'
+import {
+  COMPASSIONATE_LEAVE_DAYS_PER_YEAR,
+  SICK_LEAVE_DAYS_PER_YEAR,
+  countLeaveDays,
+  formatLeaveDays,
+  getAnnualLeaveEntitlement,
+  getCompassionateLeaveEntitlement,
+  getLeaveSummaryPeriod,
+  getLeaveTypeLabel,
+  getSickLeaveEntitlement,
+  LEAVE_TYPES,
+  countWorkingDaysRemainingOnContract,
+  summarizeLeaveForEmployee,
+} from './leave.js'
 import { countDaysWorkedFromAttendance } from './payroll.js'
+import { toKenyaDateString } from './kenyaTime.js'
 
 function CollapsibleSection({ title, isOpen, onToggle, children }) {
   return (
@@ -14,6 +29,11 @@ function CollapsibleSection({ title, isOpen, onToggle, children }) {
   )
 }
 
+function formatDisplayDate(isoDate) {
+  const [year, month, day] = isoDate.split('-')
+  return `${day}/${month}/${year}`
+}
+
 export default function AttendancePage({
   employees,
   clockedInIds,
@@ -22,14 +42,42 @@ export default function AttendancePage({
   dateFrom,
   dateTo,
   getRoleLabel = (role) => role,
+  leaveRecords,
+  publicHolidays,
+  onAddLeaveRecord,
+  onRemoveLeaveRecord,
+  onAddPublicHoliday,
+  onRemovePublicHoliday,
+  readOnly = false,
 }) {
+  const today = toKenyaDateString(new Date())
   const [showRegister, setShowRegister] = useState(false)
+  const [showRecordLeave, setShowRecordLeave] = useState(false)
+  const [showPublicHolidays, setShowPublicHolidays] = useState(false)
   const [periodFrom, setPeriodFrom] = useState(dateFrom)
   const [periodTo, setPeriodTo] = useState(dateTo)
+  const [registerFilterMode, setRegisterFilterMode] = useState('date-range')
   const [periodAttendanceEvents, setPeriodAttendanceEvents] = useState([])
   const [periodLoading, setPeriodLoading] = useState(false)
+  const [leaveEmployeeId, setLeaveEmployeeId] = useState('')
+  const [leaveType, setLeaveType] = useState('annual')
+  const [leaveStartDate, setLeaveStartDate] = useState(today)
+  const [leaveEndDate, setLeaveEndDate] = useState(today)
+  const [leaveStatus, setLeaveStatus] = useState('')
+  const [holidayDate, setHolidayDate] = useState(today)
+  const [holidayName, setHolidayName] = useState('')
+  const [holidayStatus, setHolidayStatus] = useState('')
+  const [holidayYear, setHolidayYear] = useState(today.slice(0, 4))
 
   const clockedInCount = clockedInIds.length
+  const sortedEmployees = useMemo(
+    () => [...employees].sort((a, b) => a.name.localeCompare(b.name)),
+    [employees],
+  )
+  const pendingLeaveDays = useMemo(
+    () => countLeaveDays(leaveStartDate, leaveEndDate, publicHolidays),
+    [leaveStartDate, leaveEndDate, publicHolidays],
+  )
 
   const loadPeriodAttendance = useCallback(async () => {
     if (!periodFrom || !periodTo) {
@@ -56,8 +104,29 @@ export default function AttendancePage({
 
   const registerRows = useMemo(
     () =>
-      employees
-        .map((employee) => ({
+      sortedEmployees.map((employee) => {
+        const leavePeriod = getLeaveSummaryPeriod(
+          employee,
+          registerFilterMode,
+          periodFrom,
+          periodTo,
+          today,
+        )
+        const leaveSummary = leavePeriod
+          ? summarizeLeaveForEmployee(
+              leaveRecords,
+              employee.id,
+              leavePeriod.from,
+              leavePeriod.to,
+              publicHolidays,
+            )
+          : { annual: 0, sick: 0, compassionate: 0, unpaid: 0 }
+        const contractDaysRemaining =
+          registerFilterMode === 'contract-term'
+            ? countWorkingDaysRemainingOnContract(employee.contractEndDate, publicHolidays, today)
+            : null
+
+        return {
           id: employee.id,
           name: employee.name,
           role: getRoleLabel(employee.role),
@@ -68,9 +137,47 @@ export default function AttendancePage({
             periodFrom,
             periodTo,
           ),
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [employees, clockedInIds, periodAttendanceEvents, periodFrom, periodTo, getRoleLabel],
+          leaveSummary,
+          contractDaysRemaining,
+          annualEntitlement: getAnnualLeaveEntitlement(employee),
+          sickEntitlement: getSickLeaveEntitlement(
+            employee.contractStartDate,
+            employee.contractEndDate,
+          ),
+          compassionateEntitlement: getCompassionateLeaveEntitlement(
+            employee.contractStartDate,
+            employee.contractEndDate,
+          ),
+        }
+      }),
+    [
+      sortedEmployees,
+      registerFilterMode,
+      periodFrom,
+      periodTo,
+      today,
+      leaveRecords,
+      publicHolidays,
+      clockedInIds,
+      periodAttendanceEvents,
+      getRoleLabel,
+    ],
+  )
+
+  const holidaysForYear = useMemo(
+    () =>
+      [...publicHolidays]
+        .filter((holiday) => holiday.date?.startsWith(holidayYear))
+        .sort((a, b) => a.date.localeCompare(b.date)),
+    [publicHolidays, holidayYear],
+  )
+
+  const recentLeaveRecords = useMemo(
+    () =>
+      [...leaveRecords]
+        .sort((a, b) => b.startDate.localeCompare(a.startDate) || b.recordedAt.localeCompare(a.recordedAt))
+        .slice(0, 50),
+    [leaveRecords],
   )
 
   async function handleRefresh() {
@@ -78,12 +185,72 @@ export default function AttendancePage({
     await loadPeriodAttendance()
   }
 
+  function handleRecordLeave(event) {
+    event.preventDefault()
+    setLeaveStatus('')
+    if (!leaveEmployeeId) {
+      setLeaveStatus('Select an employee.')
+      return
+    }
+    if (!leaveStartDate || !leaveEndDate) {
+      setLeaveStatus('Enter leave start and end dates.')
+      return
+    }
+    if (leaveStartDate > leaveEndDate) {
+      setLeaveStatus('Leave end date must be on or after the start date.')
+      return
+    }
+    if (pendingLeaveDays <= 0) {
+      setLeaveStatus('The selected dates do not include any working leave days.')
+      return
+    }
+    onAddLeaveRecord({
+      employeeId: leaveEmployeeId,
+      leaveType,
+      startDate: leaveStartDate,
+      endDate: leaveEndDate,
+    })
+    setLeaveStatus(`Recorded ${formatLeaveDays(pendingLeaveDays)} day(s) of ${getLeaveTypeLabel(leaveType).toLowerCase()}.`)
+    setLeaveEndDate(leaveStartDate)
+  }
+
+  function handleAddHoliday(event) {
+    event.preventDefault()
+    setHolidayStatus('')
+    const name = holidayName.trim()
+    if (!holidayDate) {
+      setHolidayStatus('Select a holiday date.')
+      return
+    }
+    if (!name) {
+      setHolidayStatus('Enter a holiday name.')
+      return
+    }
+    if (publicHolidays.some((holiday) => holiday.date === holidayDate)) {
+      setHolidayStatus('A public holiday is already recorded on that date.')
+      return
+    }
+    onAddPublicHoliday({ date: holidayDate, name })
+    setHolidayName('')
+    setHolidayStatus(`Added ${name} on ${formatDisplayDate(holidayDate)}.`)
+    setHolidayYear(holidayDate.slice(0, 4))
+  }
+
+  const sickLeaveHeader =
+    registerFilterMode === 'contract-term'
+      ? `Sick leave (max ${formatLeaveDays(SICK_LEAVE_DAYS_PER_YEAR)} p.a., pro-rata)`
+      : 'Sick leave'
+  const compassionateLeaveHeader =
+    registerFilterMode === 'contract-term'
+      ? `Compassionate leave (max ${formatLeaveDays(COMPASSIONATE_LEAVE_DAYS_PER_YEAR)} p.a., pro-rata)`
+      : 'Compassionate leave'
+
   return (
     <section className="panel">
       <h2>Attendance</h2>
       <p>
-        Review clock-in status and days worked from biometric scanner events. Scanner User ID on each
-        device matches the employee work number.
+        Review clock-in status, record employee leave, and manage Kenyan public holidays. Leave days
+        exclude Sundays and public holidays; Saturdays count as working days.
       </p>
 
       <CollapsibleSection
@@ -93,9 +260,19 @@ export default function AttendancePage({
       >
         <p className="inline-hint">
           <strong>{clockedInCount}</strong> of {employees.length} employees are clocked in right now.
-          Days worked counts distinct clock-in days in the selected period (Kenya time).
+          Days worked counts distinct clock-in days in the selected date range (Kenya time).
         </p>
         <div className="form-grid">
+          <label>
+            Period basis
+            <select
+              value={registerFilterMode}
+              onChange={(event) => setRegisterFilterMode(event.target.value)}
+            >
+              <option value="date-range">Date range</option>
+              <option value="contract-term">Contract term</option>
+            </select>
+          </label>
           <label>
             From
             <input
@@ -120,6 +297,17 @@ export default function AttendancePage({
             {attendanceRefreshing || periodLoading ? 'Refreshing…' : 'Refresh clock-in status'}
           </button>
         </div>
+        {registerFilterMode === 'contract-term' ? (
+          <p className="inline-hint">
+            Leave columns summarise days taken from each employee&apos;s contract start to the earlier
+            of their contract end, today, and the &ldquo;To&rdquo; date above. Contract days remaining
+            counts working days from today through contract end.
+          </p>
+        ) : (
+          <p className="inline-hint">
+            Leave columns summarise days taken within the date range above.
+          </p>
+        )}
         {periodLoading ? (
           <p className="inline-hint">Loading attendance for the selected period…</p>
         ) : null}
@@ -132,6 +320,11 @@ export default function AttendancePage({
                 <th>Role</th>
                 <th>Clock-in status</th>
                 <th>Days worked</th>
+                <th>Annual leave</th>
+                <th>{sickLeaveHeader}</th>
+                <th>{compassionateLeaveHeader}</th>
+                <th>Unpaid leave</th>
+                {registerFilterMode === 'contract-term' ? <th>Contract days remaining</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -148,11 +341,233 @@ export default function AttendancePage({
                     </span>
                   </td>
                   <td>{row.daysWorked}</td>
+                  <td>
+                    {formatLeaveDays(row.leaveSummary.annual)}
+                    {registerFilterMode === 'contract-term' && row.annualEntitlement != null
+                      ? ` / ${formatLeaveDays(row.annualEntitlement)}`
+                      : ''}
+                  </td>
+                  <td>
+                    {formatLeaveDays(row.leaveSummary.sick)}
+                    {registerFilterMode === 'contract-term' && row.sickEntitlement != null
+                      ? ` / ${formatLeaveDays(row.sickEntitlement)}`
+                      : ''}
+                  </td>
+                  <td>
+                    {formatLeaveDays(row.leaveSummary.compassionate)}
+                    {registerFilterMode === 'contract-term' && row.compassionateEntitlement != null
+                      ? ` / ${formatLeaveDays(row.compassionateEntitlement)}`
+                      : ''}
+                  </td>
+                  <td>{formatLeaveDays(row.leaveSummary.unpaid)}</td>
+                  {registerFilterMode === 'contract-term' ? (
+                    <td>
+                      {row.contractDaysRemaining == null
+                        ? 'Open-ended'
+                        : formatLeaveDays(row.contractDaysRemaining)}
+                    </td>
+                  ) : null}
                 </tr>
               ))}
               {registerRows.length === 0 && (
                 <tr>
-                  <td colSpan="5">No employees found.</td>
+                  <td colSpan={registerFilterMode === 'contract-term' ? 10 : 9}>
+                    No employees found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        title="Record leave"
+        isOpen={showRecordLeave}
+        onToggle={() => setShowRecordLeave((prev) => !prev)}
+      >
+        {readOnly ? (
+          <p className="inline-hint">Director view: leave cannot be recorded or removed.</p>
+        ) : (
+          <form className="form-grid" onSubmit={handleRecordLeave}>
+            <label>
+              Employee
+              <select
+                value={leaveEmployeeId}
+                onChange={(event) => setLeaveEmployeeId(event.target.value)}
+                required
+              >
+                <option value="">Select employee</option>
+                {sortedEmployees.map((employee) => (
+                  <option key={employee.id} value={employee.id}>
+                    {employee.name} ({employee.id})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Leave type
+              <select value={leaveType} onChange={(event) => setLeaveType(event.target.value)}>
+                {LEAVE_TYPES.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              From
+              <input
+                type="date"
+                value={leaveStartDate}
+                onChange={(event) => setLeaveStartDate(event.target.value)}
+                required
+              />
+            </label>
+            <label>
+              To
+              <input
+                type="date"
+                value={leaveEndDate}
+                onChange={(event) => setLeaveEndDate(event.target.value)}
+                required
+              />
+            </label>
+            <p className="inline-hint">
+              Leave days: <strong>{formatLeaveDays(pendingLeaveDays)}</strong> (excludes Sundays and
+              public holidays)
+            </p>
+            <button type="submit">Record leave</button>
+          </form>
+        )}
+        {leaveStatus ? <p className="inline-hint">{leaveStatus}</p> : null}
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th>Type</th>
+                <th>From</th>
+                <th>To</th>
+                <th>Days</th>
+                {!readOnly ? <th /> : null}
+              </tr>
+            </thead>
+            <tbody>
+              {recentLeaveRecords.map((record) => {
+                const employee = employees.find((item) => item.id === record.employeeId)
+                return (
+                  <tr key={record.id}>
+                    <td>{employee?.name ?? record.employeeId}</td>
+                    <td>{getLeaveTypeLabel(record.leaveType)}</td>
+                    <td>{formatDisplayDate(record.startDate)}</td>
+                    <td>{formatDisplayDate(record.endDate)}</td>
+                    <td>
+                      {formatLeaveDays(
+                        countLeaveDays(record.startDate, record.endDate, publicHolidays),
+                      )}
+                    </td>
+                    {!readOnly ? (
+                      <td>
+                        <button type="button" onClick={() => onRemoveLeaveRecord(record.id)}>
+                          Remove
+                        </button>
+                      </td>
+                    ) : null}
+                  </tr>
+                )
+              })}
+              {recentLeaveRecords.length === 0 && (
+                <tr>
+                  <td colSpan={readOnly ? 5 : 6}>No leave recorded yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        title="Public holidays"
+        isOpen={showPublicHolidays}
+        onToggle={() => setShowPublicHolidays((prev) => !prev)}
+      >
+        <p className="inline-hint">
+          Assign Kenyan public holidays manually. These dates are excluded when calculating leave days
+          and contract working days remaining.
+        </p>
+        {readOnly ? (
+          <p className="inline-hint">Director view: public holidays cannot be changed.</p>
+        ) : (
+          <form className="form-grid" onSubmit={handleAddHoliday}>
+            <label>
+              Date
+              <input
+                type="date"
+                value={holidayDate}
+                onChange={(event) => setHolidayDate(event.target.value)}
+                required
+              />
+            </label>
+            <label>
+              Holiday name
+              <input
+                type="text"
+                value={holidayName}
+                onChange={(event) => setHolidayName(event.target.value)}
+                placeholder="e.g. Madaraka Day"
+                required
+              />
+            </label>
+            <button type="submit">Add public holiday</button>
+          </form>
+        )}
+        {holidayStatus ? <p className="inline-hint">{holidayStatus}</p> : null}
+        <div className="form-grid">
+          <label>
+            Calendar year
+            <input
+              type="number"
+              min="2000"
+              max="2100"
+              value={holidayYear}
+              onChange={(event) => setHolidayYear(event.target.value)}
+            />
+          </label>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Day</th>
+                <th>Holiday</th>
+                {!readOnly ? <th /> : null}
+              </tr>
+            </thead>
+            <tbody>
+              {holidaysForYear.map((holiday) => {
+                const dayName = new Date(`${holiday.date}T12:00:00`).toLocaleDateString('en-GB', {
+                  weekday: 'long',
+                })
+                return (
+                  <tr key={holiday.id}>
+                    <td>{formatDisplayDate(holiday.date)}</td>
+                    <td>{dayName}</td>
+                    <td>{holiday.name}</td>
+                    {!readOnly ? (
+                      <td>
+                        <button type="button" onClick={() => onRemovePublicHoliday(holiday.id)}>
+                          Remove
+                        </button>
+                      </td>
+                    ) : null}
+                  </tr>
+                )
+              })}
+              {holidaysForYear.length === 0 && (
+                <tr>
+                  <td colSpan={readOnly ? 3 : 4}>No public holidays recorded for {holidayYear}.</td>
                 </tr>
               )}
             </tbody>

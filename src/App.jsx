@@ -48,6 +48,13 @@ import {
   withRepairedInvoicePackingListLinks,
 } from './packingList.js'
 import { printPackingListPdf } from './packingListPdf.js'
+import {
+  buildLeaveRecord,
+  formatLeaveDays,
+  getAnnualLeaveEntitlement,
+  nextLeaveRecordId,
+  nextPublicHolidayId,
+} from './leave.js'
 import logoStandard from '../LogoStandard.png'
 import { mananasiStaffEmployees } from './mananasiStaffEmployees.js'
 import {
@@ -4289,6 +4296,15 @@ function EmployeeRecordPage({
               ? `${formatDisplayDate(employee.contractStartDate)} – ${formatDisplayDate(employee.contractEndDate)}`
               : 'Not set'}
           </p>
+          <p>
+            <strong>Annual leave (contract):</strong>{' '}
+            {employee.annualLeaveDaysPerYear != null
+              ? `${formatLeaveDays(employee.annualLeaveDaysPerYear)} days per year`
+              : 'Not set'}
+            {getAnnualLeaveEntitlement(employee) != null
+              ? ` (${formatLeaveDays(getAnnualLeaveEntitlement(employee))} days pro-rata for this contract)`
+              : ''}
+          </p>
         </article>
         <article className="card">
           <h3>Identification & banking</h3>
@@ -4512,6 +4528,17 @@ function EmployeeProfileEditor({
           name="profileContractEndDate"
           type="date"
           defaultValue={employee.contractEndDate ?? ''}
+          disabled={!canEdit}
+        />
+      </label>
+      <label>
+        Annual leave days per year
+        <input
+          name="annualLeaveDaysPerYear"
+          type="number"
+          min="0"
+          step="0.5"
+          defaultValue={employee.annualLeaveDaysPerYear ?? ''}
           disabled={!canEdit}
         />
       </label>
@@ -10420,6 +10447,10 @@ function hydrateAppState(data, setters) {
     setters.setSalaryPayrollAdjustments(hydratedData.salaryPayrollAdjustments)
   }
   if (hydratedData.payrollApprovals) setters.setPayrollApprovals(hydratedData.payrollApprovals)
+  if (Array.isArray(hydratedData.leaveRecords)) setters.setLeaveRecords(hydratedData.leaveRecords)
+  if (Array.isArray(hydratedData.publicHolidays)) {
+    setters.setPublicHolidays(hydratedData.publicHolidays)
+  }
 }
 
 function App() {
@@ -10485,6 +10516,8 @@ function App() {
   const [suppliers, setSuppliers] = useState([])
   const [purchaseOrders, setPurchaseOrders] = useState([])
   const [poApprovalLimits, setPoApprovalLimits] = useState({})
+  const [leaveRecords, setLeaveRecords] = useState([])
+  const [publicHolidays, setPublicHolidays] = useState([])
 
   const currentUser = employees.find((employee) => employee.id === authLeadershipId) ?? null
 
@@ -10522,6 +10555,8 @@ function App() {
       setPayrollAdjustments,
       setSalaryPayrollAdjustments,
       setPayrollApprovals,
+      setLeaveRecords,
+      setPublicHolidays,
     })
     hydratedRef.current = true
   }, [ready, initialData, loadStatus])
@@ -10566,6 +10601,8 @@ function App() {
         payrollAdjustments,
         salaryPayrollAdjustments,
         payrollApprovals,
+        leaveRecords,
+        publicHolidays,
         }),
         { forPersist: true },
       ),
@@ -10598,6 +10635,8 @@ function App() {
       payrollAdjustments,
       salaryPayrollAdjustments,
       payrollApprovals,
+      leaveRecords,
+      publicHolidays,
     ],
   )
 
@@ -11273,6 +11312,39 @@ function App() {
     } finally {
       setAttendanceRefreshing(false)
     }
+  }
+
+  function handleAddLeaveRecord(input) {
+    setLeaveRecords((prev) => [
+      ...prev,
+      buildLeaveRecord(
+        {
+          ...input,
+          id: nextLeaveRecordId(prev),
+          recordedById: currentUser?.id ?? null,
+        },
+        publicHolidays,
+      ),
+    ])
+  }
+
+  function handleRemoveLeaveRecord(recordId) {
+    setLeaveRecords((prev) => prev.filter((record) => record.id !== recordId))
+  }
+
+  function handleAddPublicHoliday(input) {
+    setPublicHolidays((prev) => [
+      ...prev,
+      {
+        id: nextPublicHolidayId(prev),
+        date: input.date,
+        name: input.name.trim(),
+      },
+    ])
+  }
+
+  function handleRemovePublicHoliday(holidayId) {
+    setPublicHolidays((prev) => prev.filter((holiday) => holiday.id !== holidayId))
   }
 
   function handleSubmitHarvestRecord(harvesterId, bundleWeights, recordedById) {
@@ -12255,6 +12327,13 @@ function App() {
                 dateFrom={harvestingDateFrom}
                 dateTo={harvestingDateTo}
                 getRoleLabel={getEmployeeRoleLabel}
+                leaveRecords={leaveRecords}
+                publicHolidays={publicHolidays}
+                onAddLeaveRecord={handleAddLeaveRecord}
+                onRemoveLeaveRecord={handleRemoveLeaveRecord}
+                onAddPublicHoliday={handleAddPublicHoliday}
+                onRemovePublicHoliday={handleRemovePublicHoliday}
+                readOnly={readOnlyMode}
               />
             }
           />
