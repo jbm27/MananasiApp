@@ -60,6 +60,8 @@ export default function AttendancePage({
   const [periodAttendanceEvents, setPeriodAttendanceEvents] = useState([])
   const [periodLoading, setPeriodLoading] = useState(false)
   const [leaveEmployeeId, setLeaveEmployeeId] = useState('')
+  const [leaveEmployeeSearch, setLeaveEmployeeSearch] = useState('')
+  const [leaveEmployeePickerOpen, setLeaveEmployeePickerOpen] = useState(false)
   const [leaveType, setLeaveType] = useState('annual')
   const [leaveStartDate, setLeaveStartDate] = useState(today)
   const [leaveEndDate, setLeaveEndDate] = useState(today)
@@ -77,6 +79,31 @@ export default function AttendancePage({
   const pendingLeaveDays = useMemo(
     () => countLeaveDays(leaveStartDate, leaveEndDate, publicHolidays),
     [leaveStartDate, leaveEndDate, publicHolidays],
+  )
+  const leaveEmployeeSearchQuery = leaveEmployeeSearch.trim().toLowerCase()
+  const leaveEmployeeSearchResults = useMemo(() => {
+    if (!leaveEmployeeSearchQuery) {
+      return []
+    }
+    return sortedEmployees
+      .filter((employee) => {
+        const searchableText = [
+          employee.name,
+          employee.id,
+          employee.phone,
+          employee.email,
+          employee.position,
+          getRoleLabel(employee.role),
+        ]
+          .map((value) => String(value ?? '').toLowerCase())
+          .join(' ')
+        return searchableText.includes(leaveEmployeeSearchQuery)
+      })
+      .slice(0, 25)
+  }, [sortedEmployees, leaveEmployeeSearchQuery, getRoleLabel])
+  const selectedLeaveEmployee = useMemo(
+    () => employees.find((employee) => employee.id === leaveEmployeeId) ?? null,
+    [employees, leaveEmployeeId],
   )
 
   const loadPeriodAttendance = useCallback(async () => {
@@ -185,6 +212,18 @@ export default function AttendancePage({
     await loadPeriodAttendance()
   }
 
+  function handleLeaveEmployeeSearchChange(value) {
+    setLeaveEmployeeSearch(value)
+    setLeaveEmployeePickerOpen(true)
+    setLeaveEmployeeId('')
+  }
+
+  function selectLeaveEmployee(employee) {
+    setLeaveEmployeeId(employee.id)
+    setLeaveEmployeeSearch(`${employee.name} (${employee.id})`)
+    setLeaveEmployeePickerOpen(false)
+  }
+
   function handleRecordLeave(event) {
     event.preventDefault()
     setLeaveStatus('')
@@ -211,6 +250,8 @@ export default function AttendancePage({
       endDate: leaveEndDate,
     })
     setLeaveStatus(`Recorded ${formatLeaveDays(pendingLeaveDays)} day(s) of ${getLeaveTypeLabel(leaveType).toLowerCase()}.`)
+    setLeaveEmployeeId('')
+    setLeaveEmployeeSearch('')
     setLeaveEndDate(leaveStartDate)
   }
 
@@ -390,20 +431,48 @@ export default function AttendancePage({
           <p className="inline-hint">Director view: leave cannot be recorded or removed.</p>
         ) : (
           <form className="form-grid" onSubmit={handleRecordLeave}>
-            <label>
+            <label className="employee-search-field employee-picker-field">
               Employee
-              <select
-                value={leaveEmployeeId}
-                onChange={(event) => setLeaveEmployeeId(event.target.value)}
-                required
-              >
-                <option value="">Select employee</option>
-                {sortedEmployees.map((employee) => (
-                  <option key={employee.id} value={employee.id}>
-                    {employee.name} ({employee.id})
-                  </option>
-                ))}
-              </select>
+              <div className="employee-picker">
+                <input
+                  type="search"
+                  value={leaveEmployeeSearch}
+                  onChange={(event) => handleLeaveEmployeeSearchChange(event.target.value)}
+                  onFocus={() => setLeaveEmployeePickerOpen(true)}
+                  onBlur={() => {
+                    window.setTimeout(() => setLeaveEmployeePickerOpen(false), 150)
+                  }}
+                  placeholder="Search by name, work no, phone, email, or role"
+                  autoComplete="off"
+                  required={!leaveEmployeeId}
+                />
+                {leaveEmployeePickerOpen && leaveEmployeeSearchQuery ? (
+                  <ul className="employee-picker-results" role="listbox">
+                    {leaveEmployeeSearchResults.map((employee) => (
+                      <li key={employee.id}>
+                        <button
+                          type="button"
+                          role="option"
+                          className="employee-picker-option"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => selectLeaveEmployee(employee)}
+                        >
+                          <span>{employee.name}</span>
+                          <code>{employee.id}</code>
+                        </button>
+                      </li>
+                    ))}
+                    {leaveEmployeeSearchResults.length === 0 ? (
+                      <li className="employee-picker-empty">No matching employees.</li>
+                    ) : null}
+                  </ul>
+                ) : null}
+              </div>
+              {selectedLeaveEmployee ? (
+                <p className="inline-hint">
+                  Selected: {selectedLeaveEmployee.name} (<code>{selectedLeaveEmployee.id}</code>)
+                </p>
+              ) : null}
             </label>
             <label>
               Leave type
