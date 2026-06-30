@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Link,
   NavLink,
@@ -25,6 +25,7 @@ import {
 } from './procurement.js'
 import {
   canApprovePayroll,
+  countDaysWorkedFromAttendance,
   createPayrollApproval,
   isPayrollSectionApproved,
 } from './payroll.js'
@@ -110,6 +111,7 @@ import {
   changeLeadershipPassword,
   fetchAppState,
   fetchAttendanceEvents,
+  fetchAttendanceEventsForPeriod,
   fetchLeadershipAccounts,
   leadershipLogin,
   setLeadershipPassword,
@@ -3407,6 +3409,11 @@ function EmployeesPage({
   const [wageRateInput, setWageRateInput] = useState(String(dailyWageRates[DAILY_WAGE_RATE_KEYS[0]]))
   const [wageRateStatus, setWageRateStatus] = useState('')
   const [showDailyWageRates, setShowDailyWageRates] = useState(false)
+  const [showAttendance, setShowAttendance] = useState(false)
+  const [attendancePeriodFrom, setAttendancePeriodFrom] = useState(harvestingDateFrom)
+  const [attendancePeriodTo, setAttendancePeriodTo] = useState(harvestingDateTo)
+  const [periodAttendanceEvents, setPeriodAttendanceEvents] = useState([])
+  const [attendancePeriodLoading, setAttendancePeriodLoading] = useState(false)
   const clockedInCount = clockedInIds.length
   const recentClockEvents = attendanceEvents.slice(0, RECENT_CLOCK_EVENTS_LIMIT)
   const roleDefinitions = useMemo(
@@ -3454,6 +3461,62 @@ function EmployeesPage({
       })
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [employees, employeeSearchQuery])
+
+  const loadPeriodAttendance = useCallback(async () => {
+    if (!attendancePeriodFrom || !attendancePeriodTo) {
+      setPeriodAttendanceEvents([])
+      return
+    }
+    setAttendancePeriodLoading(true)
+    try {
+      const events = await fetchAttendanceEventsForPeriod(
+        attendancePeriodFrom,
+        attendancePeriodTo,
+      )
+      setPeriodAttendanceEvents(events)
+    } catch {
+      setPeriodAttendanceEvents([])
+    } finally {
+      setAttendancePeriodLoading(false)
+    }
+  }, [attendancePeriodFrom, attendancePeriodTo])
+
+  useEffect(() => {
+    if (!showAttendance) {
+      return
+    }
+    loadPeriodAttendance()
+  }, [showAttendance, loadPeriodAttendance])
+
+  const attendanceSummaryRows = useMemo(
+    () =>
+      employees
+        .map((employee) => ({
+          id: employee.id,
+          name: employee.name,
+          role: getEmployeeRoleLabel(employee.role),
+          clockedIn: clockedInIds.includes(employee.id),
+          daysWorked: countDaysWorkedFromAttendance(
+            periodAttendanceEvents,
+            employee.id,
+            attendancePeriodFrom,
+            attendancePeriodTo,
+          ),
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [
+      employees,
+      clockedInIds,
+      periodAttendanceEvents,
+      attendancePeriodFrom,
+      attendancePeriodTo,
+    ],
+  )
+
+  async function handleRefreshAttendanceSummary() {
+    await onRefreshAttendance()
+    await loadPeriodAttendance()
+  }
 
   useEffect(() => {
     setWageRateInput(String(dailyWageRates[selectedWageRateKey] ?? ''))
@@ -3555,15 +3618,81 @@ function EmployeesPage({
         ) : null}
       </p>
 
-      <div className="attendance-toolbar">
-        <p>
-          <strong>{clockedInCount}</strong> of {employees.length} employees clocked in today.
-          Scanner User ID on each device matches the employee Work No.
+      <CollapsibleSection
+        title="Attendance"
+        isOpen={showAttendance}
+        onToggle={() => setShowAttendance((prev) => !prev)}
+      >
+        <p className="inline-hint">
+          <strong>{clockedInCount}</strong> of {employees.length} employees are clocked in right now.
+          Days worked counts distinct clock-in days in the selected period (Kenya time).
         </p>
-        <button type="button" onClick={onRefreshAttendance} disabled={attendanceRefreshing}>
-          {attendanceRefreshing ? 'Refreshing…' : 'Refresh clock-in status'}
-        </button>
-      </div>
+        <div className="form-grid">
+          <label>
+            From
+            <input
+              type="date"
+              value={attendancePeriodFrom}
+              onChange={(event) => setAttendancePeriodFrom(event.target.value)}
+            />
+          </label>
+          <label>
+            To
+            <input
+              type="date"
+              value={attendancePeriodTo}
+              onChange={(event) => setAttendancePeriodTo(event.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={handleRefreshAttendanceSummary}
+            disabled={attendanceRefreshing || attendancePeriodLoading}
+          >
+            {attendanceRefreshing || attendancePeriodLoading
+              ? 'Refreshing…'
+              : 'Refresh clock-in status'}
+          </button>
+        </div>
+        {attendancePeriodLoading ? (
+          <p className="inline-hint">Loading attendance for the selected period…</p>
+        ) : null}
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Work No</th>
+                <th>Name</th>
+                <th>Role</th>
+                <th>Clock-in status</th>
+                <th>Days worked</th>
+              </tr>
+            </thead>
+            <tbody>
+              {attendanceSummaryRows.map((row) => (
+                <tr key={row.id}>
+                  <td>
+                    <code>{row.id}</code>
+                  </td>
+                  <td>{row.name}</td>
+                  <td>{row.role}</td>
+                  <td>
+                    <span className={row.clockedIn ? 'badge badge-on' : 'badge badge-off'}>
+                      {row.clockedIn ? 'Clocked In' : 'Not Clocked In'}
+                    </span>
+                  </td>
+                  <td>{row.daysWorked}</td>
+                </tr>
+              ))}
+              {attendanceSummaryRows.length === 0 && (
+                <tr>
+                  <td colSpan="5">No employees found.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </CollapsibleSection>
 
       {canEditDailyWageRates ? (
         <CollapsibleSection
