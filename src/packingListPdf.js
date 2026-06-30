@@ -81,7 +81,7 @@ export async function printPackingListPdf(document) {
   pdf.setFontSize(7.5)
   pdf.text('Product', colX.product + 1, tableTop + 4.8)
   pdf.text('Description', colX.description + 1, tableTop + 4.8)
-  pdf.text('No of bales', colX.bales + 1, tableTop + 4.8)
+  pdf.text('Bales/bags', colX.bales + 1, tableTop + 4.8)
   pdf.text('Total CBM', colX.cbm + 1, tableTop + 4.8)
   pdf.text('Gross (kg)', colX.gross + 1, tableTop + 4.8)
   pdf.text('Net (kg)', colX.net + 1, tableTop + 4.8)

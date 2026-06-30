@@ -42,6 +42,7 @@ import {
   getCommercialDocumentStatusLabel,
   getCommercialDocumentTypeLabel,
   mapPackingListItemsToFormLines,
+  packingListLineIsCustom,
   validatePackingListItems,
   withRepairedInvoicePackingListLinks,
 } from './packingList.js'
@@ -2006,28 +2007,30 @@ function InvoicingPage({
             Cancel Edit
           </button>
         </form>
+        <p className="inline-hint">
+          Bale/bag counts, CBM, and weights are calculated from the invoice for standard products.
+          Packaging is assumed to weigh 0.25 kg per bale or bag. Custom (CUS) lines can be edited
+          manually.
+        </p>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
                 <th>Product</th>
                 <th>Description</th>
-                <th>No of bales</th>
+                <th>No of bales/bags</th>
                 <th>Total CBM</th>
                 <th>Gross (kg)</th>
                 <th>Net (kg)</th>
               </tr>
             </thead>
             <tbody>
-              {packingLineItems.map((item) => (
+              {packingLineItems.map((item) => {
+                const isCustomLine = packingListLineIsCustom(item)
+                return (
                 <tr key={item.id}>
                   <td>
-                    <input
-                      value={item.product}
-                      onChange={(event) =>
-                        handlePackingLineItemChange(item.id, 'product', event.target.value)
-                      }
-                    />
+                    <input value={item.product} disabled />
                   </td>
                   <td>
                     <input
@@ -2043,6 +2046,7 @@ function InvoicingPage({
                       min="0"
                       step="1"
                       value={item.baleCount}
+                      disabled={!isCustomLine}
                       onChange={(event) =>
                         handlePackingLineItemChange(item.id, 'baleCount', event.target.value)
                       }
@@ -2054,6 +2058,7 @@ function InvoicingPage({
                       min="0"
                       step="0.01"
                       value={item.totalCbm}
+                      disabled={!isCustomLine}
                       onChange={(event) =>
                         handlePackingLineItemChange(item.id, 'totalCbm', event.target.value)
                       }
@@ -2065,6 +2070,7 @@ function InvoicingPage({
                       min="0"
                       step="1"
                       value={item.grossKg}
+                      disabled={!isCustomLine}
                       onChange={(event) =>
                         handlePackingLineItemChange(item.id, 'grossKg', event.target.value)
                       }
@@ -2076,13 +2082,14 @@ function InvoicingPage({
                       min="0"
                       step="1"
                       value={item.netKg}
+                      disabled={!isCustomLine}
                       onChange={(event) =>
                         handlePackingLineItemChange(item.id, 'netKg', event.target.value)
                       }
                     />
                   </td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
         </div>
@@ -2553,7 +2560,7 @@ function InvoicingPage({
                 <tr>
                   <th>Product</th>
                   <th>Description</th>
-                  <th>No of bales</th>
+                  <th>No of bales/bags</th>
                   <th>Total CBM</th>
                   <th>Gross (kg)</th>
                   <th>Net (kg)</th>
@@ -11890,7 +11897,7 @@ function App() {
         message: 'Only finalized invoices without an existing packing list can be converted.',
       }
     }
-    const draft = buildPackingListFromInvoice(source, balingRecords)
+    const draft = buildPackingListFromInvoice(source, balingRecords, silageRecords)
     const duplicateNumber = invoiceDocuments.some(
       (document) =>
         document.documentType === 'packing-list' &&
