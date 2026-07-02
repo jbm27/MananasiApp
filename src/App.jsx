@@ -981,15 +981,15 @@ function printSilageLabelsPdf(records, filename, baggingDate) {
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
   const pageWidth = pdf.internal.pageSize.getWidth()
   const pageHeight = pdf.internal.pageSize.getHeight()
-  const marginX = 10
-  const marginY = 10
-  const gapX = 6
-  const gapY = 6
-  const columns = 2
-  const labelWidth = (pageWidth - marginX * 2 - gapX) / columns
-  const labelHeight = 56
-  const rowsPerPage = Math.floor((pageHeight - marginY * 2 + gapY) / (labelHeight + gapY))
-  const maxPerPage = rowsPerPage * columns
+  const marginX = 8
+  const marginY = 8
+  const gapX = 3
+  const gapY = 2
+  const columns = 4
+  const rowsPerPage = 8
+  const maxPerPage = columns * rowsPerPage
+  const labelWidth = (pageWidth - marginX * 2 - gapX * (columns - 1)) / columns
+  const labelHeight = (pageHeight - marginY * 2 - gapY * (rowsPerPage - 1)) / rowsPerPage
 
   records.forEach((record, index) => {
     if (index > 0 && index % maxPerPage === 0) {
@@ -1003,15 +1003,15 @@ function printSilageLabelsPdf(records, filename, baggingDate) {
     const labelCode = migrateLegacySilageBagCode(record.bagCode, record)
 
     pdf.setDrawColor(0)
-    pdf.setLineWidth(0.6)
+    pdf.setLineWidth(0.4)
     pdf.rect(labelX, labelY, labelWidth, labelHeight)
 
     const bits = buildBarcodeBits(labelCode)
-    const barcodeAreaWidth = labelWidth - 12
-    const barcodeAreaHeight = 24
+    const barcodeAreaWidth = labelWidth - 4
+    const barcodeAreaHeight = labelHeight * 0.38
     const barWidth = barcodeAreaWidth / bits.length
-    const barcodeStartX = labelX + 6
-    const barcodeStartY = labelY + 10
+    const barcodeStartX = labelX + 2
+    const barcodeStartY = labelY + labelHeight * 0.1
 
     pdf.setFillColor(0, 0, 0)
     bits.split('').forEach((bit, bitIndex) => {
@@ -1019,7 +1019,7 @@ function printSilageLabelsPdf(records, filename, baggingDate) {
         pdf.rect(
           barcodeStartX + bitIndex * barWidth,
           barcodeStartY,
-          Math.max(0.2, barWidth),
+          Math.max(0.15, barWidth),
           barcodeAreaHeight,
           'F',
         )
@@ -1028,16 +1028,20 @@ function printSilageLabelsPdf(records, filename, baggingDate) {
 
     pdf.setTextColor(0, 0, 0)
     pdf.setFont('helvetica', 'bold')
-    pdf.setFontSize(10)
-    pdf.text(labelCode, labelX + labelWidth / 2, labelY + 38, { align: 'center' })
+    const codeFontSize = labelCode.length > 24 ? 5 : labelCode.length > 20 ? 5.5 : 6.5
+    pdf.setFontSize(codeFontSize)
+    pdf.text(labelCode, labelX + labelWidth / 2, labelY + labelHeight * 0.72, {
+      align: 'center',
+      maxWidth: labelWidth - 3,
+    })
     if (baggingDate) {
       pdf.setFont('helvetica', 'normal')
-      pdf.setFontSize(9)
+      pdf.setFontSize(5.5)
       pdf.text(
         `Bagged: ${formatDisplayDate(baggingDate)}`,
         labelX + labelWidth / 2,
-        labelY + 46,
-        { align: 'center' },
+        labelY + labelHeight * 0.9,
+        { align: 'center', maxWidth: labelWidth - 3 },
       )
     }
   })
