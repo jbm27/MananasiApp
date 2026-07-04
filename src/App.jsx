@@ -1053,14 +1053,15 @@ function printSilageLabelsPdf(records, filename, baggingDate) {
 function buildDecorticationAssignmentsFromRecords(decorticationRecords) {
   const assignmentMap = {}
   decorticationRecords.forEach((record) => {
-    const key = `${record.date}__${record.machine}__${record.shiftNumber}__${record.batchNumber}`
+    const batchNumber = normalizeBatchNumber(record.batchNumber)
+    const key = `${record.date}__${record.machine}__${record.shiftNumber}__${batchNumber}`
     if (!assignmentMap[key]) {
       assignmentMap[key] = {
-        id: `ASG-${record.date}-${record.machine}-${record.shiftNumber}-${record.batchNumber}`,
+        id: `ASG-${record.date}-${record.machine}-${record.shiftNumber}-${batchNumber}`,
         date: record.date,
         machine: record.machine,
         shiftNumber: record.shiftNumber,
-        batchNumber: record.batchNumber,
+        batchNumber,
         supervisorId: record.supervisorId,
         supervisorName: record.supervisorName,
         operatorIds: record.operatorIds,
@@ -3940,7 +3941,7 @@ function EmployeeRecordPage({
       }
       map[item.harvestedOn].count += 1
       map[item.harvestedOn].kg += item.kg
-      map[item.harvestedOn].batches.add(item.batchNumber)
+      map[item.harvestedOn].batches.add(normalizeBatchNumber(item.batchNumber))
       return map
     }, {}),
   ).sort((a, b) => b.date.localeCompare(a.date))
@@ -4054,7 +4055,7 @@ function EmployeeRecordPage({
                     <td>{item.kg}</td>
                     <td>{item.incentiveKes}</td>
                     <td>{harvestRankByDateAndHarvester[item.harvestedOn]?.[item.harvesterId] ?? '-'}</td>
-                    <td>{item.batchNumber}</td>
+                    <td>{normalizeBatchNumber(item.batchNumber)}</td>
                     <td>{item.clockInTime}</td>
                     <td>{item.clockOutTime}</td>
                   </tr>
@@ -4172,7 +4173,7 @@ function EmployeeRecordPage({
                   <td>{formatDisplayDate(item.date ?? item.weighedDate)}</td>
                   <td>
                     {item.batchNumber
-                      ? `Batch ${item.batchNumber}`
+                      ? `Batch ${normalizeBatchNumber(item.batchNumber)}`
                       : item.machine
                         ? `Machine ${item.machine}`
                         : item.sourceStockCode
@@ -5091,13 +5092,25 @@ function HarvestingPage({
     currentUser?.role === 'harvesting-supervisor'
   const canEnterHarvestData = currentUserDataEntryPermissions.has('harvesting-entry')
   const supervisors = employees.filter((employee) => employee.role === 'harvesting-supervisor')
-  const availableBatches = Array.from(
-    new Set(records.map((record) => normalizeBatchNumber(record.batchNumber))),
-  ).sort()
+  const availableBatches = useMemo(() => {
+    const active = activeBatchNumber ? normalizeBatchNumber(activeBatchNumber) : ''
+    const batches = new Set(
+      [active, ...records.map((record) => normalizeBatchNumber(record.batchNumber))].filter(
+        Boolean,
+      ),
+    )
+    const sorted = Array.from(batches).sort()
+    if (active && batches.has(active)) {
+      return [active, ...sorted.filter((batch) => batch !== active)]
+    }
+    return sorted
+  }, [activeBatchNumber, records])
   const filteredRecords =
     selectedBatchFilter === 'all'
       ? records.filter((record) => record.harvestedOn >= dateFrom && record.harvestedOn <= dateTo)
-      : records.filter((record) => record.batchNumber === selectedBatchFilter)
+      : records.filter(
+          (record) => normalizeBatchNumber(record.batchNumber) === selectedBatchFilter,
+        )
   const dateSpanDays = getInclusiveDays(dateFrom, dateTo)
   const totalKg = filteredRecords.reduce((sum, record) => sum + record.kg, 0)
   const effectiveDays =
@@ -5554,7 +5567,9 @@ function HarvestingDailyPage({ employees, records }) {
   const dayRecords = records.filter(
     (record) =>
       record.harvestedOn === date &&
-      (selectedBatch === 'all' ? true : record.batchNumber === selectedBatch),
+      (selectedBatch === 'all'
+        ? true
+        : normalizeBatchNumber(record.batchNumber) === selectedBatch),
   )
   const sortedDayRecords = [...dayRecords].sort((a, b) =>
     b.harvesterName.localeCompare(a.harvesterName),
@@ -5620,7 +5635,7 @@ function HarvestingDailyPage({ employees, records }) {
                 <td>{record.kg}</td>
                 <td>{record.incentiveKes}</td>
                 <td>{supervisorMap[record.recordedById]?.name ?? record.recordedByName}</td>
-                <td>{record.batchNumber}</td>
+                <td>{normalizeBatchNumber(record.batchNumber)}</td>
                 <td>{record.clockInTime}</td>
                 <td>{record.clockOutTime}</td>
               </tr>
@@ -5701,6 +5716,16 @@ function DecorticationPage({
   const [attendanceViewingEmployeeId, setAttendanceViewingEmployeeId] = useState('')
   const [assignmentStatus, setAssignmentStatus] = useState('')
 
+  useEffect(() => {
+    if (availableBatches.length === 0) {
+      if (batchNumber) setBatchNumber('')
+      return
+    }
+    if (!availableBatches.includes(batchNumber)) {
+      setBatchNumber(availableBatches[0])
+    }
+  }, [availableBatches, batchNumber])
+
   const clockedInSupervisors = employees.filter(
     (employee) =>
       employee.role === 'decortication-supervisor' && clockedInIds.includes(employee.id),
@@ -5715,7 +5740,9 @@ function DecorticationPage({
       ? decorticationRecords.filter(
           (record) => record.date >= dateFrom && record.date <= dateTo,
         )
-      : decorticationRecords.filter((record) => record.batchNumber === selectedBatchFilter)
+      : decorticationRecords.filter(
+          (record) => normalizeBatchNumber(record.batchNumber) === selectedBatchFilter,
+        )
   const dryingByDecorticationRecordId = dryingRecords.reduce((map, record) => {
     if (map[record.decorticationRecordId] == null) {
       map[record.decorticationRecordId] = record.totalDriedKg
@@ -5739,7 +5766,8 @@ function DecorticationPage({
           (assignment) => assignment.date >= dateFrom && assignment.date <= dateTo,
         )
       : decorticationAssignments.filter(
-          (assignment) => assignment.batchNumber === selectedBatchFilter,
+          (assignment) =>
+            normalizeBatchNumber(assignment.batchNumber) === selectedBatchFilter,
         )
   const supervisorAttendance = Object.values(
     filteredAssignments.reduce((map, assignment) => {
@@ -5940,7 +5968,7 @@ function DecorticationPage({
     setEditDate(record.date)
     setEditMachine(record.machine)
     setEditShiftNumber(String(record.shiftNumber))
-    setEditBatchNumber(record.batchNumber)
+    setEditBatchNumber(normalizeBatchNumber(record.batchNumber))
     setEditSupervisorId(record.supervisorId ?? '')
     setEditOperatorIds([...(record.operatorIds ?? [])])
     setEditWaterM3(record.waterM3 > 0 ? String(record.waterM3) : '')
@@ -6604,7 +6632,7 @@ function DecorticationPage({
                                     <td>{formatDisplayDate(assignment.date)}</td>
                                     <td>{assignment.machine}</td>
                                     <td>{assignment.shiftNumber}</td>
-                                    <td>{assignment.batchNumber}</td>
+                                    <td>{normalizeBatchNumber(assignment.batchNumber)}</td>
                                     <td>
                                       {assignment.supervisorId === row.id
                                         ? 'Supervisor'
@@ -6696,7 +6724,9 @@ function DryingPage({
   const filteredDryingRecords =
     selectedBatchFilter === 'all'
       ? dryingRecords.filter((record) => record.weighedDate >= dateFrom && record.weighedDate <= dateTo)
-      : dryingRecords.filter((record) => record.batchNumber === selectedBatchFilter)
+      : dryingRecords.filter(
+          (record) => normalizeBatchNumber(record.batchNumber) === selectedBatchFilter,
+        )
   const sortedDryingRecords = [...filteredDryingRecords].sort((a, b) =>
     a.weighedDate === b.weighedDate
       ? b.shiftNumber - a.shiftNumber
@@ -8523,6 +8553,16 @@ function SilageProductionPage({
   const [dryMatterPercent, setDryMatterPercent] = useState('35')
   const [selectedSupervisorId, setSelectedSupervisorId] = useState('')
 
+  useEffect(() => {
+    if (availableBatches.length === 0) {
+      if (batchNumber) setBatchNumber('')
+      return
+    }
+    if (!availableBatches.includes(batchNumber)) {
+      setBatchNumber(availableBatches[0])
+    }
+  }, [availableBatches, batchNumber])
+
   const canManageSilage = currentUserDataEntryPermissions.has('silage-entry')
   const clockedInSilageEntryStaff = useMemo(
     () =>
@@ -9529,6 +9569,16 @@ function HaulagePage({
   const [maintenanceType, setMaintenanceType] = useState('service')
   const [maintenanceCostKes, setMaintenanceCostKes] = useState('')
 
+  useEffect(() => {
+    if (availableBatches.length === 0) {
+      if (tripBatch) setTripBatch('')
+      return
+    }
+    if (!availableBatches.includes(tripBatch)) {
+      setTripBatch(availableBatches[0])
+    }
+  }, [availableBatches, tripBatch])
+
   const clockedInLoaders = employees.filter(
     (employee) => employee.role === 'loader' && clockedInIds.includes(employee.id),
   )
@@ -9557,7 +9607,9 @@ function HaulagePage({
   const filteredTrips =
     selectedBatchFilter === 'all'
       ? haulageTrips.filter((trip) => trip.date >= dateFrom && trip.date <= dateTo)
-      : haulageTrips.filter((trip) => trip.batchNumber === selectedBatchFilter)
+      : haulageTrips.filter(
+          (trip) => normalizeBatchNumber(trip.batchNumber) === selectedBatchFilter,
+        )
   const byDateCounts = filteredTrips.reduce((map, trip) => {
     map[trip.date] = (map[trip.date] ?? 0) + 1
     return map
@@ -9624,7 +9676,7 @@ function HaulagePage({
   function startEditingTrip(trip) {
     setEditingTripId(trip.id)
     setEditTripDate(trip.date)
-    setEditTripBatch(trip.batchNumber)
+    setEditTripBatch(normalizeBatchNumber(trip.batchNumber))
     setEditDriverId(trip.driverId)
     setEditWeighbridgeWeightKg(String(getHaulageTripWeightKg(trip)))
     setEditLoaderIds([...(trip.loaderIds ?? [])])
@@ -10106,7 +10158,7 @@ function HaulagePage({
                   <tr>
                     <td>{formatDisplayDate(trip.date)}</td>
                     <td>{trip.tripNumber}</td>
-                    <td>{trip.batchNumber}</td>
+                    <td>{normalizeBatchNumber(trip.batchNumber)}</td>
                     <td>{trip.driverName}</td>
                     <td>{trip.loaderIds.length}</td>
                     <td>{getHaulageTripWeightKg(trip).toLocaleString()}</td>
@@ -10237,7 +10289,9 @@ function HarvestingRecordPage({ employees, records }) {
   const filteredRecords =
     selectedBatch === 'all'
       ? records.filter((record) => record.harvestedOn >= dateFrom && record.harvestedOn <= dateTo)
-      : records.filter((record) => record.batchNumber === selectedBatch)
+      : records.filter(
+          (record) => normalizeBatchNumber(record.batchNumber) === selectedBatch,
+        )
 
   if (selectedPerson.role === 'harvester') {
     const harvesterRecords = [...filteredRecords.filter((record) => record.harvesterId === personId)].sort(
@@ -10317,7 +10371,7 @@ function HarvestingRecordPage({ employees, records }) {
     }
     map[record.harvestedOn].recordsCaptured += 1
     map[record.harvestedOn].totalKg += record.kg
-    map[record.harvestedOn].batches.add(record.batchNumber)
+    map[record.harvestedOn].batches.add(normalizeBatchNumber(record.batchNumber))
     return map
   }, {})
   const timeline = periodDatesDesc.map((date) => supervisorDayMap[date] || { harvestedOn: date, isAbsent: true })
@@ -10391,7 +10445,7 @@ function hydrateAppState(data, setters) {
   }
   if (Array.isArray(hydratedData.customers)) setters.setCustomers(hydratedData.customers)
   if (typeof hydratedData.activeBatchNumber === 'string') {
-    setters.setActiveBatchNumber(hydratedData.activeBatchNumber)
+    setters.setActiveBatchNumber(normalizeBatchNumber(hydratedData.activeBatchNumber))
   }
   if (Array.isArray(hydratedData.clockedInIds)) setters.setClockedInIds(hydratedData.clockedInIds)
   if (Array.isArray(hydratedData.records)) setters.setRecords(hydratedData.records)
@@ -10710,18 +10764,24 @@ function App() {
     [employees],
   )
 
-  const availableBatchNumbers = useMemo(
-    () =>
-      Array.from(
-        new Set([
-          ...records.map((record) => normalizeBatchNumber(record.batchNumber)),
-          ...haulageTrips.map((trip) => normalizeBatchNumber(trip.batchNumber)),
-          ...decorticationRecords.map((record) => normalizeBatchNumber(record.batchNumber)),
-          ...silageRecords.map((record) => normalizeBatchNumber(record.batchNumber)),
-        ]),
-      ).sort(),
-    [records, haulageTrips, decorticationRecords, silageRecords],
-  )
+  const availableBatchNumbers = useMemo(() => {
+    const active = activeBatchNumber ? normalizeBatchNumber(activeBatchNumber) : ''
+    const batches = new Set(
+      [
+        active,
+        ...records.map((record) => normalizeBatchNumber(record.batchNumber)),
+        ...haulageTrips.map((trip) => normalizeBatchNumber(trip.batchNumber)),
+        ...decorticationRecords.map((record) => normalizeBatchNumber(record.batchNumber)),
+        ...silageRecords.map((record) => normalizeBatchNumber(record.batchNumber)),
+      ].filter(Boolean),
+    )
+    const sorted = Array.from(batches).sort()
+    // Prefer the active harvesting batch first so new entry forms default to it.
+    if (active && batches.has(active)) {
+      return [active, ...sorted.filter((batch) => batch !== active)]
+    }
+    return sorted
+  }, [activeBatchNumber, records, haulageTrips, decorticationRecords, silageRecords])
   const availableLooseStockOptions = useMemo(() => {
     const stockMap = {}
     dryingRecords.forEach((record) => {
