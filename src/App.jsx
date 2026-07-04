@@ -243,7 +243,7 @@ const DATA_ENTRY_PERMISSION_IDS = [
 
 const DATA_ENTRY_PERMISSION_LABELS = {
   'harvesting-entry': 'Harvesting weight entry',
-  'harvesting-batch': 'Harvesting batch allocation',
+  'harvesting-batch': 'Change active harvesting batch number',
   'harvesting-compensation': 'Harvesting incentive rule',
   'haulage-trip': 'Haulage trip creation',
   'haulage-mileage': 'Haulage mileage, fuel, and maintenance',
@@ -5312,7 +5312,16 @@ function HarvestingPage({
         each day worked.
       </div>
       <div className="rules-box">
-        <strong>Active Batch Number:</strong> {activeBatchNumber}
+        <strong>Active Batch Number:</strong>{' '}
+        {activeBatchNumber ? normalizeBatchNumber(activeBatchNumber) : 'Not set'}
+        {!canManageBatch ? (
+          <>
+            {' '}
+            — an administrator can grant{' '}
+            <strong>Change active harvesting batch number</strong> under Data entry permissions on
+            the employee edit page or Sign-in accounts.
+          </>
+        ) : null}
       </div>
 
       <CollapsibleSection
@@ -5320,7 +5329,7 @@ function HarvestingPage({
         isOpen={showBatchAssignment}
         onToggle={() => setShowBatchAssignment((prev) => !prev)}
         canExpand={canManageBatch}
-        deniedMessage="You do not have batch allocation permission."
+        deniedMessage="You need the “Change active harvesting batch number” permission. An administrator can grant it under Data entry permissions on the employee edit page or Sign-in accounts."
       >
         <form className="form-grid" onSubmit={handleBatchSubmit}>
           <label>
