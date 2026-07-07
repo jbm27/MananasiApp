@@ -7,8 +7,9 @@ import {
   formatDisplayDate,
 } from './documentPdfHeader.js'
 import {
-  allItemsReceived,
+  canDeletePurchaseOrder,
   canEmployeeAuthorizePo,
+  canEmployeeReceivePoItem,
   computePoLineAmount,
   computePoTotal,
   DEFAULT_PO_COST_CATEGORY,
@@ -219,6 +220,7 @@ async function printPurchaseOrderPdf(purchaseOrder, supplier) {
 export default function ProcurementPage({
   suppliers,
   purchaseOrders,
+  purchaseOrderAuditLog,
   poApprovalLimits,
   signInEmployees,
   currentUser,
@@ -229,6 +231,7 @@ export default function ProcurementPage({
   onUpdateSupplier,
   onCreatePurchaseOrder,
   onUpdatePurchaseOrder,
+  onDeletePurchaseOrder,
   onAuthorizePurchaseOrder,
   onMarkPoItemReceived,
   onSetPoApprovalLimit,
@@ -268,6 +271,7 @@ export default function ProcurementPage({
   )
   const [costSummaryDateFrom, setCostSummaryDateFrom] = useState('')
   const [costSummaryDateTo, setCostSummaryDateTo] = useState('')
+  const [auditLogOpen, setAuditLogOpen] = useState(false)
 
   const payPeriodOptions = useMemo(() => {
     const fiscalYear = getFiscalYearForDate(new Date().toISOString().slice(0, 10))
@@ -537,7 +541,6 @@ export default function ProcurementPage({
         return
       }
       setSelectedPoId(updated.id)
-      setEditingPoId('')
       setFormStatus(
         updated.requiresReapproval
           ? `${updated.poNumber} updated and returned to draft for re-approval.`
@@ -546,8 +549,41 @@ export default function ProcurementPage({
       return
     }
     const created = onCreatePurchaseOrder(buildPoInput())
+    if (!created) {
+      setFormStatus('This purchase order could not be saved.')
+      return
+    }
+    setEditingPoId(created.id)
     setSelectedPoId(created.id)
-    setFormStatus(`${created.poNumber} created as draft.`)
+    setFormStatus(`${created.poNumber} saved as draft. Further saves will update this order.`)
+  }
+
+  function handleDeletePo(po) {
+    if (readOnly || !canManageProcurement) {
+      return
+    }
+    if (!canDeletePurchaseOrder(po)) {
+      setFormStatus('Only draft or authorised purchase orders can be deleted.')
+      return
+    }
+    const confirmed = window.confirm(
+      `Delete ${po.poNumber}? This cannot be undone, but a deletion audit record will be kept.`,
+    )
+    if (!confirmed) {
+      return
+    }
+    const result = onDeletePurchaseOrder(po.id)
+    if (!result.ok) {
+      setFormStatus(result.message)
+      return
+    }
+    if (editingPoId === po.id) {
+      resetPoForm()
+    }
+    if (selectedPoId === po.id) {
+      setSelectedPoId('')
+    }
+    setFormStatus(result.message)
   }
 
   function handleAuthorize() {
@@ -566,10 +602,10 @@ export default function ProcurementPage({
   }
 
   function handleMarkReceived(itemId) {
-    if (!selectedPo || readOnly || !canManageProcurement) {
+    if (!selectedPo || readOnly) {
       return
     }
-    const result = onMarkPoItemReceived(selectedPo.id, itemId, currentUser.id)
+    const result = onMarkPoItemReceived(selectedPo.id, itemId, currentUser?.id)
     if (!result.ok) {
       setFormStatus(result.message)
       return
@@ -949,7 +985,11 @@ export default function ProcurementPage({
                 <button type="button" onClick={resetPoForm}>
                   Cancel edit
                 </button>
-              ) : null}
+              ) : (
+                <button type="button" onClick={resetPoForm}>
+                  New PO
+                </button>
+              )}
             </div>
           </form>
         )}
@@ -989,9 +1029,14 @@ export default function ProcurementPage({
                 <td>{getPoStatusLabel(po.status)}</td>
                 <td>
                   {isPurchaseOrderEditable(po) && canManageProcurement && !readOnly ? (
-                    <button type="button" onClick={() => startEditingPo(po)}>
-                      Edit
-                    </button>
+                    <>
+                      <button type="button" onClick={() => startEditingPo(po)}>
+                        Edit
+                      </button>{' '}
+                      <button type="button" onClick={() => handleDeletePo(po)}>
+                        Delete
+                      </button>
+                    </>
                   ) : null}
                 </td>
               </tr>
@@ -1056,11 +1101,16 @@ export default function ProcurementPage({
                         <>
                           Yes
                           {item.receivedAt ? ` (${formatKenyaDateTime(item.receivedAt)})` : ''}
+                          {item.receivedByName ? ` by ${item.receivedByName}` : ''}
                         </>
-                      ) : selectedPo.status === 'authorized' && canManageProcurement && !readOnly ? (
+                      ) : selectedPo.status === 'authorized' &&
+                        !readOnly &&
+                        canEmployeeReceivePoItem(item, currentUser?.id) ? (
                         <button type="button" onClick={() => handleMarkReceived(item.id)}>
                           Mark received
                         </button>
+                      ) : selectedPo.status === 'authorized' && !item.received ? (
+                        'Awaiting receiver'
                       ) : (
                         'No'
                       )}
@@ -1072,6 +1122,16 @@ export default function ProcurementPage({
           </div>
 
           <div className="form-actions">
+            {isPurchaseOrderEditable(selectedPo) && canManageProcurement && !readOnly ? (
+              <>
+                <button type="button" onClick={() => startEditingPo(selectedPo)}>
+                  Edit PO
+                </button>{' '}
+                <button type="button" onClick={() => handleDeletePo(selectedPo)}>
+                  Delete PO
+                </button>
+              </>
+            ) : null}
             {selectedPo.status === 'draft' && canAuthorizeSelected && !readOnly ? (
               <button type="button" onClick={handleAuthorize}>
                 Authorise PO
@@ -1093,6 +1153,55 @@ export default function ProcurementPage({
         </section>
       ) : null}
       </CollapsibleSection>
+
+      {canManageProcurement ? (
+        <CollapsibleSection
+          title="Purchase order deletion audit"
+          isOpen={auditLogOpen}
+          onToggle={() => setAuditLogOpen((open) => !open)}
+        >
+          <p className="inline-hint">
+            Record of draft and authorised purchase orders that were deleted, including who deleted them.
+          </p>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Deleted at</th>
+                  <th>PO #</th>
+                  <th>Deleted by</th>
+                  <th>Supplier</th>
+                  <th>Total (KES)</th>
+                  <th>Status at deletion</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(purchaseOrderAuditLog ?? []).map((entry) => (
+                  <tr key={entry.id}>
+                    <td>{formatKenyaDateTime(entry.deletedAt)}</td>
+                    <td>{entry.poNumber}</td>
+                    <td>
+                      {entry.deletedByName} ({entry.deletedById})
+                    </td>
+                    <td>{entry.snapshot?.supplierName ?? '—'}</td>
+                    <td>
+                      {Number(entry.snapshot?.totalAmount ?? 0).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                      })}
+                    </td>
+                    <td>{getPoStatusLabel(entry.snapshot?.status)}</td>
+                  </tr>
+                ))}
+                {(purchaseOrderAuditLog ?? []).length === 0 ? (
+                  <tr>
+                    <td colSpan="6">No deleted purchase orders recorded yet.</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </CollapsibleSection>
+      ) : null}
 
       <CollapsibleSection
         title="Cost allocation summary"

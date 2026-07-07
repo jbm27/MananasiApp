@@ -232,3 +232,29 @@ export function isPurchaseOrderEditable(po) {
 export function isPurchaseOrderFinalized(po) {
   return po?.status === 'received'
 }
+
+export function canDeletePurchaseOrder(po) {
+  return isPurchaseOrderEditable(po)
+}
+
+export function canEmployeeReceivePoItem(item, employeeId) {
+  return Boolean(
+    item &&
+      employeeId &&
+      !item.received &&
+      String(item.receiverEmployeeId) === String(employeeId),
+  )
+}
+
+export function buildPurchaseOrderDeletionAudit(po, deletedBy) {
+  return {
+    id: `PO-AUDIT-${Date.now()}`,
+    action: 'deleted',
+    poId: po.id,
+    poNumber: po.poNumber,
+    deletedAt: new Date().toISOString(),
+    deletedById: deletedBy.id,
+    deletedByName: deletedBy.name,
+    snapshot: migratePurchaseOrder({ ...po }),
+  }
+}

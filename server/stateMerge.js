@@ -4,6 +4,7 @@ const MERGE_BY_ID_KEYS = [
   'suppliers',
   'invoiceDocuments',
   'purchaseOrders',
+  'purchaseOrderAuditLog',
   'records',
   'haulageTrips',
   'fuelEntries',

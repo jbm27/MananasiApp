@@ -18,7 +18,10 @@ import ProcurementPage from './ProcurementPage.jsx'
 import {
   allItemsReceived,
   buildPoItemsFromInput,
+  buildPurchaseOrderDeletionAudit,
+  canDeletePurchaseOrder,
   canEmployeeAuthorizePo,
+  canEmployeeReceivePoItem,
   isPurchaseOrderEditable,
   migratePurchaseOrder,
   nextPurchaseOrderNumber,
@@ -10506,6 +10509,9 @@ function hydrateAppState(data, setters) {
   if (Array.isArray(hydratedData.purchaseOrders)) {
     setters.setPurchaseOrders(hydratedData.purchaseOrders.map(migratePurchaseOrder))
   }
+  if (Array.isArray(hydratedData.purchaseOrderAuditLog)) {
+    setters.setPurchaseOrderAuditLog(hydratedData.purchaseOrderAuditLog)
+  }
   if (hydratedData.poApprovalLimits && typeof hydratedData.poApprovalLimits === 'object') {
     setters.setPoApprovalLimits(hydratedData.poApprovalLimits)
   }
@@ -10582,6 +10588,7 @@ function App() {
   const [invoiceStockIssues, setInvoiceStockIssues] = useState([])
   const [suppliers, setSuppliers] = useState([])
   const [purchaseOrders, setPurchaseOrders] = useState([])
+  const [purchaseOrderAuditLog, setPurchaseOrderAuditLog] = useState([])
   const [poApprovalLimits, setPoApprovalLimits] = useState({})
   const [leaveRecords, setLeaveRecords] = useState([])
   const [publicHolidays, setPublicHolidays] = useState([])
@@ -10618,6 +10625,7 @@ function App() {
       setInvoiceStockIssues,
       setSuppliers,
       setPurchaseOrders,
+      setPurchaseOrderAuditLog,
       setPoApprovalLimits,
       setPayrollAdjustments,
       setSalaryPayrollAdjustments,
@@ -10664,6 +10672,7 @@ function App() {
         invoiceStockIssues,
         suppliers,
         purchaseOrders,
+        purchaseOrderAuditLog,
         poApprovalLimits,
         payrollAdjustments,
         salaryPayrollAdjustments,
@@ -10698,6 +10707,7 @@ function App() {
       invoiceStockIssues,
       suppliers,
       purchaseOrders,
+      purchaseOrderAuditLog,
       poApprovalLimits,
       payrollAdjustments,
       salaryPayrollAdjustments,
@@ -11308,17 +11318,46 @@ function App() {
     return { ok: true, message: `${po.poNumber} authorised. You can now download the PDF.` }
   }
 
-  function handleMarkPoItemReceived(poId, itemId, receivedById) {
+  function handleDeletePurchaseOrder(poId) {
     if (!canMutateAppData(currentUser) || !currentUserDataEntryPermissions.has('procurement-entry')) {
-      return { ok: false, message: 'You do not have permission to mark items as received.' }
+      return { ok: false, message: 'You do not have permission to delete purchase orders.' }
     }
+    const po = purchaseOrders.find((item) => item.id === poId)
+    if (!po) {
+      return { ok: false, message: 'Purchase order not found.' }
+    }
+    if (!canDeletePurchaseOrder(po)) {
+      return { ok: false, message: 'Only draft or authorised purchase orders can be deleted.' }
+    }
+    setPurchaseOrders((prev) => prev.filter((item) => item.id !== poId))
+    setPurchaseOrderAuditLog((prev) => [
+      buildPurchaseOrderDeletionAudit(po, currentUser),
+      ...prev,
+    ])
+    return { ok: true, message: `${po.poNumber} deleted.` }
+  }
+
+  function handleMarkPoItemReceived(poId, itemId, receivedById) {
     const receiver = employees.find((employee) => employee.id === receivedById)
-    if (!receiver) {
+    if (!receiver || !canMutateAppData(receiver)) {
       return { ok: false, message: 'Could not record who received this item.' }
     }
     const po = purchaseOrders.find((item) => item.id === poId)
-    if (!po || po.status === 'draft' || po.status === 'received') {
+    if (!po || po.status !== 'authorized') {
       return { ok: false, message: 'Authorise the purchase order before marking items received.' }
+    }
+    const line = po.items.find((item) => item.id === itemId)
+    if (!line) {
+      return { ok: false, message: 'Line item not found.' }
+    }
+    if (line.received) {
+      return { ok: false, message: 'This item has already been received.' }
+    }
+    if (!canEmployeeReceivePoItem(line, receivedById)) {
+      return {
+        ok: false,
+        message: 'Only the employee assigned as receiver on this line can mark it as received.',
+      }
     }
     let resultMessage = 'Item marked as received.'
     setPurchaseOrders((prev) =>
@@ -12489,6 +12528,7 @@ function App() {
               <ProcurementPage
                 suppliers={suppliers}
                 purchaseOrders={purchaseOrders}
+                purchaseOrderAuditLog={purchaseOrderAuditLog}
                 poApprovalLimits={poApprovalLimits}
                 signInEmployees={signInEmployees}
                 currentUser={currentUser}
@@ -12499,6 +12539,7 @@ function App() {
                 onUpdateSupplier={handleUpdateSupplier}
                 onCreatePurchaseOrder={handleCreatePurchaseOrder}
                 onUpdatePurchaseOrder={handleUpdatePurchaseOrder}
+                onDeletePurchaseOrder={handleDeletePurchaseOrder}
                 onAuthorizePurchaseOrder={handleAuthorizePurchaseOrder}
                 onMarkPoItemReceived={handleMarkPoItemReceived}
                 onSetPoApprovalLimit={handleSetPoApprovalLimit}
