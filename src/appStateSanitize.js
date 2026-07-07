@@ -3,19 +3,12 @@ import { migrateSilageRecord } from './silageCodes.js'
 const DEMO_CUSTOMER_ID = 'CUST-SEED-001'
 const DEMO_INVOICE_ID = 'INV-SEED-1087'
 
-/** Real harvest entries in production began on this date (inclusive). */
-export const REAL_HARVEST_DATA_START_DATE = '2026-06-12'
-
 function isSeedHarvestRecord(record) {
   return /^\d{4}-\d{4}-\d{2}-\d{2}$/.test(String(record?.id ?? ''))
 }
 
 function shouldRemoveHarvestRecord(record) {
-  const harvestedOn = String(record?.harvestedOn ?? '')
   if (isSeedHarvestRecord(record)) {
-    return true
-  }
-  if (harvestedOn && harvestedOn < REAL_HARVEST_DATA_START_DATE) {
     return true
   }
   return false

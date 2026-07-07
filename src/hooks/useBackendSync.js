@@ -10,6 +10,7 @@ export function useBackendSync() {
   const [syncing, setSyncing] = useState(false)
   const [lastSavedAt, setLastSavedAt] = useState(null)
   const saveTimerRef = useRef(null)
+  const latestServerUpdatedAtRef = useRef(null)
 
   useEffect(() => {
     let cancelled = false
@@ -19,6 +20,7 @@ export function useBackendSync() {
         if (cancelled) {
           return
         }
+        latestServerUpdatedAtRef.current = data?._meta?.updatedAt ?? null
         setInitialData(data)
         setLoadStatus(data == null ? 'empty' : 'loaded')
         setReady(true)
@@ -42,11 +44,21 @@ export function useBackendSync() {
     saveTimerRef.current = setTimeout(async () => {
       setSyncing(true)
       try {
-        await saveAppState(snapshot)
+        const response = await saveAppState({
+          ...snapshot,
+          _meta: {
+            expectedUpdatedAt: latestServerUpdatedAtRef.current,
+          },
+        })
+        latestServerUpdatedAtRef.current = response?.updatedAt ?? latestServerUpdatedAtRef.current
         setLastSavedAt(new Date())
         setSyncError('')
       } catch (error) {
+        if (String(error?.message ?? '').includes('STATE_VERSION_CONFLICT')) {
+          setSyncError('Another session changed data. Please refresh this page before saving again.')
+        } else {
         setSyncError(error.message)
+        }
       } finally {
         setSyncing(false)
       }

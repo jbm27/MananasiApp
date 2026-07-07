@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { getAppState, saveAppState } from '../stateStore.js'
+import { getAppState, saveAppStateWithGuard } from '../stateStore.js'
 import { mergeIncomingAppState } from '../stateMerge.js'
 import { migrateLeadershipPasswordsFromMainState } from '../services/leadershipAuthStore.js'
 import { syncClockedInIdsToAppState } from '../services/attendanceAutoClockOut.js'
@@ -42,14 +42,27 @@ router.put('/', async (req, res) => {
     const clockedInIds = await syncClockedInIdsToAppState()
     const current = await getAppState()
     const { _meta, leaderPasswordHashes: _ignored, clockedInIds: _clientClockedIn, ...incoming } = body
-    const updatedAt = await saveAppState({
+    const saveResult = await saveAppStateWithGuard(
+      {
       ...mergeIncomingAppState(
         stripSensitiveStateFields(current?.data),
         stripSensitiveStateFields(incoming),
       ),
       clockedInIds,
-    })
-    res.json({ ok: true, updatedAt })
+      },
+      {
+        expectedUpdatedAt: _meta?.expectedUpdatedAt ?? null,
+        changeSource: _meta?.changeSource ?? 'api',
+      },
+    )
+    if (saveResult.conflict) {
+      return res.status(409).json({
+        error: 'Data changed on another device/session. Reload latest data before saving again.',
+        code: 'STATE_VERSION_CONFLICT',
+        latestUpdatedAt: saveResult.previousUpdatedAt,
+      })
+    }
+    res.json({ ok: true, updatedAt: saveResult.updatedAt })
   } catch (error) {
     console.error('PUT /api/state failed:', error)
     res.status(500).json({ error: 'Failed to save app state' })

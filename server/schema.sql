@@ -4,6 +4,21 @@ CREATE TABLE IF NOT EXISTS app_state (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS app_state_history (
+  history_id BIGSERIAL PRIMARY KEY,
+  state_id TEXT NOT NULL,
+  change_source TEXT NOT NULL DEFAULT 'api',
+  expected_updated_at TIMESTAMPTZ,
+  previous_updated_at TIMESTAMPTZ,
+  next_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  previous_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+  next_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_state_history_state_created
+  ON app_state_history (state_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS attendance_events (
   id TEXT PRIMARY KEY,
   employee_id TEXT NOT NULL,

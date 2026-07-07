@@ -27,14 +27,26 @@ export async function fetchAppState() {
 }
 
 export async function saveAppState(state) {
+  const expectedUpdatedAt = state?._meta?.expectedUpdatedAt ?? null
+  const payload = expectedUpdatedAt
+    ? {
+        ...state,
+        _meta: {
+          ...(state?._meta ?? {}),
+          expectedUpdatedAt,
+          changeSource: 'web-app',
+        },
+      }
+    : { ...state, _meta: { ...(state?._meta ?? {}), changeSource: 'web-app' } }
   const response = await fetch(`${API_BASE}/api/state`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(state),
+    body: JSON.stringify(payload),
   })
   if (!response.ok) {
     const body = await parseJsonResponse(response)
-    throw new Error(body?.error ?? `Failed to save app state (${response.status})`)
+    const details = [body?.code, body?.error].filter(Boolean).join(': ')
+    throw new Error(details || `Failed to save app state (${response.status})`)
   }
   return parseJsonResponse(response)
 }
