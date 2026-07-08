@@ -75,9 +75,19 @@ export async function syncClockedInIdsToAppState(referenceNow = new Date()) {
   const clockedInIds = await getActiveClockedInEmployeeIds(referenceNow)
   const current = await getAppState()
   const data = current?.data ?? {}
-  await saveAppState({
-    ...data,
-    clockedInIds,
-  })
+  const previous = Array.isArray(data.clockedInIds) ? data.clockedInIds.map(String).sort() : []
+  const next = [...clockedInIds].map(String).sort()
+  const unchanged =
+    previous.length === next.length && previous.every((id, index) => id === next[index])
+  if (!unchanged) {
+    // Preserve app_state.updated_at so open clients can still save invoices/harvests.
+    await saveAppState(
+      {
+        ...data,
+        clockedInIds,
+      },
+      { bumpVersion: false },
+    )
+  }
   return clockedInIds
 }

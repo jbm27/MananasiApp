@@ -10512,6 +10512,9 @@ function hydrateAppState(data, setters) {
   if (Array.isArray(hydratedData.purchaseOrderAuditLog)) {
     setters.setPurchaseOrderAuditLog(hydratedData.purchaseOrderAuditLog)
   }
+  if (hydratedData.deletedEntityIds && typeof hydratedData.deletedEntityIds === 'object') {
+    setters.setDeletedEntityIds(hydratedData.deletedEntityIds)
+  }
   if (hydratedData.poApprovalLimits && typeof hydratedData.poApprovalLimits === 'object') {
     setters.setPoApprovalLimits(hydratedData.poApprovalLimits)
   }
@@ -10589,6 +10592,7 @@ function App() {
   const [suppliers, setSuppliers] = useState([])
   const [purchaseOrders, setPurchaseOrders] = useState([])
   const [purchaseOrderAuditLog, setPurchaseOrderAuditLog] = useState([])
+  const [deletedEntityIds, setDeletedEntityIds] = useState({})
   const [poApprovalLimits, setPoApprovalLimits] = useState({})
   const [leaveRecords, setLeaveRecords] = useState([])
   const [publicHolidays, setPublicHolidays] = useState([])
@@ -10626,6 +10630,7 @@ function App() {
       setSuppliers,
       setPurchaseOrders,
       setPurchaseOrderAuditLog,
+      setDeletedEntityIds,
       setPoApprovalLimits,
       setPayrollAdjustments,
       setSalaryPayrollAdjustments,
@@ -10673,6 +10678,7 @@ function App() {
         suppliers,
         purchaseOrders,
         purchaseOrderAuditLog,
+        deletedEntityIds,
         poApprovalLimits,
         payrollAdjustments,
         salaryPayrollAdjustments,
@@ -10708,6 +10714,7 @@ function App() {
       suppliers,
       purchaseOrders,
       purchaseOrderAuditLog,
+      deletedEntityIds,
       poApprovalLimits,
       payrollAdjustments,
       salaryPayrollAdjustments,
@@ -11318,6 +11325,21 @@ function App() {
     return { ok: true, message: `${po.poNumber} authorised. You can now download the PDF.` }
   }
 
+  function markEntitiesDeleted(collectionKey, ids) {
+    const normalized = (Array.isArray(ids) ? ids : [ids])
+      .filter((id) => id != null && id !== '')
+      .map(String)
+    if (normalized.length === 0) {
+      return
+    }
+    setDeletedEntityIds((prev) => ({
+      ...prev,
+      [collectionKey]: Array.from(
+        new Set([...(Array.isArray(prev[collectionKey]) ? prev[collectionKey] : []), ...normalized]),
+      ),
+    }))
+  }
+
   function handleDeletePurchaseOrder(poId) {
     if (!canMutateAppData(currentUser) || !currentUserDataEntryPermissions.has('procurement-entry')) {
       return { ok: false, message: 'You do not have permission to delete purchase orders.' }
@@ -11330,6 +11352,7 @@ function App() {
       return { ok: false, message: 'Only draft or authorised purchase orders can be deleted.' }
     }
     setPurchaseOrders((prev) => prev.filter((item) => item.id !== poId))
+    markEntitiesDeleted('purchaseOrders', poId)
     setPurchaseOrderAuditLog((prev) => [
       buildPurchaseOrderDeletionAudit(po, currentUser),
       ...prev,
@@ -11442,6 +11465,7 @@ function App() {
 
   function handleRemoveLeaveRecord(recordId) {
     setLeaveRecords((prev) => prev.filter((record) => record.id !== recordId))
+    markEntitiesDeleted('leaveRecords', recordId)
   }
 
   function handleAddPublicHoliday(input) {
@@ -11457,6 +11481,7 @@ function App() {
 
   function handleRemovePublicHoliday(holidayId) {
     setPublicHolidays((prev) => prev.filter((holiday) => holiday.id !== holidayId))
+    markEntitiesDeleted('publicHolidays', holidayId)
   }
 
   function handleSubmitHarvestRecord(harvesterId, bundleWeights, recordedById) {
@@ -11762,6 +11787,7 @@ function App() {
       }
     }
     setDryingRecords((prev) => prev.filter((item) => item.id !== recordId))
+    markEntitiesDeleted('dryingRecords', recordId)
     return {
       ok: true,
       message: 'Drying record cancelled. The decorticator shift is available to record again.',
@@ -11810,6 +11836,7 @@ function App() {
       }
     }
     setBalingRecords((prev) => prev.filter((record) => !idsToDelete.has(record.id)))
+    markEntitiesDeleted('balingRecords', Array.from(idsToDelete))
     return {
       ok: true,
       message: `Deleted ${idsToDelete.size} bale(s) from ${baleSeriesCode}.`,
@@ -11836,6 +11863,7 @@ function App() {
       }
     }
     setSilageRecords((prev) => prev.filter((record) => !idsToDelete.has(record.id)))
+    markEntitiesDeleted('silageRecords', Array.from(idsToDelete))
     return {
       ok: true,
       message: `Deleted ${idsToDelete.size} silage bag(s) from ${seriesCode}.`,
@@ -12250,13 +12278,16 @@ function App() {
       }
     }
     setDecorticationRecords((prev) => prev.filter((item) => item.id !== recordId))
+    markEntitiesDeleted('decorticationRecords', recordId)
     if (record.assignmentId) {
       setDecorticationAssignments((prev) =>
         prev.filter((item) => item.id !== record.assignmentId),
       )
+      markEntitiesDeleted('decorticationAssignments', record.assignmentId)
     }
     if (linkedDryingRecord) {
       setDryingRecords((prev) => prev.filter((item) => item.id !== linkedDryingRecord.id))
+      markEntitiesDeleted('dryingRecords', linkedDryingRecord.id)
     }
     return {
       ok: true,

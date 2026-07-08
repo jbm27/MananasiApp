@@ -46,7 +46,12 @@ export async function saveAppState(state) {
   if (!response.ok) {
     const body = await parseJsonResponse(response)
     const details = [body?.code, body?.error].filter(Boolean).join(': ')
-    throw new Error(details || `Failed to save app state (${response.status})`)
+    const error = new Error(details || `Failed to save app state (${response.status})`)
+    error.status = response.status
+    error.code = body?.code
+    error.conflict = response.status === 409 || body?.code === 'STATE_VERSION_CONFLICT'
+    error.latestUpdatedAt = body?.latestUpdatedAt ?? null
+    throw error
   }
   return parseJsonResponse(response)
 }

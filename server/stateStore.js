@@ -10,6 +10,13 @@ function toTimestampOrNull(value) {
   return Number.isNaN(date.getTime()) ? null : date
 }
 
+function sameTimestamp(left, right) {
+  if (!left || !right) {
+    return false
+  }
+  return left.getTime() === right.getTime()
+}
+
 export async function getAppState() {
   const result = await getPool().query('SELECT data, updated_at FROM app_state WHERE id = $1', [
     STATE_ID,
@@ -23,12 +30,29 @@ export async function getAppState() {
   }
 }
 
-export async function saveAppState(data) {
+/**
+ * Persist app state without always bumping updated_at.
+ * Use bumpVersion:false for side effects (attendance clockedInIds) that should not
+ * invalidate concurrent client business-data saves.
+ */
+export async function saveAppState(data, { bumpVersion = true } = {}) {
+  if (bumpVersion) {
+    const result = await getPool().query(
+      `INSERT INTO app_state (id, data, updated_at)
+       VALUES ($1, $2::jsonb, NOW())
+       ON CONFLICT (id)
+       DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
+       RETURNING updated_at`,
+      [STATE_ID, JSON.stringify(data)],
+    )
+    return result.rows[0].updated_at
+  }
+
   const result = await getPool().query(
     `INSERT INTO app_state (id, data, updated_at)
-     VALUES ($1, $2::jsonb, NOW())
+     VALUES ($1, $2::jsonb, COALESCE((SELECT updated_at FROM app_state WHERE id = $1), NOW()))
      ON CONFLICT (id)
-     DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
+     DO UPDATE SET data = EXCLUDED.data
      RETURNING updated_at`,
     [STATE_ID, JSON.stringify(data)],
   )
@@ -37,7 +61,7 @@ export async function saveAppState(data) {
 
 export async function saveAppStateWithGuard(
   data,
-  { expectedUpdatedAt = null, changeSource = 'api' } = {},
+  { expectedUpdatedAt = null, changeSource = 'api', bumpVersion = true } = {},
 ) {
   const pool = getPool()
   const client = await pool.connect()
@@ -54,27 +78,35 @@ export async function saveAppStateWithGuard(
     const previousData = currentRow?.data ?? {}
     const previousUpdatedAt = currentRow?.updated_at ?? null
 
-    if (
-      expectedTimestamp &&
-      previousUpdatedAt &&
-      previousUpdatedAt.getTime() !== expectedTimestamp.getTime()
-    ) {
+    // Only enforce concurrency when the client explicitly provides a version.
+    // Attendance / side-effect writers omit expectedUpdatedAt.
+    if (expectedTimestamp && previousUpdatedAt && !sameTimestamp(previousUpdatedAt, expectedTimestamp)) {
       await client.query('ROLLBACK')
       return {
         ok: false,
         conflict: true,
         previousUpdatedAt,
+        latestData: previousData,
       }
     }
 
-    const nextResult = await client.query(
-      `INSERT INTO app_state (id, data, updated_at)
-       VALUES ($1, $2::jsonb, NOW())
-       ON CONFLICT (id)
-       DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
-       RETURNING updated_at`,
-      [STATE_ID, JSON.stringify(data)],
-    )
+    const nextResult = bumpVersion
+      ? await client.query(
+          `INSERT INTO app_state (id, data, updated_at)
+           VALUES ($1, $2::jsonb, NOW())
+           ON CONFLICT (id)
+           DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
+           RETURNING updated_at`,
+          [STATE_ID, JSON.stringify(data)],
+        )
+      : await client.query(
+          `INSERT INTO app_state (id, data, updated_at)
+           VALUES ($1, $2::jsonb, COALESCE((SELECT updated_at FROM app_state WHERE id = $1), NOW()))
+           ON CONFLICT (id)
+           DO UPDATE SET data = EXCLUDED.data
+           RETURNING updated_at`,
+          [STATE_ID, JSON.stringify(data)],
+        )
     const nextUpdatedAt = nextResult.rows[0].updated_at
 
     await client.query(
@@ -133,6 +165,11 @@ export async function applyClockEvent({ employeeId, eventType }) {
     ...data,
     clockedInIds,
   }
-  await saveAppStateWithGuard(nextData, { changeSource: 'attendance' })
+  // Do not bump business-data version — otherwise open browser tabs fail every save
+  // after any scanner clock event.
+  await saveAppStateWithGuard(nextData, {
+    changeSource: 'attendance',
+    bumpVersion: false,
+  })
   return clockedInIds
 }

@@ -36,7 +36,8 @@ export async function migrateLeadershipPasswordsFromMainState() {
   await writePasswordRow(merged)
 
   const { leaderPasswordHashes: _removed, ...rest } = main.data
-  await saveAppState(rest)
+  // Migration-only write: do not invalidate concurrent client business-data versions.
+  await saveAppState(rest, { bumpVersion: false })
 }
 
 export async function getLeadershipPasswordHashes() {
