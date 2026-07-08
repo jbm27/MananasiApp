@@ -461,6 +461,207 @@ export function applyInvoiceFinalizeStockReduction({
   }
 }
 
+function sortStockMovementsNewestFirst(left, right) {
+  const dateCompare = String(right.date ?? '').localeCompare(String(left.date ?? ''))
+  if (dateCompare !== 0) {
+    return dateCompare
+  }
+  return String(right.id ?? '').localeCompare(String(left.id ?? ''))
+}
+
+function formatInvoiceReference(documentNumber) {
+  const value = String(documentNumber ?? '').trim()
+  if (!value) {
+    return ''
+  }
+  return /^\d+$/.test(value) ? `Invoice ${value}` : value
+}
+
+/**
+ * Build a chronological stock movement ledger from production and sales sources.
+ * Invoice-driven outs cite the invoice document number.
+ */
+export function buildStockMovements({
+  dryingRecords = [],
+  brushingStockMovements = [],
+  brushingDailyRecords = [],
+  balingRecords = [],
+  silageRecords = [],
+  invoiceStockIssues = [],
+  invoiceDocuments = [],
+} = {}) {
+  const movements = []
+
+  dryingRecords.forEach((record) => {
+    const stockCode = `${normalizeBatchNumber(record.batchNumber)}-${String(record.machine ?? '')
+      .replace(/[^\d]/g, '')
+      .padStart(2, '0')}-UBR`
+    movements.push({
+      id: `DRY-IN-${record.id}`,
+      date: record.weighedDate,
+      stockCode,
+      stockForm: 'Loose',
+      direction: 'in',
+      quantityKg: Number(record.totalDriedKg ?? 0),
+      source: 'Drying',
+      detail: `Dried fibre · ${record.machine ?? '—'} · shift ${record.shiftNumber ?? '—'}`,
+      reference: '',
+    })
+  })
+
+  brushingStockMovements.forEach((item) => {
+    const isIssue = item.type === 'issue'
+    movements.push({
+      id: `BRM-${item.id}`,
+      date: item.date,
+      stockCode: item.sourceStockCode,
+      stockForm: 'Loose',
+      direction: isIssue ? 'out' : 'in',
+      quantityKg: Number(item.quantityKg ?? 0),
+      source: 'Brushing',
+      detail: isIssue ? 'Issued to brushing' : 'Returned from brushing',
+      reference: '',
+    })
+  })
+
+  brushingDailyRecords.forEach((item) => {
+    const traceabilityRoot = String(item.sourceStockCode ?? '').replace(/-UBR$/, '')
+    if (Number(item.brsKg) > 0) {
+      movements.push({
+        id: `BRD-BRS-${item.id}`,
+        date: item.date,
+        stockCode: `${traceabilityRoot}-BRS`,
+        stockForm: 'Loose',
+        direction: 'in',
+        quantityKg: Number(item.brsKg ?? 0),
+        source: 'Brushing',
+        detail: 'Brushing output (BRS)',
+        reference: '',
+      })
+    }
+    if (Number(item.towKg) > 0) {
+      movements.push({
+        id: `BRD-TOW-${item.id}`,
+        date: item.date,
+        stockCode: `${traceabilityRoot}-TOW`,
+        stockForm: 'Loose',
+        direction: 'in',
+        quantityKg: Number(item.towKg ?? 0),
+        source: 'Brushing',
+        detail: 'Brushing output (TOW)',
+        reference: '',
+      })
+    }
+  })
+
+  balingRecords.forEach((item) => {
+    movements.push({
+      id: `BAL-OUT-${item.id}`,
+      date: item.date,
+      stockCode: item.sourceStockCode,
+      stockForm: 'Loose',
+      direction: 'out',
+      quantityKg: Number(item.baleWeightKg ?? 0),
+      source: 'Baling',
+      detail: `Baled into ${item.baleCode ?? item.baleSeriesCode}`,
+      reference: '',
+    })
+    movements.push({
+      id: `BAL-IN-${item.id}`,
+      date: item.date,
+      stockCode: item.baleSeriesCode,
+      stockForm: 'Baled',
+      direction: 'in',
+      quantityKg: Number(item.baleWeightKg ?? 0),
+      source: 'Baling',
+      detail: `Bale ${item.baleCode ?? '—'} created`,
+      reference: '',
+    })
+  })
+
+  silageRecords.forEach((item) => {
+    movements.push({
+      id: `SLG-IN-${item.id}`,
+      date: item.date,
+      stockCode: getSilageBagSeriesCode(item),
+      stockForm: 'Silage',
+      direction: 'in',
+      quantityKg: Number(item.massKg ?? 0),
+      source: 'Silage',
+      detail: `Bag ${item.bagCode ?? '—'} created`,
+      reference: '',
+    })
+  })
+
+  invoiceStockIssues.forEach((issue) => {
+    const invoiceRef = formatInvoiceReference(issue.invoiceDocumentNumber)
+    movements.push({
+      id: `INV-LOOSE-${issue.id}`,
+      date: issue.date,
+      stockCode: issue.stockCode,
+      stockForm: 'Loose',
+      direction: 'out',
+      quantityKg: Number(issue.quantityKg ?? 0),
+      source: 'Sale',
+      detail: 'Sold on invoice (loose fibre)',
+      reference: invoiceRef,
+      invoiceId: issue.invoiceId ?? '',
+      invoiceDocumentNumber: issue.invoiceDocumentNumber ?? '',
+    })
+  })
+
+  invoiceDocuments.forEach((document) => {
+    if (document?.documentType !== 'invoice') {
+      return
+    }
+    if (document.status !== 'finalized' && document.status !== 'confirmed') {
+      return
+    }
+    const snapshot = document.finalizedStockSnapshot
+    if (!snapshot) {
+      return
+    }
+    const invoiceRef = formatInvoiceReference(document.documentNumber)
+    const saleDate = document.finalizedAt
+      ? String(document.finalizedAt).slice(0, 10)
+      : document.invoiceDate
+
+    ;(snapshot.balingRecords ?? []).forEach((record) => {
+      movements.push({
+        id: `INV-BAL-${document.id}-${record.id}`,
+        date: saleDate,
+        stockCode: record.baleSeriesCode,
+        stockForm: 'Baled',
+        direction: 'out',
+        quantityKg: Number(record.baleWeightKg ?? 0),
+        source: 'Sale',
+        detail: `Sold on invoice · bale ${record.baleCode ?? '—'}`,
+        reference: invoiceRef,
+        invoiceId: document.id,
+        invoiceDocumentNumber: document.documentNumber ?? '',
+      })
+    })
+
+    ;(snapshot.silageRecords ?? []).forEach((record) => {
+      movements.push({
+        id: `INV-SLG-${document.id}-${record.id}`,
+        date: saleDate,
+        stockCode: getSilageBagSeriesCode(record),
+        stockForm: 'Silage',
+        direction: 'out',
+        quantityKg: Number(record.massKg ?? 0),
+        source: 'Sale',
+        detail: `Sold on invoice · bag ${record.bagCode ?? '—'}`,
+        reference: invoiceRef,
+        invoiceId: document.id,
+        invoiceDocumentNumber: document.documentNumber ?? '',
+      })
+    })
+  })
+
+  return movements.sort(sortStockMovementsNewestFirst)
+}
+
 export function restoreInvoiceFinalizeStock({
   document,
   balingRecords,

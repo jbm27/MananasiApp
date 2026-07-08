@@ -90,6 +90,7 @@ import { sanitizePersistedAppState } from './appStateSanitize.js'
 import {
   applyInvoiceFinalizeStockReduction,
   restoreInvoiceFinalizeStock,
+  buildStockMovements,
   computeAbsoluteStockCatalog,
   createEmptyStockAllocation,
   filterStockOptionsForProduct,
@@ -8948,6 +8949,7 @@ function StockPage({
   balingRecords,
   silageRecords,
   invoiceStockIssues,
+  invoiceDocuments,
   onDeleteBaledStock,
   onDeleteSilageStock,
   dateFrom,
@@ -8962,6 +8964,7 @@ function StockPage({
   const [baleLabelStatus, setBaleLabelStatus] = useState('')
   const [silageLabelDialog, setSilageLabelDialog] = useState(null)
   const [stockDeleteDialog, setStockDeleteDialog] = useState(null)
+  const [showStockMovements, setShowStockMovements] = useState(true)
   const canDeleteStockRecords = canDeleteStock(currentUser, dataEntryPermissionOverrides, employees)
   const showAbsoluteStock = selectedBatchFilter === 'absolute'
   const filteredDryingRecords =
@@ -9119,6 +9122,42 @@ function StockPage({
     return a.stockCode.localeCompare(b.stockCode)
   })
   const totalAvailableKg = Number(stockRows.reduce((sum, row) => sum + row.totalKg, 0).toFixed(1))
+
+  const stockMovements = useMemo(() => {
+    const allMovements = buildStockMovements({
+      dryingRecords,
+      brushingStockMovements,
+      brushingDailyRecords,
+      balingRecords,
+      silageRecords,
+      invoiceStockIssues,
+      invoiceDocuments,
+    })
+    return allMovements.filter((movement) => {
+      if (showAbsoluteStock) {
+        return true
+      }
+      if (selectedBatchFilter === 'all') {
+        return movement.date >= dateFrom && movement.date <= dateTo
+      }
+      const batch = normalizeBatchNumber(
+        movement.stockCode?.split('-').slice(0, 2).join('-') ?? '',
+      )
+      return batch === selectedBatchFilter
+    })
+  }, [
+    dryingRecords,
+    brushingStockMovements,
+    brushingDailyRecords,
+    balingRecords,
+    silageRecords,
+    invoiceStockIssues,
+    invoiceDocuments,
+    showAbsoluteStock,
+    selectedBatchFilter,
+    dateFrom,
+    dateTo,
+  ])
 
   function updateBaleLabelRange(baleSeriesCode, field, value) {
     setBaleLabelRanges((prev) => ({
@@ -9425,6 +9464,57 @@ function StockPage({
         </table>
       </div>
       {baleLabelStatus ? <p className="inline-hint">{baleLabelStatus}</p> : null}
+
+      <CollapsibleSection
+        title="Stock movements"
+        isOpen={showStockMovements}
+        onToggle={() => setShowStockMovements((open) => !open)}
+      >
+        <p className="inline-hint">
+          Additions and removals across drying, brushing, baling, silage, and sales. Sales cite the
+          invoice number that took stock away.
+        </p>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Stock code</th>
+                <th>Form</th>
+                <th>Direction</th>
+                <th>Quantity (kg)</th>
+                <th>Source</th>
+                <th>Detail</th>
+                <th>Invoice / reference</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stockMovements.map((movement) => (
+                <tr key={movement.id}>
+                  <td>{formatDisplayDate(movement.date)}</td>
+                  <td>{movement.stockCode}</td>
+                  <td>{movement.stockForm}</td>
+                  <td>{movement.direction === 'in' ? 'In (+)' : 'Out (−)'}</td>
+                  <td>
+                    {movement.direction === 'out' ? '−' : '+'}
+                    {Number(movement.quantityKg).toLocaleString(undefined, {
+                      maximumFractionDigits: 1,
+                    })}
+                  </td>
+                  <td>{movement.source}</td>
+                  <td>{movement.detail}</td>
+                  <td>{movement.reference || '—'}</td>
+                </tr>
+              ))}
+              {stockMovements.length === 0 ? (
+                <tr>
+                  <td colSpan="8">No stock movements for the current filter.</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </CollapsibleSection>
 
       {silageLabelDialog ? (
         <div className="dialog-backdrop" role="presentation" onClick={() => setSilageLabelDialog(null)}>
@@ -12831,6 +12921,7 @@ function App() {
                 balingRecords={balingRecords}
                 silageRecords={silageRecords}
                 invoiceStockIssues={invoiceStockIssues}
+                invoiceDocuments={invoiceDocuments}
                 onDeleteBaledStock={handleDeleteBaledStock}
                 onDeleteSilageStock={handleDeleteSilageStock}
                 dateFrom={stockDateFrom}
