@@ -86,6 +86,28 @@ function mergeObjects(currentValue, incomingValue) {
   return { ...current, ...incomingValue }
 }
 
+function mergeDeletedEntityIds(currentValue, incomingValue) {
+  const current =
+    currentValue && typeof currentValue === 'object' && !Array.isArray(currentValue)
+      ? currentValue
+      : {}
+  const incoming =
+    incomingValue && typeof incomingValue === 'object' && !Array.isArray(incomingValue)
+      ? incomingValue
+      : {}
+  const merged = { ...current, ...incoming }
+  const keys = new Set([...Object.keys(current), ...Object.keys(incoming)])
+  for (const key of keys) {
+    const currentIds = Array.isArray(current[key]) ? current[key].map(String) : []
+    const incomingIds = Array.isArray(incoming[key]) ? incoming[key].map(String) : []
+    if (currentIds.length === 0 && incomingIds.length === 0) {
+      continue
+    }
+    merged[key] = Array.from(new Set([...currentIds, ...incomingIds]))
+  }
+  return merged
+}
+
 function collectDeletedEntityIds(merged) {
   const deleted =
     merged.deletedEntityIds && typeof merged.deletedEntityIds === 'object'
@@ -117,17 +139,30 @@ function applyDeletedEntityIds(merged, deletedEntityIds) {
   return next
 }
 
+/** Strip tombstoned entities before hydrating client state. */
+export function sanitizeAppStateForRead(data) {
+  if (!data || typeof data !== 'object') {
+    return data
+  }
+  const deletedEntityIds = collectDeletedEntityIds(data)
+  return applyDeletedEntityIds(data, deletedEntityIds)
+}
+
 /** Prevent stale or partial client saves from wiping stored business data. */
 export function mergeIncomingAppState(currentData, incomingData) {
   const current = currentData && typeof currentData === 'object' ? currentData : {}
   const incoming = incomingData && typeof incomingData === 'object' ? incomingData : {}
-  const merged = { ...current, ...incoming }
+  const mergedDeletedEntityIds = mergeDeletedEntityIds(current.deletedEntityIds, incoming.deletedEntityIds)
+  const merged = { ...current, ...incoming, deletedEntityIds: mergedDeletedEntityIds }
 
   for (const key of MERGE_BY_ID_KEYS) {
     merged[key] = mergeRecordsById(current[key], incoming[key])
   }
 
   for (const key of MERGE_OBJECT_KEYS) {
+    if (key === 'deletedEntityIds') {
+      continue
+    }
     if (key in incoming || key in current) {
       merged[key] = mergeObjects(current[key], incoming[key])
     }

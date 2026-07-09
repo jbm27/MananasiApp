@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { getAppState, saveAppStateWithGuard } from '../stateStore.js'
-import { mergeIncomingAppState } from '../stateMerge.js'
+import { mergeIncomingAppState, sanitizeAppStateForRead } from '../stateMerge.js'
 import { migrateLeadershipPasswordsFromMainState } from '../services/leadershipAuthStore.js'
 import { syncClockedInIdsToAppState } from '../services/attendanceAutoClockOut.js'
 
@@ -23,7 +23,7 @@ router.get('/', async (_req, res) => {
       return res.status(404).json({ error: 'No saved app state yet' })
     }
     res.json({
-      ...stripSensitiveStateFields(state.data),
+      ...sanitizeAppStateForRead(stripSensitiveStateFields(state.data)),
       _meta: { updatedAt: state.updatedAt },
     })
   } catch (error) {

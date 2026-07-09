@@ -5202,8 +5202,8 @@ function HarvestingPage({
       }
       summary[record.harvesterId].daysWorkedSet.add(record.harvestedOn)
       summary[record.harvesterId].leafMassKg += record.kg
-      summary[record.harvesterId].basicWage += record.baseWageKes
-      summary[record.harvesterId].incentive += record.incentiveKes
+      summary[record.harvesterId].basicWage += Number(record.baseWageKes) || 0
+      summary[record.harvesterId].incentive += Number(record.incentiveKes) || 0
       return summary
     }, {}),
   )
