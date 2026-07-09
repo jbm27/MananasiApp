@@ -491,6 +491,52 @@ export function buildStockMovements({
   invoiceDocuments = [],
 } = {}) {
   const movements = []
+  const groupedMovements = new Map()
+
+  const appendGroupedMovement = ({
+    idPrefix,
+    date,
+    stockCode,
+    stockForm,
+    direction,
+    quantityKg,
+    source,
+    detail,
+    reference = '',
+    invoiceId = '',
+    invoiceDocumentNumber = '',
+  }) => {
+    const key = [
+      idPrefix,
+      String(date ?? ''),
+      stockCode,
+      stockForm,
+      direction,
+      source,
+      detail,
+      reference,
+      invoiceId,
+      invoiceDocumentNumber,
+    ].join('|')
+    const existing = groupedMovements.get(key)
+    if (existing) {
+      existing.quantityKg = Number((existing.quantityKg + Number(quantityKg ?? 0)).toFixed(2))
+      return
+    }
+    groupedMovements.set(key, {
+      id: `${idPrefix}-${key}`,
+      date,
+      stockCode,
+      stockForm,
+      direction,
+      quantityKg: Number(quantityKg ?? 0),
+      source,
+      detail,
+      reference,
+      invoiceId,
+      invoiceDocumentNumber,
+    })
+  }
 
   dryingRecords.forEach((record) => {
     const stockCode = `${normalizeBatchNumber(record.batchNumber)}-${String(record.machine ?? '')
@@ -554,41 +600,71 @@ export function buildStockMovements({
     }
   })
 
-  balingRecords.forEach((item) => {
-    movements.push({
-      id: `BAL-OUT-${item.id}`,
-      date: item.date,
-      stockCode: item.sourceStockCode,
+  const balingSeriesByGroup = balingRecords.reduce((map, item) => {
+    const key = `${item.date}|${item.sourceStockCode}|${item.baleSeriesCode}`
+    if (!map[key]) {
+      map[key] = {
+        date: item.date,
+        sourceStockCode: item.sourceStockCode,
+        baleSeriesCode: item.baleSeriesCode,
+        totalKg: 0,
+        count: 0,
+      }
+    }
+    map[key].totalKg += Number(item.baleWeightKg ?? 0)
+    map[key].count += 1
+    return map
+  }, {})
+  Object.values(balingSeriesByGroup).forEach((group) => {
+    appendGroupedMovement({
+      idPrefix: 'BAL-OUT',
+      date: group.date,
+      stockCode: group.sourceStockCode,
       stockForm: 'Loose',
       direction: 'out',
-      quantityKg: Number(item.baleWeightKg ?? 0),
+      quantityKg: group.totalKg,
       source: 'Baling',
-      detail: `Baled into ${item.baleCode ?? item.baleSeriesCode}`,
+      detail: `Baled into ${group.baleSeriesCode} (${group.count} bale${group.count === 1 ? '' : 's'})`,
       reference: '',
     })
-    movements.push({
-      id: `BAL-IN-${item.id}`,
-      date: item.date,
-      stockCode: item.baleSeriesCode,
+    appendGroupedMovement({
+      idPrefix: 'BAL-IN',
+      date: group.date,
+      stockCode: group.baleSeriesCode,
       stockForm: 'Baled',
       direction: 'in',
-      quantityKg: Number(item.baleWeightKg ?? 0),
+      quantityKg: group.totalKg,
       source: 'Baling',
-      detail: `Bale ${item.baleCode ?? '—'} created`,
+      detail: `${group.count} bale${group.count === 1 ? '' : 's'} created`,
       reference: '',
     })
   })
 
-  silageRecords.forEach((item) => {
-    movements.push({
-      id: `SLG-IN-${item.id}`,
-      date: item.date,
-      stockCode: getSilageBagSeriesCode(item),
+  const silageSeriesByGroup = silageRecords.reduce((map, item) => {
+    const seriesCode = getSilageBagSeriesCode(item)
+    const key = `${item.date}|${seriesCode}`
+    if (!map[key]) {
+      map[key] = {
+        date: item.date,
+        seriesCode,
+        totalKg: 0,
+        count: 0,
+      }
+    }
+    map[key].totalKg += Number(item.massKg ?? 0)
+    map[key].count += 1
+    return map
+  }, {})
+  Object.values(silageSeriesByGroup).forEach((group) => {
+    appendGroupedMovement({
+      idPrefix: 'SLG-IN',
+      date: group.date,
+      stockCode: group.seriesCode,
       stockForm: 'Silage',
       direction: 'in',
-      quantityKg: Number(item.massKg ?? 0),
+      quantityKg: group.totalKg,
       source: 'Silage',
-      detail: `Bag ${item.bagCode ?? '—'} created`,
+      detail: `${group.count} bag${group.count === 1 ? '' : 's'} created`,
       reference: '',
     })
   })
@@ -626,38 +702,58 @@ export function buildStockMovements({
       ? String(document.finalizedAt).slice(0, 10)
       : document.invoiceDate
 
-    ;(snapshot.balingRecords ?? []).forEach((record) => {
-      movements.push({
-        id: `INV-BAL-${document.id}-${record.id}`,
+    const baledSalesBySeries = (snapshot.balingRecords ?? []).reduce((map, record) => {
+      const key = record.baleSeriesCode
+      if (!map[key]) {
+        map[key] = { stockCode: key, totalKg: 0, count: 0 }
+      }
+      map[key].totalKg += Number(record.baleWeightKg ?? 0)
+      map[key].count += 1
+      return map
+    }, {})
+    Object.values(baledSalesBySeries).forEach((group) => {
+      appendGroupedMovement({
+        idPrefix: 'INV-BAL',
         date: saleDate,
-        stockCode: record.baleSeriesCode,
+        stockCode: group.stockCode,
         stockForm: 'Baled',
         direction: 'out',
-        quantityKg: Number(record.baleWeightKg ?? 0),
+        quantityKg: group.totalKg,
         source: 'Sale',
-        detail: `Sold on invoice · bale ${record.baleCode ?? '—'}`,
+        detail: `Sold on invoice (${group.count} bale${group.count === 1 ? '' : 's'})`,
         reference: invoiceRef,
         invoiceId: document.id,
         invoiceDocumentNumber: document.documentNumber ?? '',
       })
     })
 
-    ;(snapshot.silageRecords ?? []).forEach((record) => {
-      movements.push({
-        id: `INV-SLG-${document.id}-${record.id}`,
+    const silageSalesBySeries = (snapshot.silageRecords ?? []).reduce((map, record) => {
+      const key = getSilageBagSeriesCode(record)
+      if (!map[key]) {
+        map[key] = { stockCode: key, totalKg: 0, count: 0 }
+      }
+      map[key].totalKg += Number(record.massKg ?? 0)
+      map[key].count += 1
+      return map
+    }, {})
+    Object.values(silageSalesBySeries).forEach((group) => {
+      appendGroupedMovement({
+        idPrefix: 'INV-SLG',
         date: saleDate,
-        stockCode: getSilageBagSeriesCode(record),
+        stockCode: group.stockCode,
         stockForm: 'Silage',
         direction: 'out',
-        quantityKg: Number(record.massKg ?? 0),
+        quantityKg: group.totalKg,
         source: 'Sale',
-        detail: `Sold on invoice · bag ${record.bagCode ?? '—'}`,
+        detail: `Sold on invoice (${group.count} bag${group.count === 1 ? '' : 's'})`,
         reference: invoiceRef,
         invoiceId: document.id,
         invoiceDocumentNumber: document.documentNumber ?? '',
       })
     })
   })
+
+  movements.push(...groupedMovements.values())
 
   return movements.sort(sortStockMovementsNewestFirst)
 }
