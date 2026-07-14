@@ -488,8 +488,6 @@ export default function PayrollPage({
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Department</th>
-                <th>Contract</th>
                 <th>Earnings to date</th>
                 <th>Max claimable</th>
                 <th>Amount claimed</th>
@@ -498,7 +496,7 @@ export default function PayrollPage({
             <tbody>
               {advanceLines.length === 0 && (
                 <tr>
-                  <td colSpan="6">No employees on record for this period.</td>
+                  <td colSpan="4">No employees on record for this period.</td>
                 </tr>
               )}
               {advanceLines.map((line) => (
@@ -509,8 +507,6 @@ export default function PayrollPage({
                   }
                 >
                   <td>{line.name}</td>
-                  <td>{line.department}</td>
-                  <td>{getContractTypeLabel(line.contractType)}</td>
                   <td>{formatMoney(line.earningsToDate)}</td>
                   <td>{formatMoney(line.maxClaimable)}</td>
                   <td>
@@ -524,7 +520,7 @@ export default function PayrollPage({
               ))}
               {advanceLines.length > 0 && (
                 <tr className="payroll-totals-row">
-                  <td colSpan="3">
+                  <td>
                     <strong>Totals</strong>
                   </td>
                   <td>{formatMoney(advanceTotals.earningsToDate)}</td>

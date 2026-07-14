@@ -1,3 +1,4 @@
+import { compareEmployeesByName } from './employeeFields.js'
 import { getEmployeeDailyWageKes, isPayrollParticipant, sumAttendanceDailyPay } from './employeePay.js'
 import { toKenyaDateString } from './kenyaTime.js'
 import { calculateMaxAdvanceClaimable } from './payrollAdvances.js'
@@ -238,7 +239,7 @@ export function buildPayrollLines({
     .filter((employee) =>
       contractTypeFilter === 'all' ? true : employee.contractType === contractTypeFilter,
     )
-    .sort((a, b) => a.name.localeCompare(b.name))
+    .sort(compareEmployeesByName)
     .map((employee) =>
       calculatePayrollLine({
         employee,

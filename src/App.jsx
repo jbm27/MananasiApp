@@ -77,6 +77,7 @@ import {
 import {
   CONTRACT_TYPE_OPTIONS,
   SEASONAL_GRADE_OPTIONS,
+  compareEmployeesByName,
   createBlankEmployeeTemplate,
   formatEmployeeFieldValue,
   mergeEmployeesWithSeed,
@@ -596,11 +597,13 @@ function getClockedInEmployeesWithDataEntryPermission(
   permissionId,
   overrides,
 ) {
-  return employees.filter(
-    (employee) =>
-      clockedInIds.includes(employee.id) &&
-      getEffectiveDataEntryPermissions(employee.id, overrides, employees).has(permissionId),
-  )
+  return employees
+    .filter(
+      (employee) =>
+        clockedInIds.includes(employee.id) &&
+        getEffectiveDataEntryPermissions(employee.id, overrides, employees).has(permissionId),
+    )
+    .sort(compareEmployeesByName)
 }
 
 function isSeasonalOrSupplementaryEmployee(employee) {
@@ -3146,7 +3149,7 @@ function PageAccessAdminSection({
 }) {
   const isAdmin = currentUser?.role === 'admin'
   const sortedEmployees = useMemo(
-    () => [...employees].sort((a, b) => a.name.localeCompare(b.name)),
+    () => [...employees].sort(compareEmployeesByName),
     [employees],
   )
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(() => sortedEmployees[0]?.id ?? '')
@@ -3471,7 +3474,7 @@ function EmployeesPage({
           .join(' ')
         return searchableText.includes(employeeSearchQuery)
       })
-      .sort((a, b) => a.name.localeCompare(b.name))
+      .sort(compareEmployeesByName)
   }, [employees, employeeSearchQuery])
 
   useEffect(() => {
@@ -3730,7 +3733,7 @@ function EmployeesPage({
         orderedRoles.map((roleItem) => {
         const roleEmployees = (employeesByRole[roleItem.id] ?? [])
           .slice()
-          .sort((a, b) => a.name.localeCompare(b.name))
+          .sort(compareEmployeesByName)
         return (
           <CollapsibleSection
             key={roleItem.id}
@@ -4860,15 +4863,17 @@ function HarvestWeightEntryPage({
   const [entryStatus, setEntryStatus] = useState('')
 
   const canEnterHarvestData = currentUserDataEntryPermissions.has('harvesting-entry')
-  const availableHarvesters = employees.filter((employee) => {
-    if (employee.role !== 'harvester') {
-      return false
-    }
-    if (!clockedInIds.includes(employee.id)) {
-      return false
-    }
-    return true
-  })
+  const availableHarvesters = employees
+    .filter((employee) => {
+      if (employee.role !== 'harvester') {
+        return false
+      }
+      if (!clockedInIds.includes(employee.id)) {
+        return false
+      }
+      return true
+    })
+    .sort(compareEmployeesByName)
 
   const runningTotal = Number(
     pendingBundleWeights.reduce((sum, weight) => sum + weight, 0).toFixed(1),
@@ -5095,7 +5100,9 @@ function HarvestingPage({
     currentUser?.role === 'harvesting-manager' ||
     currentUser?.role === 'harvesting-supervisor'
   const canEnterHarvestData = currentUserDataEntryPermissions.has('harvesting-entry')
-  const supervisors = employees.filter((employee) => employee.role === 'harvesting-supervisor')
+  const supervisors = employees
+    .filter((employee) => employee.role === 'harvesting-supervisor')
+    .sort(compareEmployeesByName)
   const availableBatches = useMemo(() => {
     const active = activeBatchNumber ? normalizeBatchNumber(activeBatchNumber) : ''
     const batches = new Set(
@@ -5219,7 +5226,7 @@ function HarvestingPage({
         averageLeafMassPerDay: daysWorked > 0 ? Math.round(item.leafMassKg / daysWorked) : 0,
       }
     })
-    .sort((a, b) => a.name.localeCompare(b.name))
+    .sort(compareEmployeesByName)
   const summaryPeriodFrom =
     selectedBatchFilter === 'all'
       ? dateFrom
@@ -5730,14 +5737,18 @@ function DecorticationPage({
     }
   }, [availableBatches, batchNumber])
 
-  const clockedInSupervisors = employees.filter(
-    (employee) =>
-      employee.role === 'decortication-supervisor' && clockedInIds.includes(employee.id),
-  )
-  const clockedInOperators = employees.filter(
-    (employee) =>
-      employee.role === 'decorticator-operator' && clockedInIds.includes(employee.id),
-  )
+  const clockedInSupervisors = employees
+    .filter(
+      (employee) =>
+        employee.role === 'decortication-supervisor' && clockedInIds.includes(employee.id),
+    )
+    .sort(compareEmployeesByName)
+  const clockedInOperators = employees
+    .filter(
+      (employee) =>
+        employee.role === 'decorticator-operator' && clockedInIds.includes(employee.id),
+    )
+    .sort(compareEmployeesByName)
 
   const filteredRecords =
     selectedBatchFilter === 'all'
@@ -6051,12 +6062,12 @@ function DecorticationPage({
     setEditingRecordId('')
   }
 
-  const allDecorticationSupervisors = employees.filter(
-    (employee) => employee.role === 'decortication-supervisor',
-  )
-  const allDecorticatorOperators = employees.filter(
-    (employee) => employee.role === 'decorticator-operator',
-  )
+  const allDecorticationSupervisors = employees
+    .filter((employee) => employee.role === 'decortication-supervisor')
+    .sort(compareEmployeesByName)
+  const allDecorticatorOperators = employees
+    .filter((employee) => employee.role === 'decorticator-operator')
+    .sort(compareEmployeesByName)
   const editStaffingWarnings = editingRecordId
     ? getDecorticationStaffingWarnings(editSupervisorId, editOperatorIds.length)
     : []
@@ -6803,9 +6814,9 @@ function DryingPage({
     }))
     .sort((a, b) => b.daysWorked - a.daysWorked || b.shiftsHandled - a.shiftsHandled)
 
-  const activeDryers = employees.filter(
-    (employee) => employee.role === 'dryer' && clockedInIds.includes(employee.id),
-  )
+  const activeDryers = employees
+    .filter((employee) => employee.role === 'dryer' && clockedInIds.includes(employee.id))
+    .sort(compareEmployeesByName)
   const selectedAttendanceEmployee = employeeAttendance.find(
     (item) => item.id === attendanceViewingEmployeeId,
   )
@@ -7415,13 +7426,15 @@ function BrushingPage({
   const canManageBrushing = currentUserDataEntryPermissions.has('brushing-entry')
   const canViewBrushing = canManageBrushing || currentUser?.role === 'brusher'
 
-  const clockedInBrushingSupervisors = employees.filter(
-    (employee) =>
-      employee.role === 'brushing-supervisor' && clockedInIds.includes(employee.id),
-  )
-  const clockedInBrushers = employees.filter(
-    (employee) => employee.role === 'brusher' && clockedInIds.includes(employee.id),
-  )
+  const clockedInBrushingSupervisors = employees
+    .filter(
+      (employee) =>
+        employee.role === 'brushing-supervisor' && clockedInIds.includes(employee.id),
+    )
+    .sort(compareEmployeesByName)
+  const clockedInBrushers = employees
+    .filter((employee) => employee.role === 'brusher' && clockedInIds.includes(employee.id))
+    .sort(compareEmployeesByName)
   const availableUbrStockCodes = useMemo(
     () =>
       Array.from(
@@ -8065,9 +8078,9 @@ function BalingPage({
   const canSubmitBaleEntry =
     canManageBaling && (isAppAdmin(currentUser) || clockedInIds.includes(currentUser?.id))
 
-  const clockedInBalers = employees.filter(
-    (employee) => employee.role === 'baler' && clockedInIds.includes(employee.id),
-  )
+  const clockedInBalers = employees
+    .filter((employee) => employee.role === 'baler' && clockedInIds.includes(employee.id))
+    .sort(compareEmployeesByName)
 
   const filteredBalingAssignments = balingAssignments.filter(
     (assignment) => assignment.date >= dateFrom && assignment.date <= dateTo,
@@ -8720,6 +8733,7 @@ function SilageProductionPage({
         (employee) =>
           employee.role === 'silage-operator' && clockedInIds.includes(employee.id),
       )
+      .sort(compareEmployeesByName)
       .map((employee) => employee.id)
     const operatorNames = operatorIds
       .map((id) => employees.find((employee) => employee.id === id)?.name)
@@ -9672,21 +9686,21 @@ function HaulagePage({
     }
   }, [availableBatches, tripBatch])
 
-  const clockedInLoaders = employees.filter(
-    (employee) => employee.role === 'loader' && clockedInIds.includes(employee.id),
-  )
+  const clockedInLoaders = employees
+    .filter((employee) => employee.role === 'loader' && clockedInIds.includes(employee.id))
+    .sort(compareEmployeesByName)
   const truckDrivers = useMemo(
     () =>
       employees
         .filter((employee) => employee.role === 'truck-driver')
-        .sort((a, b) => a.name.localeCompare(b.name)),
+        .sort(compareEmployeesByName),
     [employees],
   )
   const allLoaders = useMemo(
     () =>
       employees
         .filter((employee) => employee.role === 'loader')
-        .sort((a, b) => a.name.localeCompare(b.name)),
+        .sort(compareEmployeesByName),
     [employees],
   )
 
@@ -10867,7 +10881,7 @@ function App() {
       employees
         .filter(isLeadershipTeamMember)
         .slice()
-        .sort((a, b) => a.name.localeCompare(b.name)),
+        .sort(compareEmployeesByName),
     [employees],
   )
 

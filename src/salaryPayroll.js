@@ -1,3 +1,4 @@
+import { compareEmployeesByName } from './employeeFields.js'
 import { calculateMaxAdvanceClaimable } from './payrollAdvances.js'
 import { isPayrollParticipant } from './employeePay.js'
 
@@ -126,13 +127,7 @@ export function buildSalaryPayrollLines({
   const periodAdjustments = salaryPayrollAdjustments[periodId] ?? {}
   return employees
     .filter((employee) => isSalariedEmployee(employee))
-    .sort((a, b) => {
-      const dept = (a.department ?? '').localeCompare(b.department ?? '')
-      if (dept !== 0) {
-        return dept
-      }
-      return a.name.localeCompare(b.name)
-    })
+    .sort(compareEmployeesByName)
     .map((employee) => {
       const maxSalaryAdvance = period
         ? calculateMaxAdvanceClaimable(employee, period, attendanceEvents, harvestRecords)

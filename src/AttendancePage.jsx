@@ -14,6 +14,7 @@ import {
   countWorkingDaysRemainingOnContract,
   summarizeLeaveForEmployee,
 } from './leave.js'
+import { compareEmployeesByName } from './employeeFields.js'
 import { countDaysWorkedFromAttendance } from './payroll.js'
 import { toKenyaDateString } from './kenyaTime.js'
 
@@ -73,7 +74,7 @@ export default function AttendancePage({
 
   const clockedInCount = clockedInIds.length
   const sortedEmployees = useMemo(
-    () => [...employees].sort((a, b) => a.name.localeCompare(b.name)),
+    () => [...employees].sort(compareEmployeesByName),
     [employees],
   )
   const pendingLeaveDays = useMemo(

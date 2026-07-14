@@ -160,3 +160,14 @@ export function formatEmployeeFieldValue(value) {
   }
   return String(value)
 }
+
+/** Sort by full name (first name first) for employee lists and dropdowns. */
+export function compareEmployeesByName(a, b) {
+  return String(a?.name ?? '').localeCompare(String(b?.name ?? ''), undefined, {
+    sensitivity: 'base',
+  })
+}
+
+export function sortEmployeesByName(employees) {
+  return [...(employees ?? [])].sort(compareEmployeesByName)
+}

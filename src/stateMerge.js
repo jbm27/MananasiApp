@@ -48,7 +48,12 @@ function recordKey(item) {
  * Missing incoming array keeps current. Empty incoming keeps current if current has data
  * (guards against blank client snapshots wiping the DB).
  */
-export function mergeRecordsById(currentItems, incomingItems, getKey = recordKey) {
+export function mergeRecordsById(
+  currentItems,
+  incomingItems,
+  getKey = recordKey,
+  mergeItems = (_currentItem, incomingItem) => incomingItem,
+) {
   const current = Array.isArray(currentItems) ? currentItems : []
   const incoming = Array.isArray(incomingItems) ? incomingItems : null
 
@@ -69,7 +74,11 @@ export function mergeRecordsById(currentItems, incomingItems, getKey = recordKey
   for (const item of incoming) {
     const key = getKey(item)
     if (key != null) {
-      merged.set(key, item)
+      if (merged.has(key)) {
+        merged.set(key, mergeItems(merged.get(key), item))
+      } else {
+        merged.set(key, item)
+      }
     }
   }
   return Array.from(merged.values())
@@ -156,7 +165,16 @@ export function mergeIncomingAppState(currentData, incomingData) {
   const merged = { ...current, ...incoming, deletedEntityIds: mergedDeletedEntityIds }
 
   for (const key of MERGE_BY_ID_KEYS) {
-    merged[key] = mergeRecordsById(current[key], incoming[key])
+    if (key === 'records') {
+      merged[key] = mergeRecordsById(
+        current[key],
+        incoming[key],
+        recordKey,
+        (currentItem, incomingItem) => ({ ...(currentItem ?? {}), ...(incomingItem ?? {}) }),
+      )
+    } else {
+      merged[key] = mergeRecordsById(current[key], incoming[key])
+    }
   }
 
   for (const key of MERGE_OBJECT_KEYS) {

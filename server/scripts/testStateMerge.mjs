@@ -40,5 +40,14 @@ assert.deepEqual(
   mergeRecordsById([{ id: 'A' }], []).map((item) => item.id),
   ['A'],
 )
+assert.deepEqual(
+  mergeRecordsById(
+    [{ id: 'R-1', baseWageKes: 550, incentiveKes: 320 }],
+    [{ id: 'R-1', incentiveKes: 500 }],
+    (item) => item.id,
+    (currentItem, incomingItem) => ({ ...currentItem, ...incomingItem }),
+  ),
+  [{ id: 'R-1', baseWageKes: 550, incentiveKes: 500 }],
+)
 
 console.log('stateMerge safeguards ok')

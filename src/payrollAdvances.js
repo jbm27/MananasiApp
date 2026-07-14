@@ -1,3 +1,4 @@
+import { compareEmployeesByName } from './employeeFields.js'
 import { getEmployeeDailyWageKes, isPayrollParticipant, sumAttendanceDailyPay } from './employeePay.js'
 import { toKenyaDateString } from './kenyaTime.js'
 
@@ -116,13 +117,7 @@ export function buildAdvanceLines({
 
   return employees
     .filter(isAdvanceEligibleEmployee)
-    .sort((a, b) => {
-      const dept = (a.department ?? '').localeCompare(b.department ?? '')
-      if (dept !== 0) {
-        return dept
-      }
-      return a.name.localeCompare(b.name)
-    })
+    .sort(compareEmployeesByName)
     .map((employee) => {
       const earningsToDate = calculateEarningsToAdvanceDate(
         employee,
@@ -142,8 +137,6 @@ export function buildAdvanceLines({
       return {
         employeeId: employee.id,
         name: employee.name,
-        department: employee.department ?? '—',
-        contractType: employee.contractType,
         earningsToDate,
         maxClaimable,
         amountClaimed,

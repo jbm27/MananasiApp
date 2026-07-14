@@ -5,6 +5,13 @@ import {
   setLeadershipPasswordHash,
 } from './leadershipAuthStore.js'
 
+// Keep in sync with client name sorting in src/employeeFields.js (compareEmployeesByName).
+function compareEmployeesByName(a, b) {
+  return String(a?.name ?? '').localeCompare(String(b?.name ?? ''), undefined, {
+    sensitivity: 'base',
+  })
+}
+
 const leadershipTeamEmployeeIds = new Set(['0001', '0008', '0013', '0003', '0012'])
 
 export function buildLoginUsername(displayName) {
@@ -148,7 +155,7 @@ export async function listLeadershipAccountsForAdmin(adminEmployeeId, adminPassw
   const hashes = await getLeadershipPasswordHashes()
   const accounts = employees
     .filter(isLeadershipTeamMember)
-    .sort((a, b) => a.name.localeCompare(b.name))
+    .sort(compareEmployeesByName)
     .map((employee) => ({
       employeeId: employee.id,
       name: employee.name,

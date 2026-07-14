@@ -1,3 +1,4 @@
+import { compareEmployeesByName } from './employeeFields.js'
 import { isPayrollParticipant } from './employeePay.js'
 import { toKenyaDateString } from './kenyaTime.js'
 
@@ -188,7 +189,7 @@ export function buildAttendanceExceptionReport(
   const workDays = listWorkDaysInRange(period.startDate, period.endDate)
   const rows = []
 
-  for (const employee of employees.filter(isPayrollParticipant)) {
+  for (const employee of employees.filter(isPayrollParticipant).sort(compareEmployeesByName)) {
     for (const dateStr of workDays) {
       if (!employeeHasAnyManualEventOnDay(attendanceEvents, employee.id, dateStr)) {
         continue
@@ -252,7 +253,7 @@ export function buildAttendanceExceptionReport(
 
   return rows.sort((a, b) => {
     if (a.date === b.date) {
-      return a.name.localeCompare(b.name)
+      return compareEmployeesByName(a, b)
     }
     return a.date.localeCompare(b.date)
   })
