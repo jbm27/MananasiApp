@@ -3,6 +3,7 @@ import { getAppState, saveAppStateWithGuard } from '../stateStore.js'
 import { mergeIncomingAppState, sanitizeAppStateForRead } from '../stateMerge.js'
 import { migrateLeadershipPasswordsFromMainState } from '../services/leadershipAuthStore.js'
 import { syncClockedInIdsToAppState } from '../services/attendanceAutoClockOut.js'
+import { remapLegacyAttendanceEmployeeIds } from '../services/attendanceService.js'
 
 const router = Router()
 
@@ -17,6 +18,7 @@ function stripSensitiveStateFields(data) {
 router.get('/', async (_req, res) => {
   try {
     await migrateLeadershipPasswordsFromMainState()
+    await remapLegacyAttendanceEmployeeIds()
     await syncClockedInIdsToAppState()
     const state = await getAppState()
     if (!state) {
@@ -39,6 +41,7 @@ router.put('/', async (req, res) => {
       return res.status(400).json({ error: 'Expected JSON object body' })
     }
     await migrateLeadershipPasswordsFromMainState()
+    await remapLegacyAttendanceEmployeeIds()
     const clockedInIds = await syncClockedInIdsToAppState()
     const current = await getAppState()
     const { _meta, leaderPasswordHashes: _ignored, clockedInIds: _clientClockedIn, ...incoming } = body

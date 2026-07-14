@@ -87,6 +87,7 @@ import {
   buildEmployeeIdMapFromNameMatch,
   remapEmployeeIdsInAppState,
 } from './employeeIdMigration.js'
+import { buildEmployeeIdMap } from './employeeWorkNumberAssignments.js'
 import { sanitizePersistedAppState } from './appStateSanitize.js'
 import {
   applyInvoiceFinalizeStockReduction,
@@ -10542,10 +10543,16 @@ function hydrateAppState(data, setters) {
   const storedEmployees = Array.isArray(sanitized.employees) ? sanitized.employees : []
   const mergedEmployees = mergeEmployeesWithSeed(storedEmployees, mananasiStaffEmployees)
   const employeeIdMap = buildEmployeeIdMapFromNameMatch(storedEmployees, mergedEmployees)
-  const hydratedData =
+  for (const [oldId, newId] of buildEmployeeIdMap(mergedEmployees)) {
+    employeeIdMap.set(oldId, newId)
+  }
+  const remappedState =
+    employeeIdMap.size > 0 ? remapEmployeeIdsInAppState(sanitized, employeeIdMap) : sanitized
+  const remappedEmployees =
     employeeIdMap.size > 0
-      ? { ...remapEmployeeIdsInAppState(sanitized, employeeIdMap), employees: mergedEmployees }
-      : { ...sanitized, employees: mergedEmployees }
+      ? remapEmployeeIdsInAppState({ employees: mergedEmployees }, employeeIdMap).employees
+      : mergedEmployees
+  const hydratedData = { ...remappedState, employees: remappedEmployees }
 
   if (Array.isArray(hydratedData.employees)) {
     setters.setEmployees(hydratedData.employees)

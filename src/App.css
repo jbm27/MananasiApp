@@ -551,6 +551,36 @@ th {
   margin: 0;
 }
 
+.table-heading-with-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+.table-sort-button {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #475569;
+  border-radius: 0.35rem;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.table-sort-button:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.table-sort-button.is-active {
+  background: #0b5cad;
+  border-color: #0b5cad;
+  color: #fff;
+}
+
 .employee-search-toolbar {
   display: flex;
   flex-wrap: wrap;

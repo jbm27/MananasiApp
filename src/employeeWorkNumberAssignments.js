@@ -157,7 +157,12 @@ export const WORK_NUMBER_BY_NORMALIZED_NAME = {
   'tomas jumbi akhonya': '0102',
   'timothy kamau ndungu': '0103',
   'brian mvinmani nyangule': '0104',
+  'brian mwinami nyangule': '0104',
+  'brian nyangule': '0104',
   'graiston pamba ameyo': '0105',
+  'grainton pamba ameyo': '0105',
+  'graiton pamba ameyo': '0105',
+  'graiton pamba': '0105',
   'michael nzoka mboye': '0106',
 }
 

@@ -145,9 +145,10 @@ function matchHarvesterByName(rawName, maps) {
     'calvince mwongela': '0088',
     'samwel mukule': '0037',
     'lydiah mweru': '0077',
-    'graiton pamba': '5069',
-    'grainton pamba ameyo': '5069',
-    'brian nyangule': '5068',
+    'graiton pamba': '0105',
+    'grainton pamba ameyo': '0105',
+    'brian nyangule': '0104',
+    'brian mwinami nyangule': '0104',
   }
   const aliasId = manualAliases[normalized]
   if (aliasId) {

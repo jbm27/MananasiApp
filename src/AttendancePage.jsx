@@ -58,6 +58,7 @@ export default function AttendancePage({
   const [periodFrom, setPeriodFrom] = useState(dateFrom)
   const [periodTo, setPeriodTo] = useState(dateTo)
   const [registerFilterMode, setRegisterFilterMode] = useState('date-range')
+  const [registerSortMode, setRegisterSortMode] = useState('name')
   const [periodAttendanceEvents, setPeriodAttendanceEvents] = useState([])
   const [periodLoading, setPeriodLoading] = useState(false)
   const [leaveEmployeeId, setLeaveEmployeeId] = useState('')
@@ -130,67 +131,71 @@ export default function AttendancePage({
     loadPeriodAttendance()
   }, [showRegister, loadPeriodAttendance])
 
-  const registerRows = useMemo(
-    () =>
-      sortedEmployees.map((employee) => {
-        const leavePeriod = getLeaveSummaryPeriod(
-          employee,
-          registerFilterMode,
+  const registerRows = useMemo(() => {
+    const rows = sortedEmployees.map((employee) => {
+      const leavePeriod = getLeaveSummaryPeriod(
+        employee,
+        registerFilterMode,
+        periodFrom,
+        periodTo,
+        today,
+      )
+      const leaveSummary = leavePeriod
+        ? summarizeLeaveForEmployee(
+            leaveRecords,
+            employee.id,
+            leavePeriod.from,
+            leavePeriod.to,
+            publicHolidays,
+          )
+        : { annual: 0, sick: 0, compassionate: 0, unpaid: 0 }
+      const contractDaysRemaining =
+        registerFilterMode === 'contract-term'
+          ? countWorkingDaysRemainingOnContract(employee.contractEndDate, publicHolidays, today)
+          : null
+
+      return {
+        id: employee.id,
+        name: employee.name,
+        role: getRoleLabel(employee.role),
+        clockedIn: clockedInIds.includes(employee.id),
+        daysWorked: countDaysWorkedFromAttendance(
+          periodAttendanceEvents,
+          employee.id,
           periodFrom,
           periodTo,
-          today,
-        )
-        const leaveSummary = leavePeriod
-          ? summarizeLeaveForEmployee(
-              leaveRecords,
-              employee.id,
-              leavePeriod.from,
-              leavePeriod.to,
-              publicHolidays,
-            )
-          : { annual: 0, sick: 0, compassionate: 0, unpaid: 0 }
-        const contractDaysRemaining =
-          registerFilterMode === 'contract-term'
-            ? countWorkingDaysRemainingOnContract(employee.contractEndDate, publicHolidays, today)
-            : null
+        ),
+        leaveSummary,
+        contractDaysRemaining,
+        annualEntitlement: getAnnualLeaveEntitlement(employee),
+        sickEntitlement: getSickLeaveEntitlement(
+          employee.contractStartDate,
+          employee.contractEndDate,
+        ),
+        compassionateEntitlement: getCompassionateLeaveEntitlement(
+          employee.contractStartDate,
+          employee.contractEndDate,
+        ),
+      }
+    })
 
-        return {
-          id: employee.id,
-          name: employee.name,
-          role: getRoleLabel(employee.role),
-          clockedIn: clockedInIds.includes(employee.id),
-          daysWorked: countDaysWorkedFromAttendance(
-            periodAttendanceEvents,
-            employee.id,
-            periodFrom,
-            periodTo,
-          ),
-          leaveSummary,
-          contractDaysRemaining,
-          annualEntitlement: getAnnualLeaveEntitlement(employee),
-          sickEntitlement: getSickLeaveEntitlement(
-            employee.contractStartDate,
-            employee.contractEndDate,
-          ),
-          compassionateEntitlement: getCompassionateLeaveEntitlement(
-            employee.contractStartDate,
-            employee.contractEndDate,
-          ),
-        }
-      }),
-    [
-      sortedEmployees,
-      registerFilterMode,
-      periodFrom,
-      periodTo,
-      today,
-      leaveRecords,
-      publicHolidays,
-      clockedInIds,
-      periodAttendanceEvents,
-      getRoleLabel,
-    ],
-  )
+    if (registerSortMode === 'id') {
+      return rows.sort((a, b) => Number(a.id) - Number(b.id) || String(a.id).localeCompare(String(b.id)))
+    }
+    return rows.sort((a, b) => compareEmployeesByName(a, b) || Number(a.id) - Number(b.id))
+  }, [
+    sortedEmployees,
+    registerFilterMode,
+    registerSortMode,
+    periodFrom,
+    periodTo,
+    today,
+    leaveRecords,
+    publicHolidays,
+    clockedInIds,
+    periodAttendanceEvents,
+    getRoleLabel,
+  ])
 
   const holidaysForYear = useMemo(
     () =>
@@ -357,8 +362,34 @@ export default function AttendancePage({
           <table>
             <thead>
               <tr>
-                <th>Work No</th>
-                <th>Name</th>
+                <th>
+                  <span className="table-heading-with-sort">
+                    Work No
+                    <button
+                      type="button"
+                      className={`table-sort-button${registerSortMode === 'id' ? ' is-active' : ''}`}
+                      aria-label="Sort by work number"
+                      aria-pressed={registerSortMode === 'id'}
+                      onClick={() => setRegisterSortMode('id')}
+                    >
+                      #
+                    </button>
+                  </span>
+                </th>
+                <th>
+                  <span className="table-heading-with-sort">
+                    Name
+                    <button
+                      type="button"
+                      className={`table-sort-button${registerSortMode === 'name' ? ' is-active' : ''}`}
+                      aria-label="Sort by first name"
+                      aria-pressed={registerSortMode === 'name'}
+                      onClick={() => setRegisterSortMode('name')}
+                    >
+                      A–Z
+                    </button>
+                  </span>
+                </th>
                 <th>Role</th>
                 <th>Clock-in status</th>
                 <th>Days worked</th>

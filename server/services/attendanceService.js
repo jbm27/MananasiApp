@@ -5,6 +5,25 @@ function buildEventId(sourceEventId, employeeId, eventType, occurredAt) {
   return sourceEventId ?? `${employeeId}-${eventType}-${occurredAt}`
 }
 
+/** One-time / idempotent remaps for employees who missed the work-number migration. */
+const LEGACY_ATTENDANCE_EMPLOYEE_IDS = new Map([
+  ['5068', '0104'], // Brian Mwinami Nyangule
+  ['5069', '0105'], // Grainton Pamba Ameyo
+])
+
+export async function remapLegacyAttendanceEmployeeIds() {
+  const pool = getPool()
+  let total = 0
+  for (const [oldId, newId] of LEGACY_ATTENDANCE_EMPLOYEE_IDS) {
+    const result = await pool.query(
+      `UPDATE attendance_events SET employee_id = $2 WHERE employee_id = $1`,
+      [oldId, newId],
+    )
+    total += result.rowCount ?? 0
+  }
+  return total
+}
+
 export async function recordAttendanceEvent({
   employeeId,
   eventType,
