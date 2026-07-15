@@ -14,9 +14,10 @@ import {
   countWorkingDaysRemainingOnContract,
   summarizeLeaveForEmployee,
 } from './leave.js'
-import { compareEmployeesByName } from './employeeFields.js'
+import { compareEmployeesByName, compareEmployeeWorkNumbers } from './employeeFields.js'
 import { countDaysWorkedFromAttendance } from './payroll.js'
-import { toKenyaDateString } from './kenyaTime.js'
+import { formatKenyaTime, toKenyaDateString } from './kenyaTime.js'
+import { getEmployeeClockTimesForDay } from './attendanceProcessing.js'
 
 function CollapsibleSection({ title, isOpen, onToggle, children }) {
   return (
@@ -108,21 +109,26 @@ export default function AttendancePage({
     [employees, leaveEmployeeId],
   )
 
+  const isDayMode = registerFilterMode === 'day'
+  const selectedDay = periodFrom || today
+
   const loadPeriodAttendance = useCallback(async () => {
-    if (!periodFrom || !periodTo) {
+    const from = isDayMode ? selectedDay : periodFrom
+    const to = isDayMode ? selectedDay : periodTo
+    if (!from || !to) {
       setPeriodAttendanceEvents([])
       return
     }
     setPeriodLoading(true)
     try {
-      const events = await fetchAttendanceEventsForPeriod(periodFrom, periodTo)
+      const events = await fetchAttendanceEventsForPeriod(from, to)
       setPeriodAttendanceEvents(events)
     } catch {
       setPeriodAttendanceEvents([])
     } finally {
       setPeriodLoading(false)
     }
-  }, [periodFrom, periodTo])
+  }, [isDayMode, selectedDay, periodFrom, periodTo])
 
   useEffect(() => {
     if (!showRegister) {
@@ -132,12 +138,14 @@ export default function AttendancePage({
   }, [showRegister, loadPeriodAttendance])
 
   const registerRows = useMemo(() => {
+    const leaveFrom = isDayMode ? selectedDay : periodFrom
+    const leaveTo = isDayMode ? selectedDay : periodTo
     const rows = sortedEmployees.map((employee) => {
       const leavePeriod = getLeaveSummaryPeriod(
         employee,
-        registerFilterMode,
-        periodFrom,
-        periodTo,
+        isDayMode ? 'date-range' : registerFilterMode,
+        leaveFrom,
+        leaveTo,
         today,
       )
       const leaveSummary = leavePeriod
@@ -153,6 +161,9 @@ export default function AttendancePage({
         registerFilterMode === 'contract-term'
           ? countWorkingDaysRemainingOnContract(employee.contractEndDate, publicHolidays, today)
           : null
+      const dayClockTimes = isDayMode
+        ? getEmployeeClockTimesForDay(periodAttendanceEvents, employee.id, selectedDay)
+        : null
 
       return {
         id: employee.id,
@@ -162,9 +173,12 @@ export default function AttendancePage({
         daysWorked: countDaysWorkedFromAttendance(
           periodAttendanceEvents,
           employee.id,
-          periodFrom,
-          periodTo,
+          leaveFrom,
+          leaveTo,
         ),
+        clockInAt: dayClockTimes?.clockInAt ?? null,
+        clockOutAt: dayClockTimes?.clockOutAt ?? null,
+        clockOutIsAuto: dayClockTimes?.clockOutIsAuto ?? false,
         leaveSummary,
         contractDaysRemaining,
         annualEntitlement: getAnnualLeaveEntitlement(employee),
@@ -180,13 +194,15 @@ export default function AttendancePage({
     })
 
     if (registerSortMode === 'id') {
-      return rows.sort((a, b) => Number(a.id) - Number(b.id) || String(a.id).localeCompare(String(b.id)))
+      return rows.sort((a, b) => compareEmployeeWorkNumbers(a, b))
     }
-    return rows.sort((a, b) => compareEmployeesByName(a, b) || Number(a.id) - Number(b.id))
+    return rows.sort((a, b) => compareEmployeesByName(a, b) || compareEmployeeWorkNumbers(a, b))
   }, [
     sortedEmployees,
     registerFilterMode,
     registerSortMode,
+    isDayMode,
+    selectedDay,
     periodFrom,
     periodTo,
     today,
@@ -307,35 +323,63 @@ export default function AttendancePage({
       >
         <p className="inline-hint">
           <strong>{clockedInCount}</strong> of {employees.length} employees are clocked in right now.
-          Days worked counts distinct clock-in days in the selected date range (Kenya time).
+          {isDayMode
+            ? ' Day view shows each employee’s clock-in and clock-out times for the selected date (Kenya time).'
+            : ' Days worked counts distinct clock-in days in the selected date range (Kenya time).'}
         </p>
         <div className="form-grid">
           <label>
             Period basis
             <select
               value={registerFilterMode}
-              onChange={(event) => setRegisterFilterMode(event.target.value)}
+              onChange={(event) => {
+                const nextMode = event.target.value
+                setRegisterFilterMode(nextMode)
+                if (nextMode === 'day') {
+                  const day = periodFrom || today
+                  setPeriodFrom(day)
+                  setPeriodTo(day)
+                }
+              }}
             >
               <option value="date-range">Date range</option>
+              <option value="day">Day</option>
               <option value="contract-term">Contract term</option>
             </select>
           </label>
-          <label>
-            From
-            <input
-              type="date"
-              value={periodFrom}
-              onChange={(event) => setPeriodFrom(event.target.value)}
-            />
-          </label>
-          <label>
-            To
-            <input
-              type="date"
-              value={periodTo}
-              onChange={(event) => setPeriodTo(event.target.value)}
-            />
-          </label>
+          {isDayMode ? (
+            <label>
+              Date
+              <input
+                type="date"
+                value={selectedDay}
+                onChange={(event) => {
+                  const day = event.target.value
+                  setPeriodFrom(day)
+                  setPeriodTo(day)
+                }}
+              />
+            </label>
+          ) : (
+            <>
+              <label>
+                From
+                <input
+                  type="date"
+                  value={periodFrom}
+                  onChange={(event) => setPeriodFrom(event.target.value)}
+                />
+              </label>
+              <label>
+                To
+                <input
+                  type="date"
+                  value={periodTo}
+                  onChange={(event) => setPeriodTo(event.target.value)}
+                />
+              </label>
+            </>
+          )}
           <button
             type="button"
             onClick={handleRefresh}
@@ -349,6 +393,11 @@ export default function AttendancePage({
             Leave columns summarise days taken from each employee&apos;s contract start to the earlier
             of their contract end, today, and the &ldquo;To&rdquo; date above. Contract days remaining
             counts working days from today through contract end.
+          </p>
+        ) : isDayMode ? (
+          <p className="inline-hint">
+            Leave columns show leave recorded on {formatDisplayDate(selectedDay)}. Auto clock-outs are
+            marked.
           </p>
         ) : (
           <p className="inline-hint">
@@ -391,8 +440,17 @@ export default function AttendancePage({
                   </span>
                 </th>
                 <th>Role</th>
-                <th>Clock-in status</th>
-                <th>Days worked</th>
+                {isDayMode ? (
+                  <>
+                    <th>Clock in</th>
+                    <th>Clock out</th>
+                  </>
+                ) : (
+                  <>
+                    <th>Clock-in status</th>
+                    <th>Days worked</th>
+                  </>
+                )}
                 <th>Annual leave</th>
                 <th>{sickLeaveHeader}</th>
                 <th>{compassionateLeaveHeader}</th>
@@ -408,12 +466,24 @@ export default function AttendancePage({
                   </td>
                   <td>{row.name}</td>
                   <td>{row.role}</td>
-                  <td>
-                    <span className={row.clockedIn ? 'badge badge-on' : 'badge badge-off'}>
-                      {row.clockedIn ? 'Clocked In' : 'Not Clocked In'}
-                    </span>
-                  </td>
-                  <td>{row.daysWorked}</td>
+                  {isDayMode ? (
+                    <>
+                      <td>{formatKenyaTime(row.clockInAt)}</td>
+                      <td>
+                        {formatKenyaTime(row.clockOutAt)}
+                        {row.clockOutAt && row.clockOutIsAuto ? ' (auto)' : ''}
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td>
+                        <span className={row.clockedIn ? 'badge badge-on' : 'badge badge-off'}>
+                          {row.clockedIn ? 'Clocked In' : 'Not Clocked In'}
+                        </span>
+                      </td>
+                      <td>{row.daysWorked}</td>
+                    </>
+                  )}
                   <td>
                     {formatLeaveDays(row.leaveSummary.annual)}
                     {registerFilterMode === 'contract-term' && row.annualEntitlement != null

@@ -110,6 +110,30 @@ export function employeeClockedInOnDay(events, employeeId, dateStr) {
   )
 }
 
+/** First clock-in and last clock-out on the Kenya calendar day (manual outs preferred). */
+export function getEmployeeClockTimesForDay(events, employeeId, dateStr) {
+  const dayEvents = sortEventsChronologically(
+    (events ?? []).filter(
+      (event) =>
+        event.employeeId === employeeId && toKenyaDateString(event.occurredAt) === dateStr,
+    ),
+  )
+  const clockIn = dayEvents.find((event) => event.eventType === 'clock_in') ?? null
+  const manualOuts = dayEvents.filter(
+    (event) => event.eventType === 'clock_out' && !isAutoClockOutEvent(event),
+  )
+  const clockOut =
+    manualOuts.at(-1) ??
+    dayEvents.filter((event) => event.eventType === 'clock_out').at(-1) ??
+    null
+
+  return {
+    clockInAt: clockIn?.occurredAt ?? null,
+    clockOutAt: clockOut?.occurredAt ?? null,
+    clockOutIsAuto: Boolean(clockOut && isAutoClockOutEvent(clockOut)),
+  }
+}
+
 function employeeClockedOutOnDay(events, employeeId, dateStr) {
   return events.some(
     (event) =>

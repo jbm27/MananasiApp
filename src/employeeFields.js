@@ -104,7 +104,7 @@ export function mergeEmployeesWithSeed(storedEmployees, seedEmployees) {
     merged.push(seed)
   }
 
-  return merged.sort((a, b) => Number(a.id) - Number(b.id))
+  return merged.sort(compareEmployeeWorkNumbers)
 }
 
 function parseOptionalNumber(value) {
@@ -170,4 +170,63 @@ export function compareEmployeesByName(a, b) {
 
 export function sortEmployeesByName(employees) {
   return [...(employees ?? [])].sort(compareEmployeesByName)
+}
+
+/** Regular staff work numbers are 0001, 0002, … Director numbers use D001, D002, … */
+export function isRegularWorkNumber(id) {
+  const raw = String(id ?? '').trim()
+  if (!/^\d{4}$/.test(raw)) {
+    return false
+  }
+  const num = Number(raw)
+  // Official staff series is 0001–0999. Ignore legacy/out-of-series stubs (2xxx, 5xxx, …).
+  return Number.isFinite(num) && num >= 1 && num < 1000
+}
+
+export function isDirectorWorkNumber(id) {
+  return /^D\d{3}$/i.test(String(id ?? '').trim())
+}
+
+/**
+ * Next regular employee work number (0001–9999 series).
+ * Floors at 0106 so numbering continues after the current staff list.
+ */
+export function nextEmployeeWorkNumber(employees, { minimumNext = 106 } = {}) {
+  const maxNumber = (employees ?? []).reduce((max, employee) => {
+    if (!isRegularWorkNumber(employee?.id)) {
+      return max
+    }
+    return Math.max(max, Number(employee.id))
+  }, minimumNext - 1)
+  return String(maxNumber + 1).padStart(4, '0')
+}
+
+export function nextDirectorWorkNumber(employees) {
+  const maxNumber = (employees ?? []).reduce((max, employee) => {
+    const match = String(employee?.id ?? '')
+      .trim()
+      .match(/^D(\d+)$/i)
+    if (!match) {
+      return max
+    }
+    return Math.max(max, Number(match[1]))
+  }, 0)
+  return `D${String(maxNumber + 1).padStart(3, '0')}`
+}
+
+export function compareEmployeeWorkNumbers(a, b) {
+  const aId = String(a?.id ?? a ?? '')
+  const bId = String(b?.id ?? b ?? '')
+  const aDirector = isDirectorWorkNumber(aId)
+  const bDirector = isDirectorWorkNumber(bId)
+  if (aDirector !== bDirector) {
+    return aDirector ? 1 : -1
+  }
+  if (aDirector && bDirector) {
+    return aId.localeCompare(bId, undefined, { numeric: true, sensitivity: 'base' })
+  }
+  if (isRegularWorkNumber(aId) && isRegularWorkNumber(bId)) {
+    return Number(aId) - Number(bId)
+  }
+  return aId.localeCompare(bId, undefined, { numeric: true, sensitivity: 'base' })
 }

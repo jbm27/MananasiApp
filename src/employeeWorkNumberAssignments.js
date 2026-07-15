@@ -164,6 +164,11 @@ export const WORK_NUMBER_BY_NORMALIZED_NAME = {
   'graiton pamba ameyo': '0105',
   'graiton pamba': '0105',
   'michael nzoka mboye': '0106',
+  'zeid shehadeh': 'D001',
+  'riikka juva': 'D002',
+  'raquel prado': 'D003',
+  'zakariya ali musleh': 'D004',
+  'zainab haquon': 'D005',
 }
 
 export function normalizeEmployeeName(name) {

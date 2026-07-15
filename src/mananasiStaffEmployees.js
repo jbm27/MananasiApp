@@ -497,7 +497,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": "0792 035 946"
   },
   {
-    "id": "1022",
+    "id": "D001",
     "name": "Zeid Shehadeh",
     "role": "director",
     "contractType": "regular",
@@ -528,7 +528,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": ""
   },
   {
-    "id": "1023",
+    "id": "D004",
     "name": "Zakariya Ali Musleh",
     "role": "director",
     "contractType": "regular",
@@ -559,7 +559,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": ""
   },
   {
-    "id": "1024",
+    "id": "D002",
     "name": "Riikka Juva",
     "role": "director",
     "contractType": "regular",
@@ -590,7 +590,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": ""
   },
   {
-    "id": "1025",
+    "id": "D003",
     "name": "Raquel Prado",
     "role": "director",
     "contractType": "regular",
@@ -621,7 +621,7 @@ export const mananasiStaffEmployees = [
     "emergencyContactNumber": ""
   },
   {
-    "id": "1026",
+    "id": "D005",
     "name": "Zainab Haquon",
     "role": "director",
     "contractType": "regular",

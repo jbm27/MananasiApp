@@ -19,6 +19,22 @@ export function formatKenyaDateTime(value) {
   })
 }
 
+export function formatKenyaTime(value) {
+  if (!value) {
+    return '—'
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return '—'
+  }
+  return date.toLocaleTimeString('en-KE', {
+    timeZone: KENYA_TIMEZONE,
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  })
+}
+
 export function toKenyaDateString(value) {
   if (!value) {
     return ''

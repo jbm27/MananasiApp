@@ -9,6 +9,13 @@ function buildEventId(sourceEventId, employeeId, eventType, occurredAt) {
 const LEGACY_ATTENDANCE_EMPLOYEE_IDS = new Map([
   ['5068', '0104'], // Brian Mwinami Nyangule
   ['5069', '0105'], // Grainton Pamba Ameyo
+  ['5071', '0102'], // Tomas Jumbi Akhonya
+  ['5072', '0103'], // Timothy Kamau Ndungu
+  ['1022', 'D001'], // Zeid Shehadeh
+  ['1024', 'D002'], // Riikka Juva
+  ['1025', 'D003'], // Raquel Prado
+  ['1023', 'D004'], // Zakariya Ali Musleh
+  ['1026', 'D005'], // Zainab Haquon
 ])
 
 export async function remapLegacyAttendanceEmployeeIds() {

@@ -81,6 +81,8 @@ import {
   createBlankEmployeeTemplate,
   formatEmployeeFieldValue,
   mergeEmployeesWithSeed,
+  nextDirectorWorkNumber,
+  nextEmployeeWorkNumber,
   parseEmployeeProfileFromForm,
 } from './employeeFields.js'
 import {
@@ -128,14 +130,6 @@ import {
   leadershipLogin,
   setLeadershipPassword,
 } from './api/client.js'
-
-function nextEmployeeWorkNumber(employees) {
-  const maxNumber = employees.reduce((max, employee) => {
-    const digits = Number(String(employee.id).replace(/\D/g, ''))
-    return Number.isFinite(digits) ? Math.max(max, digits) : max
-  }, 0)
-  return String(maxNumber + 1).padStart(4, '0')
-}
 
 const activityModules = [
   {
@@ -3325,7 +3319,10 @@ function AddEmployeePage({
   const navigate = useNavigate()
   const [role, setRole] = useState('harvester')
   const canAddEmployees = currentUserDataEntryPermissions.has('employee-add')
-  const nextWorkNo = useMemo(() => String(nextEmployeeWorkNumber(employees)), [employees])
+  const nextWorkNo = useMemo(
+    () => (role === 'director' ? nextDirectorWorkNumber(employees) : nextEmployeeWorkNumber(employees)),
+    [employees, role],
+  )
   const blankEmployee = useMemo(
     () => createBlankEmployeeTemplate(nextWorkNo, role),
     [nextWorkNo, role],
@@ -11014,7 +11011,8 @@ function App() {
       return
     }
     const { role = 'harvester', ...profile } = input
-    const nextWorkNo = String(nextEmployeeWorkNumber(employees))
+    const nextWorkNo =
+      role === 'director' ? nextDirectorWorkNumber(employees) : nextEmployeeWorkNumber(employees)
     if (!String(profile.name ?? '').trim()) {
       return
     }
