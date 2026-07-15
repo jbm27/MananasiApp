@@ -111,9 +111,14 @@ export function employeeClockedInOnDay(events, employeeId, dateStr) {
 }
 
 /** First clock-in and last clock-out on the Kenya calendar day (manual outs preferred). */
-export function getEmployeeClockTimesForDay(events, employeeId, dateStr) {
+export function getEmployeeClockTimesForDay(
+  events,
+  employeeId,
+  dateStr,
+  referenceNow = new Date(),
+) {
   const dayEvents = sortEventsChronologically(
-    (events ?? []).filter(
+    withAutoClockOutEvents(events, referenceNow).filter(
       (event) =>
         event.employeeId === employeeId && toKenyaDateString(event.occurredAt) === dateStr,
     ),

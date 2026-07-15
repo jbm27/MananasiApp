@@ -17,7 +17,7 @@ import {
 import { compareEmployeesByName, compareEmployeeWorkNumbers } from './employeeFields.js'
 import { countDaysWorkedFromAttendance } from './payroll.js'
 import { formatKenyaTime, toKenyaDateString } from './kenyaTime.js'
-import { getEmployeeClockTimesForDay } from './attendanceProcessing.js'
+import { getEmployeeClockTimesForDay, calculateDayWorkedHours } from './attendanceProcessing.js'
 
 function CollapsibleSection({ title, isOpen, onToggle, children }) {
   return (
@@ -141,9 +141,28 @@ export default function AttendancePage({
     const leaveFrom = isDayMode ? selectedDay : periodFrom
     const leaveTo = isDayMode ? selectedDay : periodTo
     const rows = sortedEmployees.map((employee) => {
+      const dayClockTimes = isDayMode
+        ? getEmployeeClockTimesForDay(periodAttendanceEvents, employee.id, selectedDay)
+        : null
+      const hoursWorked = isDayMode
+        ? calculateDayWorkedHours(periodAttendanceEvents, employee.id, selectedDay)
+        : null
+
+      if (isDayMode) {
+        return {
+          id: employee.id,
+          name: employee.name,
+          role: getRoleLabel(employee.role),
+          clockInAt: dayClockTimes?.clockInAt ?? null,
+          clockOutAt: dayClockTimes?.clockOutAt ?? null,
+          clockOutIsAuto: dayClockTimes?.clockOutIsAuto ?? false,
+          hoursWorked,
+        }
+      }
+
       const leavePeriod = getLeaveSummaryPeriod(
         employee,
-        isDayMode ? 'date-range' : registerFilterMode,
+        registerFilterMode,
         leaveFrom,
         leaveTo,
         today,
@@ -161,9 +180,6 @@ export default function AttendancePage({
         registerFilterMode === 'contract-term'
           ? countWorkingDaysRemainingOnContract(employee.contractEndDate, publicHolidays, today)
           : null
-      const dayClockTimes = isDayMode
-        ? getEmployeeClockTimesForDay(periodAttendanceEvents, employee.id, selectedDay)
-        : null
 
       return {
         id: employee.id,
@@ -176,9 +192,6 @@ export default function AttendancePage({
           leaveFrom,
           leaveTo,
         ),
-        clockInAt: dayClockTimes?.clockInAt ?? null,
-        clockOutAt: dayClockTimes?.clockOutAt ?? null,
-        clockOutIsAuto: dayClockTimes?.clockOutIsAuto ?? false,
         leaveSummary,
         contractDaysRemaining,
         annualEntitlement: getAnnualLeaveEntitlement(employee),
@@ -324,7 +337,7 @@ export default function AttendancePage({
         <p className="inline-hint">
           <strong>{clockedInCount}</strong> of {employees.length} employees are clocked in right now.
           {isDayMode
-            ? ' Day view shows each employee’s clock-in and clock-out times for the selected date (Kenya time).'
+            ? ' Day view shows clock-in, clock-out, and hours worked for the selected date (Kenya time).'
             : ' Days worked counts distinct clock-in days in the selected date range (Kenya time).'}
         </p>
         <div className="form-grid">
@@ -396,8 +409,8 @@ export default function AttendancePage({
           </p>
         ) : isDayMode ? (
           <p className="inline-hint">
-            Leave columns show leave recorded on {formatDisplayDate(selectedDay)}. Auto clock-outs are
-            marked.
+            Showing clock-in, clock-out, and hours worked for {formatDisplayDate(selectedDay)} (Kenya
+            time). Auto clock-outs are marked.
           </p>
         ) : (
           <p className="inline-hint">
@@ -444,18 +457,21 @@ export default function AttendancePage({
                   <>
                     <th>Clock in</th>
                     <th>Clock out</th>
+                    <th>Hours worked</th>
                   </>
                 ) : (
                   <>
                     <th>Clock-in status</th>
                     <th>Days worked</th>
+                    <th>Annual leave</th>
+                    <th>{sickLeaveHeader}</th>
+                    <th>{compassionateLeaveHeader}</th>
+                    <th>Unpaid leave</th>
+                    {registerFilterMode === 'contract-term' ? (
+                      <th>Contract days remaining</th>
+                    ) : null}
                   </>
                 )}
-                <th>Annual leave</th>
-                <th>{sickLeaveHeader}</th>
-                <th>{compassionateLeaveHeader}</th>
-                <th>Unpaid leave</th>
-                {registerFilterMode === 'contract-term' ? <th>Contract days remaining</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -473,6 +489,7 @@ export default function AttendancePage({
                         {formatKenyaTime(row.clockOutAt)}
                         {row.clockOutAt && row.clockOutIsAuto ? ' (auto)' : ''}
                       </td>
+                      <td>{Number(row.hoursWorked ?? 0).toFixed(2)}</td>
                     </>
                   ) : (
                     <>
@@ -482,39 +499,40 @@ export default function AttendancePage({
                         </span>
                       </td>
                       <td>{row.daysWorked}</td>
+                      <td>
+                        {formatLeaveDays(row.leaveSummary.annual)}
+                        {registerFilterMode === 'contract-term' && row.annualEntitlement != null
+                          ? ` / ${formatLeaveDays(row.annualEntitlement)}`
+                          : ''}
+                      </td>
+                      <td>
+                        {formatLeaveDays(row.leaveSummary.sick)}
+                        {registerFilterMode === 'contract-term' && row.sickEntitlement != null
+                          ? ` / ${formatLeaveDays(row.sickEntitlement)}`
+                          : ''}
+                      </td>
+                      <td>
+                        {formatLeaveDays(row.leaveSummary.compassionate)}
+                        {registerFilterMode === 'contract-term' &&
+                        row.compassionateEntitlement != null
+                          ? ` / ${formatLeaveDays(row.compassionateEntitlement)}`
+                          : ''}
+                      </td>
+                      <td>{formatLeaveDays(row.leaveSummary.unpaid)}</td>
+                      {registerFilterMode === 'contract-term' ? (
+                        <td>
+                          {row.contractDaysRemaining == null
+                            ? 'Open-ended'
+                            : formatLeaveDays(row.contractDaysRemaining)}
+                        </td>
+                      ) : null}
                     </>
                   )}
-                  <td>
-                    {formatLeaveDays(row.leaveSummary.annual)}
-                    {registerFilterMode === 'contract-term' && row.annualEntitlement != null
-                      ? ` / ${formatLeaveDays(row.annualEntitlement)}`
-                      : ''}
-                  </td>
-                  <td>
-                    {formatLeaveDays(row.leaveSummary.sick)}
-                    {registerFilterMode === 'contract-term' && row.sickEntitlement != null
-                      ? ` / ${formatLeaveDays(row.sickEntitlement)}`
-                      : ''}
-                  </td>
-                  <td>
-                    {formatLeaveDays(row.leaveSummary.compassionate)}
-                    {registerFilterMode === 'contract-term' && row.compassionateEntitlement != null
-                      ? ` / ${formatLeaveDays(row.compassionateEntitlement)}`
-                      : ''}
-                  </td>
-                  <td>{formatLeaveDays(row.leaveSummary.unpaid)}</td>
-                  {registerFilterMode === 'contract-term' ? (
-                    <td>
-                      {row.contractDaysRemaining == null
-                        ? 'Open-ended'
-                        : formatLeaveDays(row.contractDaysRemaining)}
-                    </td>
-                  ) : null}
                 </tr>
               ))}
               {registerRows.length === 0 && (
                 <tr>
-                  <td colSpan={registerFilterMode === 'contract-term' ? 10 : 9}>
+                  <td colSpan={isDayMode ? 6 : registerFilterMode === 'contract-term' ? 10 : 9}>
                     No employees found.
                   </td>
                 </tr>
