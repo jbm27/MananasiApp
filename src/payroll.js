@@ -1,14 +1,18 @@
 import { compareEmployeesByName } from './employeeFields.js'
 import { getEmployeeDailyWageKes, isPayrollParticipant, sumAttendanceDailyPay } from './employeePay.js'
 import { toKenyaDateString } from './kenyaTime.js'
+import {
+  HOURS_PER_DAY,
+  calculateOvertimePay,
+  calculateUndertimeDeduction,
+  summarizeOverUnderTimeForEmployee,
+} from './overUnderTime.js'
 import { calculateMaxAdvanceClaimable } from './payrollAdvances.js'
 
-const HOURS_PER_DAY = 8
 const SHA_RATE = 0.0275
 const SHA_MINIMUM_KES = 300
 const NSSF_RATE = 0.06
 const AHL_RATE = 0.015
-const OVERTIME_MULTIPLIER = 1.5
 
 export const PAYROLL_EDITOR_EMPLOYEE_IDS = new Set(['0001', '0008', '0014'])
 export const PAYROLL_APPROVER_EMPLOYEE_ID = '0014'
@@ -86,7 +90,6 @@ export function createBlankPayrollAdjustment() {
     compassionateLeaveDays: 0,
     unpaidLeaveDays: 0,
     maternityLeaveDays: 0,
-    overtimeHours: 0,
     salaryAdvance: 0,
     azimaSacco: 0,
     helb: 0,
@@ -132,6 +135,7 @@ export function calculatePayrollLine({
   adjustment = createBlankPayrollAdjustment(),
   attendanceEvents = [],
   harvestRecords = [],
+  overUnderTimeRecords = [],
   incentiveThresholdKg = 250,
   dailyWageRates,
 }) {
@@ -157,9 +161,17 @@ export function calculatePayrollLine({
     wageRates,
   )
   const leavePay = Math.round(dailyRate * paidLeaveDays)
-  const regularPay = attendancePay + leavePay
-  const overtimeHours = Number(adjustment.overtimeHours) || 0
-  const overtimePay = Math.round(overtimeHours * hourlyRate * OVERTIME_MULTIPLIER)
+  const timeSummary = summarizeOverUnderTimeForEmployee(
+    overUnderTimeRecords,
+    employee.id,
+    period.startDate,
+    period.endDate,
+  )
+  const overtimeHours = timeSummary.overtime
+  const undertimeHours = timeSummary.undertime
+  const undertimeDeduction = calculateUndertimeDeduction(undertimeHours, hourlyRate)
+  const regularPay = attendancePay + leavePay - undertimeDeduction
+  const overtimePay = calculateOvertimePay(overtimeHours, hourlyRate)
   const { totalIncentiveKes, kgsOver250 } = sumHarvestMetrics(
     harvestRecords,
     employee.id,
@@ -204,6 +216,8 @@ export function calculatePayrollLine({
     maternityLeaveDays,
     paidLeaveDays,
     overtimeHours,
+    undertimeHours,
+    undertimeDeduction,
     regularPay,
     overtimePay,
     incentiveRate: 1,
@@ -229,6 +243,7 @@ export function buildPayrollLines({
   payrollAdjustments = {},
   attendanceEvents = [],
   harvestRecords = [],
+  overUnderTimeRecords = [],
   incentiveThresholdKg = 250,
   contractTypeFilter = 'all',
   dailyWageRates,
@@ -250,6 +265,7 @@ export function buildPayrollLines({
         },
         attendanceEvents,
         harvestRecords,
+        overUnderTimeRecords,
         incentiveThresholdKg,
         dailyWageRates,
       }),

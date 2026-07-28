@@ -58,6 +58,10 @@ import {
   nextLeaveRecordId,
   nextPublicHolidayId,
 } from './leave.js'
+import {
+  buildOverUnderTimeRecord,
+  nextOverUnderTimeRecordId,
+} from './overUnderTime.js'
 import logoStandard from '../LogoStandard.png'
 import { mananasiStaffEmployees } from './mananasiStaffEmployees.js'
 import {
@@ -10632,6 +10636,9 @@ function hydrateAppState(data, setters) {
   }
   if (hydratedData.payrollApprovals) setters.setPayrollApprovals(hydratedData.payrollApprovals)
   if (Array.isArray(hydratedData.leaveRecords)) setters.setLeaveRecords(hydratedData.leaveRecords)
+  if (Array.isArray(hydratedData.overUnderTimeRecords)) {
+    setters.setOverUnderTimeRecords(hydratedData.overUnderTimeRecords)
+  }
   if (Array.isArray(hydratedData.publicHolidays)) {
     setters.setPublicHolidays(hydratedData.publicHolidays)
   }
@@ -10703,6 +10710,7 @@ function App() {
   const [deletedEntityIds, setDeletedEntityIds] = useState({})
   const [poApprovalLimits, setPoApprovalLimits] = useState({})
   const [leaveRecords, setLeaveRecords] = useState([])
+  const [overUnderTimeRecords, setOverUnderTimeRecords] = useState([])
   const [publicHolidays, setPublicHolidays] = useState([])
 
   const currentUser = employees.find((employee) => employee.id === authLeadershipId) ?? null
@@ -10744,6 +10752,7 @@ function App() {
       setSalaryPayrollAdjustments,
       setPayrollApprovals,
       setLeaveRecords,
+      setOverUnderTimeRecords,
       setPublicHolidays,
     })
     hydratedRef.current = true
@@ -10792,6 +10801,7 @@ function App() {
         salaryPayrollAdjustments,
         payrollApprovals,
         leaveRecords,
+        overUnderTimeRecords,
         publicHolidays,
         }),
         { forPersist: true },
@@ -10828,6 +10838,7 @@ function App() {
       salaryPayrollAdjustments,
       payrollApprovals,
       leaveRecords,
+      overUnderTimeRecords,
       publicHolidays,
     ],
   )
@@ -11575,6 +11586,38 @@ function App() {
   function handleRemoveLeaveRecord(recordId) {
     setLeaveRecords((prev) => prev.filter((record) => record.id !== recordId))
     markEntitiesDeleted('leaveRecords', recordId)
+  }
+
+  function handleAddOverUnderTimeRecord(input) {
+    setOverUnderTimeRecords((prev) => [
+      ...prev,
+      buildOverUnderTimeRecord({
+        ...input,
+        id: nextOverUnderTimeRecordId(prev),
+        recordedById: currentUser?.id ?? null,
+      }),
+    ])
+  }
+
+  function handleUpdateOverUnderTimeRecord(recordId, input) {
+    setOverUnderTimeRecords((prev) =>
+      prev.map((record) =>
+        record.id === recordId
+          ? buildOverUnderTimeRecord({
+              ...record,
+              ...input,
+              id: record.id,
+              recordedAt: record.recordedAt,
+              recordedById: currentUser?.id ?? record.recordedById ?? null,
+            })
+          : record,
+      ),
+    )
+  }
+
+  function handleRemoveOverUnderTimeRecord(recordId) {
+    setOverUnderTimeRecords((prev) => prev.filter((record) => record.id !== recordId))
+    markEntitiesDeleted('overUnderTimeRecords', recordId)
   }
 
   function handleAddPublicHoliday(input) {
@@ -12580,9 +12623,14 @@ function App() {
                 dateTo={harvestingDateTo}
                 getRoleLabel={getEmployeeRoleLabel}
                 leaveRecords={leaveRecords}
+                overUnderTimeRecords={overUnderTimeRecords}
                 publicHolidays={publicHolidays}
+                payrollApprovals={payrollApprovals}
                 onAddLeaveRecord={handleAddLeaveRecord}
                 onRemoveLeaveRecord={handleRemoveLeaveRecord}
+                onAddOverUnderTimeRecord={handleAddOverUnderTimeRecord}
+                onUpdateOverUnderTimeRecord={handleUpdateOverUnderTimeRecord}
+                onRemoveOverUnderTimeRecord={handleRemoveOverUnderTimeRecord}
                 onAddPublicHoliday={handleAddPublicHoliday}
                 onRemovePublicHoliday={handleRemovePublicHoliday}
                 readOnly={readOnlyMode}
@@ -12697,6 +12745,7 @@ function App() {
                 payrollAdjustments={payrollAdjustments}
                 salaryPayrollAdjustments={salaryPayrollAdjustments}
                 payrollApprovals={payrollApprovals}
+                overUnderTimeRecords={overUnderTimeRecords}
                 onUpdatePayrollAdjustment={handleUpdatePayrollAdjustment}
                 onUpdateSalaryPayrollAdjustment={handleUpdateSalaryPayrollAdjustment}
                 onApprovePayrollSection={handleApprovePayrollSection}

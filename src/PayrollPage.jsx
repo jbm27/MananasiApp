@@ -30,6 +30,7 @@ import {
   createBlankSalaryAdjustment,
   sumSalaryColumn,
 } from './salaryPayroll.js'
+import { formatHours } from './overUnderTime.js'
 
 function formatDisplayDateTime(isoDateTime) {
   if (!isoDateTime) {
@@ -145,6 +146,7 @@ export default function PayrollPage({
   payrollAdjustments,
   salaryPayrollAdjustments,
   payrollApprovals,
+  overUnderTimeRecords = [],
   onUpdatePayrollAdjustment,
   onUpdateSalaryPayrollAdjustment,
   onApprovePayrollSection,
@@ -254,6 +256,7 @@ export default function PayrollPage({
       payrollAdjustments,
       attendanceEvents,
       harvestRecords,
+      overUnderTimeRecords,
       incentiveThresholdKg: compensationRules.incentiveThresholdKg,
       contractTypeFilter,
       dailyWageRates,
@@ -264,6 +267,7 @@ export default function PayrollPage({
     payrollAdjustments,
     attendanceEvents,
     harvestRecords,
+    overUnderTimeRecords,
     compensationRules.incentiveThresholdKg,
     contractTypeFilter,
     dailyWageRates,
@@ -280,8 +284,16 @@ export default function PayrollPage({
       period: selectedPeriod,
       attendanceEvents,
       harvestRecords,
+      overUnderTimeRecords,
     })
-  }, [employees, selectedPeriod, salaryPayrollAdjustments, attendanceEvents, harvestRecords])
+  }, [
+    employees,
+    selectedPeriod,
+    salaryPayrollAdjustments,
+    attendanceEvents,
+    harvestRecords,
+    overUnderTimeRecords,
+  ])
 
   const attendanceExceptionLines = useMemo(() => {
     if (!selectedPeriod) {
@@ -382,6 +394,8 @@ export default function PayrollPage({
   const wageTotals = {
     daysWorked: sumPayrollColumn(payrollLines, 'daysWorked'),
     regularPay: sumPayrollColumn(payrollLines, 'regularPay'),
+    overtimeHours: sumPayrollColumn(payrollLines, 'overtimeHours'),
+    undertimeHours: sumPayrollColumn(payrollLines, 'undertimeHours'),
     overtimePay: sumPayrollColumn(payrollLines, 'overtimePay'),
     totalIncentiveKes: sumPayrollColumn(payrollLines, 'totalIncentiveKes'),
     totalEarnings: sumPayrollColumn(payrollLines, 'totalEarnings'),
@@ -397,6 +411,9 @@ export default function PayrollPage({
 
   const salaryTotals = {
     grossSalary: sumSalaryColumn(salaryLines, 'grossSalary'),
+    overtimeHours: sumSalaryColumn(salaryLines, 'overtimeHours'),
+    undertimeHours: sumSalaryColumn(salaryLines, 'undertimeHours'),
+    overtimePay: sumSalaryColumn(salaryLines, 'overtimePay'),
     grossPay: sumSalaryColumn(salaryLines, 'grossPay'),
     nssf: sumSalaryColumn(salaryLines, 'nssf'),
     pension: sumSalaryColumn(salaryLines, 'pension'),
@@ -580,6 +597,7 @@ export default function PayrollPage({
                 <th>Unpaid</th>
                 <th>Regular pay</th>
                 <th>OT hrs</th>
+                <th>UT hrs</th>
                 <th>OT pay</th>
                 <th>Kg over 250</th>
                 <th>Incentive</th>
@@ -598,7 +616,7 @@ export default function PayrollPage({
             <tbody>
               {payrollLines.length === 0 && (
                 <tr>
-                  <td colSpan="24">No seasonal or supplementary employees match this filter.</td>
+                  <td colSpan="25">No seasonal or supplementary employees match this filter.</td>
                 </tr>
               )}
               {payrollLines.map((line) => (
@@ -649,16 +667,8 @@ export default function PayrollPage({
                     />
                   </td>
                   <td>{formatMoney(line.regularPay)}</td>
-                  <td>
-                    <EditableNumberCell
-                      value={line.overtimeHours}
-                      onChange={(value) =>
-                        handleWageAdjustmentChange(line.employeeId, 'overtimeHours', value)
-                      }
-                      disabled={!canModifyWages}
-                      step="0.5"
-                    />
-                  </td>
+                  <td>{formatHours(line.overtimeHours)}</td>
+                  <td>{formatHours(line.undertimeHours)}</td>
                   <td>{formatMoney(line.overtimePay)}</td>
                   <td>{formatMoney(line.kgsOver250)}</td>
                   <td>{formatMoney(line.totalIncentiveKes)}</td>
@@ -712,7 +722,8 @@ export default function PayrollPage({
                   <td>{wageTotals.daysWorked}</td>
                   <td colSpan="4"></td>
                   <td>{formatMoney(wageTotals.regularPay)}</td>
-                  <td></td>
+                  <td>{formatHours(wageTotals.overtimeHours)}</td>
+                  <td>{formatHours(wageTotals.undertimeHours)}</td>
                   <td>{formatMoney(wageTotals.overtimePay)}</td>
                   <td></td>
                   <td>{formatMoney(wageTotals.totalIncentiveKes)}</td>
@@ -746,9 +757,10 @@ export default function PayrollPage({
         )}
 
         <div className="rules-box">
-          <strong>Wages:</strong> Regular pay = daily rate × (days worked + sick + compassionate +
-          maternity leave). Overtime = hours × hourly rate × 1.5. SHA = max(KES 300, 2.75% of total
-          earnings). NSSF = 6%. AHL = 1.5%.
+          <strong>Wages:</strong> Regular pay = attendance pay + paid leave − undertime (hours ×
+          hourly rate). Overtime = hours × hourly rate × 1.5. OT/UT hours come from Attendance
+          entries for this pay period. SHA = max(KES 300, 2.75% of total earnings). NSSF = 6%. AHL =
+          1.5%.
         </div>
       </PayrollSection>
 
@@ -764,7 +776,9 @@ export default function PayrollPage({
                 <th>Name</th>
                 <th>Department</th>
                 <th>Gross salary</th>
-                <th>Overtime</th>
+                <th>OT hrs</th>
+                <th>UT hrs</th>
+                <th>OT pay</th>
                 <th>Allowances</th>
                 <th>Backdated / unpaid leave</th>
                 <th>Gross pay</th>
@@ -790,7 +804,7 @@ export default function PayrollPage({
             <tbody>
               {salaryLines.length === 0 && (
                 <tr>
-                  <td colSpan="24">No salaried employees with a monthly salary on record.</td>
+                  <td colSpan="26">No salaried employees with a monthly salary on record.</td>
                 </tr>
               )}
               {salaryLines.map((line) => (
@@ -798,15 +812,9 @@ export default function PayrollPage({
                   <td>{line.name}</td>
                   <td>{line.department}</td>
                   <td>{formatMoney(line.grossSalary)}</td>
-                  <td>
-                    <EditableNumberCell
-                      value={line.overtime}
-                      onChange={(value) =>
-                        handleSalaryAdjustmentChange(line.employeeId, 'overtime', value)
-                      }
-                      disabled={!canModifySalaries}
-                    />
-                  </td>
+                  <td>{formatHours(line.overtimeHours)}</td>
+                  <td>{formatHours(line.undertimeHours)}</td>
+                  <td>{formatMoney(line.overtimePay)}</td>
                   <td>
                     <EditableNumberCell
                       value={line.allowances}
@@ -891,7 +899,10 @@ export default function PayrollPage({
                     <strong>Totals</strong>
                   </td>
                   <td>{formatMoney(salaryTotals.grossSalary)}</td>
-                  <td colSpan="3"></td>
+                  <td>{formatHours(salaryTotals.overtimeHours)}</td>
+                  <td>{formatHours(salaryTotals.undertimeHours)}</td>
+                  <td>{formatMoney(salaryTotals.overtimePay)}</td>
+                  <td colSpan="2"></td>
                   <td>{formatMoney(salaryTotals.grossPay)}</td>
                   <td>{formatMoney(salaryTotals.nssf)}</td>
                   <td colSpan="2"></td>
@@ -927,8 +938,10 @@ export default function PayrollPage({
         )}
 
         <div className="rules-box">
-          <strong>Salaries:</strong> Gross pay = gross salary + overtime + allowances + backdated
-          pay. NSSF = Tier 1 (540) + Tier 2 (min((gross pay − 9,000) × 5%, 5,940)). Pension = 5%.
+          <strong>Salaries:</strong> Gross pay = gross salary + overtime pay − undertime + allowances
+          + backdated pay. Overtime = hours × (monthly salary ÷ 22 ÷ 8) × 1.5; undertime uses the same
+          hourly rate without the multiplier. OT/UT hours come from Attendance entries for this pay
+          period. NSSF = Tier 1 (540) + Tier 2 (min((gross pay − 9,000) × 5%, 5,940)). Pension = 5%.
           AHL = 1.5%. SHA = 2.75%. PAYE = tax − tax relief (default KES 2,400 personal relief; set to
           0 if not applicable). Net pay = gross pay − total deductions − advance − Sacco − welfare.
         </div>

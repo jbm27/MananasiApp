@@ -21,6 +21,7 @@ export const MERGE_BY_ID_KEYS = [
   'silageRecords',
   'invoiceStockIssues',
   'leaveRecords',
+  'overUnderTimeRecords',
   'publicHolidays',
 ]
 

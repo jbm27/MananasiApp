@@ -1,6 +1,12 @@
 import { compareEmployeesByName } from './employeeFields.js'
 import { calculateMaxAdvanceClaimable } from './payrollAdvances.js'
 import { isPayrollParticipant } from './employeePay.js'
+import {
+  calculateOvertimePay,
+  calculateUndertimeDeduction,
+  getSalariedHourlyRateKes,
+  summarizeOverUnderTimeForEmployee,
+} from './overUnderTime.js'
 
 const NSSF_TIER_1_KES = 540
 const NSSF_TIER_2_LOWER_LIMIT_KES = 9000
@@ -21,7 +27,6 @@ export function isSalariedEmployee(employee) {
 
 export function createBlankSalaryAdjustment() {
   return {
-    overtime: 0,
     allowances: 0,
     backdatedPay: 0,
     helb: 0,
@@ -55,14 +60,29 @@ export function calculateMonthlyTax(taxableSalary) {
 
 export function calculateSalaryLine({
   employee,
+  period = null,
   adjustment = createBlankSalaryAdjustment(),
+  overUnderTimeRecords = [],
   maxSalaryAdvance = 0,
 }) {
   const grossSalary = Math.round(Number(employee.monthlySalaryKes) || 0)
-  const overtime = Number(adjustment.overtime) || 0
+  const hourlyRate = getSalariedHourlyRateKes(employee.monthlySalaryKes)
+  const timeSummary =
+    period != null
+      ? summarizeOverUnderTimeForEmployee(
+          overUnderTimeRecords,
+          employee.id,
+          period.startDate,
+          period.endDate,
+        )
+      : { overtime: 0, undertime: 0 }
+  const overtimeHours = timeSummary.overtime
+  const undertimeHours = timeSummary.undertime
+  const overtimePay = calculateOvertimePay(overtimeHours, hourlyRate)
+  const undertimeDeduction = calculateUndertimeDeduction(undertimeHours, hourlyRate)
   const allowances = Number(adjustment.allowances) || 0
   const backdatedPay = Number(adjustment.backdatedPay) || 0
-  const grossPay = grossSalary + overtime + allowances + backdatedPay
+  const grossPay = grossSalary + overtimePay - undertimeDeduction + allowances + backdatedPay
 
   const nssfTier1 = NSSF_TIER_1_KES
   const nssfTier2 = Math.round(calculateNssfTier2(grossPay))
@@ -90,7 +110,11 @@ export function calculateSalaryLine({
     name: employee.name,
     department: employee.department ?? '—',
     grossSalary,
-    overtime,
+    overtimeHours,
+    undertimeHours,
+    overtimePay,
+    undertimeDeduction,
+    overtime: overtimePay,
     allowances,
     backdatedPay,
     grossPay,
@@ -123,6 +147,7 @@ export function buildSalaryPayrollLines({
   period = null,
   attendanceEvents = [],
   harvestRecords = [],
+  overUnderTimeRecords = [],
 }) {
   const periodAdjustments = salaryPayrollAdjustments[periodId] ?? {}
   return employees
@@ -134,6 +159,8 @@ export function buildSalaryPayrollLines({
         : 0
       return calculateSalaryLine({
         employee,
+        period,
+        overUnderTimeRecords,
         maxSalaryAdvance,
         adjustment: {
           ...createBlankSalaryAdjustment(),

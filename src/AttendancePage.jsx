@@ -14,6 +14,14 @@ import {
   countWorkingDaysRemainingOnContract,
   summarizeLeaveForEmployee,
 } from './leave.js'
+import {
+  OVER_UNDER_TIME_TYPES,
+  formatHours,
+  getOverUnderTimeLockMessage,
+  getOverUnderTimeTypeLabel,
+  isOverUnderTimeRecordLocked,
+  summarizeOverUnderTimeForEmployee,
+} from './overUnderTime.js'
 import { compareEmployeesByName, compareEmployeeWorkNumbers } from './employeeFields.js'
 import { countDaysWorkedFromAttendance } from './payroll.js'
 import { formatKenyaTime, toKenyaDateString } from './kenyaTime.js'
@@ -32,6 +40,9 @@ function CollapsibleSection({ title, isOpen, onToggle, children }) {
 }
 
 function formatDisplayDate(isoDate) {
+  if (!isoDate) {
+    return '—'
+  }
   const [year, month, day] = isoDate.split('-')
   return `${day}/${month}/${year}`
 }
@@ -45,9 +56,14 @@ export default function AttendancePage({
   dateTo,
   getRoleLabel = (role) => role,
   leaveRecords,
+  overUnderTimeRecords = [],
   publicHolidays,
+  payrollApprovals = {},
   onAddLeaveRecord,
   onRemoveLeaveRecord,
+  onAddOverUnderTimeRecord,
+  onUpdateOverUnderTimeRecord,
+  onRemoveOverUnderTimeRecord,
   onAddPublicHoliday,
   onRemovePublicHoliday,
   readOnly = false,
@@ -55,6 +71,7 @@ export default function AttendancePage({
   const today = toKenyaDateString(new Date())
   const [showRegister, setShowRegister] = useState(false)
   const [showRecordLeave, setShowRecordLeave] = useState(false)
+  const [showOverUnderTime, setShowOverUnderTime] = useState(false)
   const [showPublicHolidays, setShowPublicHolidays] = useState(false)
   const [periodFrom, setPeriodFrom] = useState(dateFrom)
   const [periodTo, setPeriodTo] = useState(dateTo)
@@ -69,6 +86,14 @@ export default function AttendancePage({
   const [leaveStartDate, setLeaveStartDate] = useState(today)
   const [leaveEndDate, setLeaveEndDate] = useState(today)
   const [leaveStatus, setLeaveStatus] = useState('')
+  const [outEditingId, setOutEditingId] = useState('')
+  const [outEmployeeId, setOutEmployeeId] = useState('')
+  const [outEmployeeSearch, setOutEmployeeSearch] = useState('')
+  const [outEmployeePickerOpen, setOutEmployeePickerOpen] = useState(false)
+  const [outAdjustmentType, setOutAdjustmentType] = useState('overtime')
+  const [outHours, setOutHours] = useState('1')
+  const [outDate, setOutDate] = useState(today)
+  const [outStatus, setOutStatus] = useState('')
   const [holidayDate, setHolidayDate] = useState(today)
   const [holidayName, setHolidayName] = useState('')
   const [holidayStatus, setHolidayStatus] = useState('')
@@ -107,6 +132,31 @@ export default function AttendancePage({
   const selectedLeaveEmployee = useMemo(
     () => employees.find((employee) => employee.id === leaveEmployeeId) ?? null,
     [employees, leaveEmployeeId],
+  )
+  const outEmployeeSearchQuery = outEmployeeSearch.trim().toLowerCase()
+  const outEmployeeSearchResults = useMemo(() => {
+    if (!outEmployeeSearchQuery) {
+      return []
+    }
+    return sortedEmployees
+      .filter((employee) => {
+        const searchableText = [
+          employee.name,
+          employee.id,
+          employee.phone,
+          employee.email,
+          employee.position,
+          getRoleLabel(employee.role),
+        ]
+          .map((value) => String(value ?? '').toLowerCase())
+          .join(' ')
+        return searchableText.includes(outEmployeeSearchQuery)
+      })
+      .slice(0, 25)
+  }, [sortedEmployees, outEmployeeSearchQuery, getRoleLabel])
+  const selectedOutEmployee = useMemo(
+    () => employees.find((employee) => employee.id === outEmployeeId) ?? null,
+    [employees, outEmployeeId],
   )
 
   const isDayMode = registerFilterMode === 'day'
@@ -176,6 +226,14 @@ export default function AttendancePage({
             publicHolidays,
           )
         : { annual: 0, sick: 0, compassionate: 0, unpaid: 0 }
+      const timeSummary = leavePeriod
+        ? summarizeOverUnderTimeForEmployee(
+            overUnderTimeRecords,
+            employee.id,
+            leavePeriod.from,
+            leavePeriod.to,
+          )
+        : { overtime: 0, undertime: 0 }
       const contractDaysRemaining =
         registerFilterMode === 'contract-term'
           ? countWorkingDaysRemainingOnContract(employee.contractEndDate, publicHolidays, today)
@@ -193,6 +251,7 @@ export default function AttendancePage({
           leaveTo,
         ),
         leaveSummary,
+        timeSummary,
         contractDaysRemaining,
         annualEntitlement: getAnnualLeaveEntitlement(employee),
         sickEntitlement: getSickLeaveEntitlement(
@@ -220,6 +279,7 @@ export default function AttendancePage({
     periodTo,
     today,
     leaveRecords,
+    overUnderTimeRecords,
     publicHolidays,
     clockedInIds,
     periodAttendanceEvents,
@@ -242,6 +302,37 @@ export default function AttendancePage({
     [leaveRecords],
   )
 
+  const recentOverUnderTimeRecords = useMemo(
+    () =>
+      [...overUnderTimeRecords]
+        .sort((a, b) => b.date.localeCompare(a.date) || b.recordedAt.localeCompare(a.recordedAt))
+        .slice(0, 50),
+    [overUnderTimeRecords],
+  )
+
+  const periodOverUnderTimeSummary = useMemo(() => {
+    const from = isDayMode ? selectedDay : periodFrom
+    const to = isDayMode ? selectedDay : periodTo
+    if (!from || !to || from > to) {
+      return { overtime: 0, undertime: 0 }
+    }
+    return (overUnderTimeRecords ?? []).reduce(
+      (totals, record) => {
+        if (record.date < from || record.date > to) {
+          return totals
+        }
+        const hours = Number(record.hours) || 0
+        if (record.adjustmentType === 'overtime') {
+          totals.overtime += hours
+        } else if (record.adjustmentType === 'undertime') {
+          totals.undertime += hours
+        }
+        return totals
+      },
+      { overtime: 0, undertime: 0 },
+    )
+  }, [overUnderTimeRecords, isDayMode, selectedDay, periodFrom, periodTo])
+
   async function handleRefresh() {
     await onRefreshAttendance()
     await loadPeriodAttendance()
@@ -257,6 +348,111 @@ export default function AttendancePage({
     setLeaveEmployeeId(employee.id)
     setLeaveEmployeeSearch(`${employee.name} (${employee.id})`)
     setLeaveEmployeePickerOpen(false)
+  }
+
+  function resetOverUnderTimeForm() {
+    setOutEditingId('')
+    setOutEmployeeId('')
+    setOutEmployeeSearch('')
+    setOutAdjustmentType('overtime')
+    setOutHours('1')
+    setOutDate(today)
+  }
+
+  function handleOutEmployeeSearchChange(value) {
+    setOutEmployeeSearch(value)
+    setOutEmployeePickerOpen(true)
+    setOutEmployeeId('')
+  }
+
+  function selectOutEmployee(employee) {
+    setOutEmployeeId(employee.id)
+    setOutEmployeeSearch(`${employee.name} (${employee.id})`)
+    setOutEmployeePickerOpen(false)
+  }
+
+  function beginEditOverUnderTime(record) {
+    const employee = employees.find((item) => item.id === record.employeeId)
+    setOutEditingId(record.id)
+    setOutEmployeeId(record.employeeId)
+    setOutEmployeeSearch(
+      employee ? `${employee.name} (${employee.id})` : String(record.employeeId),
+    )
+    setOutAdjustmentType(record.adjustmentType)
+    setOutHours(String(record.hours))
+    setOutDate(record.date)
+    setOutStatus('')
+    setShowOverUnderTime(true)
+  }
+
+  function handleRecordOverUnderTime(event) {
+    event.preventDefault()
+    setOutStatus('')
+    const hours = Number(outHours)
+    if (!outEmployeeId) {
+      setOutStatus('Select an employee.')
+      return
+    }
+    if (!outDate) {
+      setOutStatus('Select the date of the under/overtime.')
+      return
+    }
+    if (!Number.isFinite(hours) || hours <= 0) {
+      setOutStatus('Enter a positive number of hours.')
+      return
+    }
+    const employee = employees.find((item) => item.id === outEmployeeId)
+    const candidate = {
+      id: outEditingId || 'pending',
+      employeeId: outEmployeeId,
+      adjustmentType: outAdjustmentType,
+      hours,
+      date: outDate,
+    }
+    if (isOverUnderTimeRecordLocked(candidate, employee, payrollApprovals)) {
+      setOutStatus(getOverUnderTimeLockMessage(candidate, employee, payrollApprovals))
+      return
+    }
+    if (outEditingId) {
+      const existing = overUnderTimeRecords.find((record) => record.id === outEditingId)
+      if (existing && isOverUnderTimeRecordLocked(existing, employee, payrollApprovals)) {
+        setOutStatus(getOverUnderTimeLockMessage(existing, employee, payrollApprovals))
+        return
+      }
+      onUpdateOverUnderTimeRecord(outEditingId, {
+        employeeId: outEmployeeId,
+        adjustmentType: outAdjustmentType,
+        hours,
+        date: outDate,
+      })
+      setOutStatus(
+        `Updated ${formatHours(hours)} hour(s) of ${getOverUnderTimeTypeLabel(outAdjustmentType).toLowerCase()}.`,
+      )
+    } else {
+      onAddOverUnderTimeRecord({
+        employeeId: outEmployeeId,
+        adjustmentType: outAdjustmentType,
+        hours,
+        date: outDate,
+      })
+      setOutStatus(
+        `Recorded ${formatHours(hours)} hour(s) of ${getOverUnderTimeTypeLabel(outAdjustmentType).toLowerCase()}.`,
+      )
+    }
+    resetOverUnderTimeForm()
+  }
+
+  function handleRemoveOverUnderTime(record) {
+    const employee = employees.find((item) => item.id === record.employeeId)
+    if (isOverUnderTimeRecordLocked(record, employee, payrollApprovals)) {
+      setOutStatus(getOverUnderTimeLockMessage(record, employee, payrollApprovals))
+      return
+    }
+    onRemoveOverUnderTimeRecord(record.id)
+    if (outEditingId === record.id) {
+      resetOverUnderTimeForm()
+    }
+    setOutStatus('Removed under/overtime entry.')
   }
 
   function handleRecordLeave(event) {
@@ -325,8 +521,9 @@ export default function AttendancePage({
     <section className="panel">
       <h2>Attendance</h2>
       <p>
-        Review clock-in status, record employee leave, and manage Kenyan public holidays. Leave days
-        exclude Sundays and public holidays; Saturdays count as working days.
+        Review clock-in status, record employee leave and under/overtime, and manage Kenyan public
+        holidays. Leave days exclude Sundays and public holidays; Saturdays count as working days.
+        Under/overtime entries feed wages and salaries payroll automatically.
       </p>
 
       <CollapsibleSection
@@ -467,6 +664,8 @@ export default function AttendancePage({
                     <th>{sickLeaveHeader}</th>
                     <th>{compassionateLeaveHeader}</th>
                     <th>Unpaid leave</th>
+                    <th>Overtime hrs</th>
+                    <th>Undertime hrs</th>
                     {registerFilterMode === 'contract-term' ? (
                       <th>Contract days remaining</th>
                     ) : null}
@@ -519,6 +718,8 @@ export default function AttendancePage({
                           : ''}
                       </td>
                       <td>{formatLeaveDays(row.leaveSummary.unpaid)}</td>
+                      <td>{formatHours(row.timeSummary.overtime)}</td>
+                      <td>{formatHours(row.timeSummary.undertime)}</td>
                       {registerFilterMode === 'contract-term' ? (
                         <td>
                           {row.contractDaysRemaining == null
@@ -532,7 +733,7 @@ export default function AttendancePage({
               ))}
               {registerRows.length === 0 && (
                 <tr>
-                  <td colSpan={isDayMode ? 6 : registerFilterMode === 'contract-term' ? 10 : 9}>
+                  <td colSpan={isDayMode ? 6 : registerFilterMode === 'contract-term' ? 12 : 11}>
                     No employees found.
                   </td>
                 </tr>
@@ -669,6 +870,175 @@ export default function AttendancePage({
               {recentLeaveRecords.length === 0 && (
                 <tr>
                   <td colSpan={readOnly ? 5 : 6}>No leave recorded yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        title="Record under/overtime"
+        isOpen={showOverUnderTime}
+        onToggle={() => setShowOverUnderTime((prev) => !prev)}
+      >
+        <p className="inline-hint">
+          Record fractional days as undertime and extra hours as overtime. These hours populate
+          payroll automatically. Entries cannot be changed once the matching wages or salaries
+          period has been approved.
+        </p>
+        <p className="inline-hint">
+          Period summary ({isDayMode ? formatDisplayDate(selectedDay) : `${formatDisplayDate(periodFrom)} – ${formatDisplayDate(periodTo)}`}
+          ): overtime <strong>{formatHours(periodOverUnderTimeSummary.overtime)}</strong> hrs,
+          undertime <strong>{formatHours(periodOverUnderTimeSummary.undertime)}</strong> hrs
+          {registerFilterMode === 'contract-term'
+            ? ' (register uses each employee’s contract window; this total uses the From/To dates above).'
+            : '.'}
+        </p>
+        {readOnly ? (
+          <p className="inline-hint">Director view: under/overtime cannot be recorded or changed.</p>
+        ) : (
+          <form className="form-grid" onSubmit={handleRecordOverUnderTime}>
+            <label className="employee-search-field employee-picker-field">
+              Employee
+              <div className="employee-picker">
+                <input
+                  type="search"
+                  value={outEmployeeSearch}
+                  onChange={(event) => handleOutEmployeeSearchChange(event.target.value)}
+                  onFocus={() => setOutEmployeePickerOpen(true)}
+                  onBlur={() => {
+                    window.setTimeout(() => setOutEmployeePickerOpen(false), 150)
+                  }}
+                  placeholder="Search by name, work no, phone, email, or role"
+                  autoComplete="off"
+                  required={!outEmployeeId}
+                />
+                {outEmployeePickerOpen && outEmployeeSearchQuery ? (
+                  <ul className="employee-picker-results" role="listbox">
+                    {outEmployeeSearchResults.map((employee) => (
+                      <li key={employee.id}>
+                        <button
+                          type="button"
+                          role="option"
+                          className="employee-picker-option"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => selectOutEmployee(employee)}
+                        >
+                          <span>{employee.name}</span>
+                          <code>{employee.id}</code>
+                        </button>
+                      </li>
+                    ))}
+                    {outEmployeeSearchResults.length === 0 ? (
+                      <li className="employee-picker-empty">No matching employees.</li>
+                    ) : null}
+                  </ul>
+                ) : null}
+              </div>
+              {selectedOutEmployee ? (
+                <p className="inline-hint">
+                  Selected: {selectedOutEmployee.name} (<code>{selectedOutEmployee.id}</code>)
+                </p>
+              ) : null}
+            </label>
+            <label>
+              Type
+              <select
+                value={outAdjustmentType}
+                onChange={(event) => setOutAdjustmentType(event.target.value)}
+              >
+                {OVER_UNDER_TIME_TYPES.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Hours
+              <input
+                type="number"
+                min="0.5"
+                step="0.5"
+                value={outHours}
+                onChange={(event) => setOutHours(event.target.value)}
+                required
+              />
+            </label>
+            <label>
+              Date
+              <input
+                type="date"
+                value={outDate}
+                onChange={(event) => setOutDate(event.target.value)}
+                required
+              />
+            </label>
+            <button type="submit">{outEditingId ? 'Update entry' : 'Record under/overtime'}</button>
+            {outEditingId ? (
+              <button type="button" onClick={resetOverUnderTimeForm}>
+                Cancel edit
+              </button>
+            ) : null}
+          </form>
+        )}
+        {outStatus ? <p className="inline-hint">{outStatus}</p> : null}
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th>Type</th>
+                <th>Date</th>
+                <th>Hours</th>
+                {!readOnly ? <th /> : null}
+              </tr>
+            </thead>
+            <tbody>
+              {recentOverUnderTimeRecords.map((record) => {
+                const employee = employees.find((item) => item.id === record.employeeId)
+                const locked = isOverUnderTimeRecordLocked(record, employee, payrollApprovals)
+                return (
+                  <tr key={record.id}>
+                    <td>{employee?.name ?? record.employeeId}</td>
+                    <td>{getOverUnderTimeTypeLabel(record.adjustmentType)}</td>
+                    <td>{formatDisplayDate(record.date)}</td>
+                    <td>{formatHours(record.hours)}</td>
+                    {!readOnly ? (
+                      <td>
+                        <button
+                          type="button"
+                          disabled={locked}
+                          title={
+                            locked
+                              ? getOverUnderTimeLockMessage(record, employee, payrollApprovals)
+                              : 'Edit entry'
+                          }
+                          onClick={() => beginEditOverUnderTime(record)}
+                        >
+                          Edit
+                        </button>{' '}
+                        <button
+                          type="button"
+                          disabled={locked}
+                          title={
+                            locked
+                              ? getOverUnderTimeLockMessage(record, employee, payrollApprovals)
+                              : 'Remove entry'
+                          }
+                          onClick={() => handleRemoveOverUnderTime(record)}
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    ) : null}
+                  </tr>
+                )
+              })}
+              {recentOverUnderTimeRecords.length === 0 && (
+                <tr>
+                  <td colSpan={readOnly ? 4 : 5}>No under/overtime recorded yet.</td>
                 </tr>
               )}
             </tbody>
