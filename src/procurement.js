@@ -246,30 +246,50 @@ export function canEmployeeReceivePoItem(item, employeeId) {
   )
 }
 
-export function getPurchaseOrdersPendingApprovalForEmployee(purchaseOrders, employeeId) {
-  if (!employeeId) {
+export function getPurchaseOrdersPendingApprovalForEmployee(
+  purchaseOrders,
+  employee,
+  approvalLimits = {},
+) {
+  if (!employee?.id) {
     return []
   }
-  return (purchaseOrders ?? [])
-    .filter((po) => po?.status === 'authorized')
-    .map((po) => {
-      const pendingItems = (po.items ?? []).filter((item) =>
-        canEmployeeReceivePoItem(item, employeeId),
-      )
-      if (pendingItems.length === 0) {
-        return null
-      }
-      return {
+
+  const pending = []
+
+  ;(purchaseOrders ?? []).forEach((po) => {
+    if (!po) {
+      return
+    }
+
+    if (po.status === 'draft' && canEmployeeAuthorizePo(employee, po.totalAmount, approvalLimits)) {
+      pending.push({
         ...po,
-        pendingItems,
+        pendingAction: 'authorise',
+        pendingItems: Array.isArray(po.items) ? po.items : [],
+      })
+      return
+    }
+
+    if (po.status === 'authorized') {
+      const pendingItems = (po.items ?? []).filter((item) =>
+        canEmployeeReceivePoItem(item, employee.id),
+      )
+      if (pendingItems.length > 0) {
+        pending.push({
+          ...po,
+          pendingAction: 'receive',
+          pendingItems,
+        })
       }
-    })
-    .filter(Boolean)
-    .sort((a, b) =>
-      a.createdAt === b.createdAt
-        ? String(b.poNumber).localeCompare(String(a.poNumber))
-        : b.createdAt.localeCompare(a.createdAt),
-    )
+    }
+  })
+
+  return pending.sort((a, b) =>
+    a.createdAt === b.createdAt
+      ? String(b.poNumber).localeCompare(String(a.poNumber))
+      : b.createdAt.localeCompare(a.createdAt),
+  )
 }
 
 export function buildPurchaseOrderDeletionAudit(po, deletedBy) {

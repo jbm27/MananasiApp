@@ -360,8 +360,13 @@ export default function ProcurementPage({
   }, [filteredPurchaseOrders])
 
   const myPendingApprovals = useMemo(
-    () => getPurchaseOrdersPendingApprovalForEmployee(purchaseOrders, currentUser?.id),
-    [purchaseOrders, currentUser?.id],
+    () =>
+      getPurchaseOrdersPendingApprovalForEmployee(
+        purchaseOrders,
+        currentUser,
+        poApprovalLimits,
+      ),
+    [purchaseOrders, currentUser, poApprovalLimits],
   )
 
   const selectedPo =
@@ -635,16 +640,16 @@ export default function ProcurementPage({
     setFormStatus(result.message)
   }
 
-  function handleAuthorize() {
-    if (!selectedPo || readOnly) {
+  function handleAuthorize(poId = selectedPo?.id) {
+    if (!poId || readOnly) {
       return
     }
-    const result = onAuthorizePurchaseOrder(selectedPo.id, currentUser.id)
+    const result = onAuthorizePurchaseOrder(poId, currentUser.id)
     if (!result.ok) {
       setFormStatus(result.message)
       return
     }
-    if (editingPoId === selectedPo.id) {
+    if (editingPoId === poId) {
       resetPoForm()
     }
     setFormStatus(result.message)
@@ -1053,80 +1058,104 @@ export default function ProcurementPage({
         onToggle={() => setMyApprovalsOpen((open) => !open)}
       >
         <p className="inline-hint">
-          Authorised purchase orders where you are the assigned receiver for one or more items still
-          awaiting receipt. Only your pending items are listed here.
+          Draft purchase orders within your approval limit that need authorising, and authorised
+          purchase orders where you are the assigned receiver for items still awaiting receipt.
         </p>
         {myPendingApprovals.length === 0 ? (
-          <p className="inline-hint">No purchase orders are waiting for your receipt approval.</p>
+          <p className="inline-hint">No purchase orders are waiting for your approval.</p>
         ) : (
-          myPendingApprovals.map((po) => (
-            <section key={po.id} className="panel nested-panel">
-              <h3>
-                <button
-                  type="button"
-                  className="link-button"
-                  onClick={() => {
-                    setSelectedPoId(po.id)
-                    setPoRegisterOpen(true)
-                  }}
-                >
-                  {po.poNumber}
-                </button>
-              </h3>
-              <p>
-                Supplier: {po.supplierName} · Order date: {formatDisplayDate(po.orderDate)} · Total:
-                KES{' '}
-                {po.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-              </p>
-              {po.authorizedByName ? (
+          myPendingApprovals.map((po) => {
+            const isAuthorise = po.pendingAction === 'authorise'
+            return (
+              <section key={`${po.pendingAction}-${po.id}`} className="panel nested-panel">
+                <h3>
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => {
+                      setSelectedPoId(po.id)
+                      setPoRegisterOpen(true)
+                    }}
+                  >
+                    {po.poNumber}
+                  </button>
+                  {' · '}
+                  <span className="inline-hint">
+                    {isAuthorise ? 'Awaiting authorisation' : 'Awaiting your receipt'}
+                  </span>
+                </h3>
                 <p>
-                  Authorised by {po.authorizedByName}
-                  {po.authorizedAt ? ` on ${formatKenyaDateTime(po.authorizedAt)}` : ''}
+                  Supplier: {po.supplierName} · Order date: {formatDisplayDate(po.orderDate)} ·
+                  Total: KES{' '}
+                  {po.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </p>
-              ) : null}
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Description</th>
-                      <th>Qty</th>
-                      <th>Unit</th>
-                      <th>Unit price</th>
-                      <th>Amount</th>
-                      <th>Cost allocation</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {po.pendingItems.map((item) => (
-                      <tr key={item.id}>
-                        <td>{item.description}</td>
-                        <td>{item.quantity}</td>
-                        <td>{item.unit}</td>
-                        <td>{item.unitPrice.toFixed(2)}</td>
-                        <td>
-                          {item.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        </td>
-                        <td>{getPoCostCategoryLabel(item.costCategory)}</td>
-                        <td>
-                          {readOnly ? (
-                            'Awaiting your receipt'
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleMarkReceived(po.id, item.id)}
-                            >
-                              Mark received
-                            </button>
-                          )}
-                        </td>
+                {!isAuthorise && po.authorizedByName ? (
+                  <p>
+                    Authorised by {po.authorizedByName}
+                    {po.authorizedAt ? ` on ${formatKenyaDateTime(po.authorizedAt)}` : ''}
+                  </p>
+                ) : null}
+                {isAuthorise ? (
+                  <div className="form-actions">
+                    {readOnly ? (
+                      <p className="inline-hint">Director view: authorisation is disabled.</p>
+                    ) : (
+                      <button type="button" onClick={() => handleAuthorize(po.id)}>
+                        Authorise PO
+                      </button>
+                    )}
+                  </div>
+                ) : null}
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Description</th>
+                        <th>Qty</th>
+                        <th>Unit</th>
+                        <th>Unit price</th>
+                        <th>Amount</th>
+                        <th>Cost allocation</th>
+                        {!isAuthorise ? <th>Action</th> : <th>Receiver</th>}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          ))
+                    </thead>
+                    <tbody>
+                      {po.pendingItems.map((item) => (
+                        <tr key={item.id}>
+                          <td>{item.description}</td>
+                          <td>{item.quantity}</td>
+                          <td>{item.unit}</td>
+                          <td>{item.unitPrice.toFixed(2)}</td>
+                          <td>
+                            {item.amount.toLocaleString(undefined, {
+                              minimumFractionDigits: 2,
+                            })}
+                          </td>
+                          <td>{getPoCostCategoryLabel(item.costCategory)}</td>
+                          {isAuthorise ? (
+                            <td>{item.receiverEmployeeName || '—'}</td>
+                          ) : (
+                            <td>
+                              {readOnly ? (
+                                'Awaiting your receipt'
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleMarkReceived(po.id, item.id)}
+                                >
+                                  Mark received
+                                </button>
+                              )}
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )
+          })
         )}
       </CollapsibleSection>
 
