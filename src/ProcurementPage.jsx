@@ -239,6 +239,13 @@ export default function ProcurementPage({
   const [supplierFormOpen, setSupplierFormOpen] = useState(false)
   const [poFormOpen, setPoFormOpen] = useState(false)
   const [poRegisterOpen, setPoRegisterOpen] = useState(false)
+  const [poRegisterDateFrom, setPoRegisterDateFrom] = useState('')
+  const [poRegisterDateTo, setPoRegisterDateTo] = useState('')
+  const [poGroupOpen, setPoGroupOpen] = useState({
+    open: true,
+    authorised: false,
+    finalised: false,
+  })
   const [costSummaryOpen, setCostSummaryOpen] = useState(false)
   const [limitsFormOpen, setLimitsFormOpen] = useState(false)
 
@@ -315,9 +322,44 @@ export default function ProcurementPage({
     [purchaseOrders],
   )
 
+  const filteredPurchaseOrders = useMemo(() => {
+    const from = poRegisterDateFrom || null
+    const to = poRegisterDateTo || null
+    return sortedPurchaseOrders.filter((po) => {
+      if (!po?.orderDate) {
+        return !from && !to
+      }
+      if (from && po.orderDate < from) {
+        return false
+      }
+      if (to && po.orderDate > to) {
+        return false
+      }
+      return true
+    })
+  }, [sortedPurchaseOrders, poRegisterDateFrom, poRegisterDateTo])
+
+  const purchaseOrdersByStatus = useMemo(() => {
+    const groups = {
+      open: [],
+      authorised: [],
+      finalised: [],
+    }
+    filteredPurchaseOrders.forEach((po) => {
+      if (po.status === 'received') {
+        groups.finalised.push(po)
+      } else if (po.status === 'authorized') {
+        groups.authorised.push(po)
+      } else {
+        groups.open.push(po)
+      }
+    })
+    return groups
+  }, [filteredPurchaseOrders])
+
   const selectedPo =
-    sortedPurchaseOrders.find((item) => item.id === selectedPoId) ??
-    sortedPurchaseOrders[0] ??
+    filteredPurchaseOrders.find((item) => item.id === selectedPoId) ??
+    filteredPurchaseOrders[0] ??
     null
 
   const editingPo = editingPoId
@@ -1003,52 +1045,108 @@ export default function ProcurementPage({
         isOpen={poRegisterOpen}
         onToggle={() => setPoRegisterOpen((open) => !open)}
       >
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>PO #</th>
-              <th>Date</th>
-              <th>Supplier</th>
-              <th>Total (KES)</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sortedPurchaseOrders.map((po) => (
-              <tr key={po.id} className={po.id === selectedPo?.id ? 'selected-row' : undefined}>
-                <td>
-                  <button type="button" className="link-button" onClick={() => setSelectedPoId(po.id)}>
-                    {po.poNumber}
-                  </button>
-                </td>
-                <td>{formatDisplayDate(po.orderDate)}</td>
-                <td>{po.supplierName}</td>
-                <td>{po.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                <td>{getPoStatusLabel(po.status)}</td>
-                <td>
-                  {isPurchaseOrderEditable(po) && canManageProcurement && !readOnly ? (
-                    <>
-                      <button type="button" onClick={() => startEditingPo(po)}>
-                        Edit
-                      </button>{' '}
-                      <button type="button" onClick={() => handleDeletePo(po)}>
-                        Delete
-                      </button>
-                    </>
-                  ) : null}
-                </td>
-              </tr>
-            ))}
-            {sortedPurchaseOrders.length === 0 ? (
-              <tr>
-                <td colSpan="6">No purchase orders yet.</td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+      <div className="form-grid">
+        <label>
+          From date
+          <input
+            type="date"
+            value={poRegisterDateFrom}
+            onChange={(event) => setPoRegisterDateFrom(event.target.value)}
+          />
+        </label>
+        <label>
+          To date
+          <input
+            type="date"
+            value={poRegisterDateTo}
+            onChange={(event) => setPoRegisterDateTo(event.target.value)}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => {
+            setPoRegisterDateFrom('')
+            setPoRegisterDateTo('')
+          }}
+        >
+          Clear dates
+        </button>
       </div>
+      <p className="inline-hint">
+        Filter by order date. Showing {filteredPurchaseOrders.length} of {purchaseOrders.length}{' '}
+        purchase order{purchaseOrders.length === 1 ? '' : 's'}.
+      </p>
+
+      {[
+        { key: 'open', title: 'Open', orders: purchaseOrdersByStatus.open },
+        { key: 'authorised', title: 'Authorised', orders: purchaseOrdersByStatus.authorised },
+        { key: 'finalised', title: 'Finalised', orders: purchaseOrdersByStatus.finalised },
+      ].map((group) => (
+        <CollapsibleSection
+          key={group.key}
+          title={`${group.title} (${group.orders.length})`}
+          isOpen={poGroupOpen[group.key]}
+          onToggle={() =>
+            setPoGroupOpen((prev) => ({
+              ...prev,
+              [group.key]: !prev[group.key],
+            }))
+          }
+        >
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>PO #</th>
+                  <th>Date</th>
+                  <th>Supplier</th>
+                  <th>Total (KES)</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {group.orders.map((po) => (
+                  <tr key={po.id} className={po.id === selectedPo?.id ? 'selected-row' : undefined}>
+                    <td>
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={() => setSelectedPoId(po.id)}
+                      >
+                        {po.poNumber}
+                      </button>
+                    </td>
+                    <td>{formatDisplayDate(po.orderDate)}</td>
+                    <td>{po.supplierName}</td>
+                    <td>
+                      {po.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </td>
+                    <td>{getPoStatusLabel(po.status)}</td>
+                    <td>
+                      {isPurchaseOrderEditable(po) && canManageProcurement && !readOnly ? (
+                        <>
+                          <button type="button" onClick={() => startEditingPo(po)}>
+                            Edit
+                          </button>{' '}
+                          <button type="button" onClick={() => handleDeletePo(po)}>
+                            Delete
+                          </button>
+                        </>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+                {group.orders.length === 0 ? (
+                  <tr>
+                    <td colSpan="6">No {group.title.toLowerCase()} purchase orders in this date range.</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </CollapsibleSection>
+      ))}
 
       {selectedPo ? (
         <section className="panel nested-panel">
