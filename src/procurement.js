@@ -246,6 +246,32 @@ export function canEmployeeReceivePoItem(item, employeeId) {
   )
 }
 
+export function getPurchaseOrdersPendingApprovalForEmployee(purchaseOrders, employeeId) {
+  if (!employeeId) {
+    return []
+  }
+  return (purchaseOrders ?? [])
+    .filter((po) => po?.status === 'authorized')
+    .map((po) => {
+      const pendingItems = (po.items ?? []).filter((item) =>
+        canEmployeeReceivePoItem(item, employeeId),
+      )
+      if (pendingItems.length === 0) {
+        return null
+      }
+      return {
+        ...po,
+        pendingItems,
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) =>
+      a.createdAt === b.createdAt
+        ? String(b.poNumber).localeCompare(String(a.poNumber))
+        : b.createdAt.localeCompare(a.createdAt),
+    )
+}
+
 export function buildPurchaseOrderDeletionAudit(po, deletedBy) {
   return {
     id: `PO-AUDIT-${Date.now()}`,

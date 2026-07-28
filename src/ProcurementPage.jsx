@@ -16,6 +16,7 @@ import {
   getEmployeeApprovalLimitDisplay,
   getPoCostCategoryLabel,
   getPoStatusLabel,
+  getPurchaseOrdersPendingApprovalForEmployee,
   isPurchaseOrderEditable,
   PO_COST_CATEGORY_IDS,
   PO_COST_CATEGORY_LABELS,
@@ -242,10 +243,11 @@ export default function ProcurementPage({
   const [poRegisterDateFrom, setPoRegisterDateFrom] = useState('')
   const [poRegisterDateTo, setPoRegisterDateTo] = useState('')
   const [poGroupOpen, setPoGroupOpen] = useState({
-    open: true,
+    open: false,
     authorised: false,
     finalised: false,
   })
+  const [myApprovalsOpen, setMyApprovalsOpen] = useState(true)
   const [costSummaryOpen, setCostSummaryOpen] = useState(false)
   const [limitsFormOpen, setLimitsFormOpen] = useState(false)
 
@@ -356,6 +358,11 @@ export default function ProcurementPage({
     })
     return groups
   }, [filteredPurchaseOrders])
+
+  const myPendingApprovals = useMemo(
+    () => getPurchaseOrdersPendingApprovalForEmployee(purchaseOrders, currentUser?.id),
+    [purchaseOrders, currentUser?.id],
+  )
 
   const selectedPo =
     filteredPurchaseOrders.find((item) => item.id === selectedPoId) ??
@@ -643,11 +650,11 @@ export default function ProcurementPage({
     setFormStatus(result.message)
   }
 
-  function handleMarkReceived(itemId) {
-    if (!selectedPo || readOnly) {
+  function handleMarkReceived(poId, itemId) {
+    if (readOnly || !poId) {
       return
     }
-    const result = onMarkPoItemReceived(selectedPo.id, itemId, currentUser?.id)
+    const result = onMarkPoItemReceived(poId, itemId, currentUser?.id)
     if (!result.ok) {
       setFormStatus(result.message)
       return
@@ -1041,6 +1048,89 @@ export default function ProcurementPage({
       </CollapsibleSection>
 
       <CollapsibleSection
+        title={`My pending approvals (${myPendingApprovals.length})`}
+        isOpen={myApprovalsOpen}
+        onToggle={() => setMyApprovalsOpen((open) => !open)}
+      >
+        <p className="inline-hint">
+          Authorised purchase orders where you are the assigned receiver for one or more items still
+          awaiting receipt. Only your pending items are listed here.
+        </p>
+        {myPendingApprovals.length === 0 ? (
+          <p className="inline-hint">No purchase orders are waiting for your receipt approval.</p>
+        ) : (
+          myPendingApprovals.map((po) => (
+            <section key={po.id} className="panel nested-panel">
+              <h3>
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={() => {
+                    setSelectedPoId(po.id)
+                    setPoRegisterOpen(true)
+                  }}
+                >
+                  {po.poNumber}
+                </button>
+              </h3>
+              <p>
+                Supplier: {po.supplierName} · Order date: {formatDisplayDate(po.orderDate)} · Total:
+                KES{' '}
+                {po.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </p>
+              {po.authorizedByName ? (
+                <p>
+                  Authorised by {po.authorizedByName}
+                  {po.authorizedAt ? ` on ${formatKenyaDateTime(po.authorizedAt)}` : ''}
+                </p>
+              ) : null}
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Description</th>
+                      <th>Qty</th>
+                      <th>Unit</th>
+                      <th>Unit price</th>
+                      <th>Amount</th>
+                      <th>Cost allocation</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {po.pendingItems.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.description}</td>
+                        <td>{item.quantity}</td>
+                        <td>{item.unit}</td>
+                        <td>{item.unitPrice.toFixed(2)}</td>
+                        <td>
+                          {item.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td>{getPoCostCategoryLabel(item.costCategory)}</td>
+                        <td>
+                          {readOnly ? (
+                            'Awaiting your receipt'
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleMarkReceived(po.id, item.id)}
+                            >
+                              Mark received
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          ))
+        )}
+      </CollapsibleSection>
+
+      <CollapsibleSection
         title="Purchase order register"
         isOpen={poRegisterOpen}
         onToggle={() => setPoRegisterOpen((open) => !open)}
@@ -1204,7 +1294,7 @@ export default function ProcurementPage({
                       ) : selectedPo.status === 'authorized' &&
                         !readOnly &&
                         canEmployeeReceivePoItem(item, currentUser?.id) ? (
-                        <button type="button" onClick={() => handleMarkReceived(item.id)}>
+                        <button type="button" onClick={() => handleMarkReceived(selectedPo.id, item.id)}>
                           Mark received
                         </button>
                       ) : selectedPo.status === 'authorized' && !item.received ? (
