@@ -241,6 +241,7 @@ const DATA_ENTRY_PERMISSION_IDS = [
   'employee-role-all',
   'employee-wage-rates',
   'employee-add',
+  'employee-edit',
   'procurement-entry',
   'procurement-approval-limits',
 ]
@@ -262,6 +263,7 @@ const DATA_ENTRY_PERMISSION_LABELS = {
   'employee-role-all': 'Edit roles for all employees (including permanent)',
   'employee-wage-rates': 'Edit daily wage rate settings',
   'employee-add': 'Add new employees',
+  'employee-edit': 'Edit employee personal and employment details',
   'procurement-entry': 'Create and manage purchase orders and suppliers',
   'procurement-approval-limits': 'Set purchase order approval limits for sign-in employees',
 }
@@ -270,6 +272,7 @@ const DATA_ENTRY_PERMISSION_LABELS = {
 const RESTRICTED_DATA_ENTRY_PERMISSIONS = ['stock-delete', 'invoice-edit-finalized']
 const DEFAULT_EXCLUSIVE_DATA_ENTRY_PERMISSIONS_BY_EMPLOYEE_ID = {
   '0014': ['stock-delete', 'invoice-edit-finalized'],
+  '0001': ['employee-edit'],
 }
 const DEFAULT_PAGE_ACCESS_BY_EMPLOYEE_ID = {
   '0001': ['dashboard', 'employees', 'attendance', 'payroll'],
@@ -473,7 +476,13 @@ function getDefaultDataEntryPermissionsForRole(role) {
     return []
   }
   if (role === 'harvesting-manager') {
-    return ['harvesting-entry', 'harvesting-batch', 'haulage-mileage', 'employee-role-all']
+    return [
+      'harvesting-entry',
+      'harvesting-batch',
+      'haulage-mileage',
+      'employee-role-all',
+      'employee-edit',
+    ]
   }
   if (role === 'harvesting-supervisor') {
     return ['harvesting-entry']
@@ -3776,6 +3785,7 @@ function EmployeesPage({
 function EmployeeRecordPage({
   employees,
   currentUser,
+  currentUserDataEntryPermissions,
   dailyWageRates,
   clockedInIds,
   records,
@@ -3804,7 +3814,7 @@ function EmployeeRecordPage({
     )
   }
 
-  const canEditEmployee = currentUser?.role === 'admin' || currentUser?.role === 'harvesting-manager'
+  const canEditEmployee = currentUserDataEntryPermissions.has('employee-edit')
 
   const allActivityDates = [
     ...records.map((item) => item.harvestedOn),
@@ -4650,8 +4660,7 @@ function EmployeeEditPage({
 }) {
   const { employeeId } = useParams()
   const employee = employees.find((item) => item.id === employeeId)
-  const canEditEmployeeProfile =
-    currentUser?.role === 'admin' || currentUser?.role === 'harvesting-manager'
+  const canEditEmployeeProfile = currentUserDataEntryPermissions.has('employee-edit')
   const canEditRole = canEditEmployeeRoleForEmployee(currentUserDataEntryPermissions, employee)
   const canEditRoleAndPermissions = currentUser?.role === 'admin'
   const [permissionsSaveNote, setPermissionsSaveNote] = useState('')
@@ -11105,6 +11114,14 @@ function App() {
     if (!canMutateAppData(currentUser)) {
       return
     }
+    const permissions = getEffectiveDataEntryPermissions(
+      currentUser.id,
+      dataEntryPermissionOverrides,
+      employees,
+    )
+    if (!permissions.has('employee-edit')) {
+      return
+    }
     setEmployees((prev) =>
       prev.map((employee) => {
         if (employee.id !== employeeId) {
@@ -12668,6 +12685,7 @@ function App() {
               <EmployeeRecordPage
                 employees={employees}
                 currentUser={currentUser}
+                currentUserDataEntryPermissions={currentUserDataEntryPermissions}
                 dailyWageRates={getDailyWageRatesFromCompensation(compensationRules)}
                 clockedInIds={clockedInIds}
                 records={records}
