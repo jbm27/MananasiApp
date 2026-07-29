@@ -133,6 +133,18 @@ export function sumLeaveDaysForEmployee(
       if (!overlap) {
         return sum
       }
+      const storedDays = Number(record.days)
+      if (Number.isFinite(storedDays) && storedDays > 0) {
+        const fullSpanDays = countLeaveDays(record.startDate, record.endDate, publicHolidays)
+        if (fullSpanDays <= 0) {
+          return sum + storedDays
+        }
+        const overlapDays = countLeaveDays(overlap.start, overlap.end, publicHolidays)
+        if (overlapDays >= fullSpanDays) {
+          return sum + storedDays
+        }
+        return sum + Math.round((storedDays * overlapDays) / fullSpanDays * 10) / 10
+      }
       return sum + countLeaveDays(overlap.start, overlap.end, publicHolidays)
     }, 0)
 }
@@ -216,7 +228,10 @@ export function nextPublicHolidayId(publicHolidays) {
 }
 
 export function buildLeaveRecord(input, publicHolidays = []) {
-  const days = countLeaveDays(input.startDate, input.endDate, publicHolidays)
+  const calculatedDays = countLeaveDays(input.startDate, input.endDate, publicHolidays)
+  const explicitDays = Number(input.days)
+  const days =
+    Number.isFinite(explicitDays) && explicitDays > 0 ? explicitDays : calculatedDays
   return {
     id: input.id,
     employeeId: input.employeeId,

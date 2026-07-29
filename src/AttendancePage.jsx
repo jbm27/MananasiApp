@@ -85,6 +85,7 @@ export default function AttendancePage({
   const [leaveType, setLeaveType] = useState('annual')
   const [leaveStartDate, setLeaveStartDate] = useState(today)
   const [leaveEndDate, setLeaveEndDate] = useState(today)
+  const [leaveDaysOverride, setLeaveDaysOverride] = useState('')
   const [leaveStatus, setLeaveStatus] = useState('')
   const [outEditingId, setOutEditingId] = useState('')
   const [outEmployeeId, setOutEmployeeId] = useState('')
@@ -104,10 +105,14 @@ export default function AttendancePage({
     () => [...employees].sort(compareEmployeesByName),
     [employees],
   )
-  const pendingLeaveDays = useMemo(
+  const calculatedLeaveDays = useMemo(
     () => countLeaveDays(leaveStartDate, leaveEndDate, publicHolidays),
     [leaveStartDate, leaveEndDate, publicHolidays],
   )
+  const pendingLeaveDays =
+    leaveDaysOverride !== '' && Number.isFinite(Number(leaveDaysOverride))
+      ? Number(leaveDaysOverride)
+      : calculatedLeaveDays
   const leaveEmployeeSearchQuery = leaveEmployeeSearch.trim().toLowerCase()
   const leaveEmployeeSearchResults = useMemo(() => {
     if (!leaveEmployeeSearchQuery) {
@@ -479,11 +484,13 @@ export default function AttendancePage({
       leaveType,
       startDate: leaveStartDate,
       endDate: leaveEndDate,
+      days: pendingLeaveDays,
     })
     setLeaveStatus(`Recorded ${formatLeaveDays(pendingLeaveDays)} day(s) of ${getLeaveTypeLabel(leaveType).toLowerCase()}.`)
     setLeaveEmployeeId('')
     setLeaveEmployeeSearch('')
     setLeaveEndDate(leaveStartDate)
+    setLeaveDaysOverride('')
   }
 
   function handleAddHoliday(event) {
@@ -810,7 +817,10 @@ export default function AttendancePage({
               <input
                 type="date"
                 value={leaveStartDate}
-                onChange={(event) => setLeaveStartDate(event.target.value)}
+                onChange={(event) => {
+                  setLeaveStartDate(event.target.value)
+                  setLeaveDaysOverride('')
+                }}
                 required
               />
             </label>
@@ -819,13 +829,27 @@ export default function AttendancePage({
               <input
                 type="date"
                 value={leaveEndDate}
-                onChange={(event) => setLeaveEndDate(event.target.value)}
+                onChange={(event) => {
+                  setLeaveEndDate(event.target.value)
+                  setLeaveDaysOverride('')
+                }}
+                required
+              />
+            </label>
+            <label>
+              Leave days
+              <input
+                type="number"
+                min="0.1"
+                step="0.1"
+                value={leaveDaysOverride !== '' ? leaveDaysOverride : calculatedLeaveDays}
+                onChange={(event) => setLeaveDaysOverride(event.target.value)}
                 required
               />
             </label>
             <p className="inline-hint">
-              Leave days: <strong>{formatLeaveDays(pendingLeaveDays)}</strong> (excludes Sundays and
-              public holidays)
+              Auto-calculated: {formatLeaveDays(calculatedLeaveDays)} working day(s) (excludes
+              Sundays and public holidays). Adjust for half-days or partial leave.
             </p>
             <button type="submit">Record leave</button>
           </form>
@@ -852,11 +876,7 @@ export default function AttendancePage({
                     <td>{getLeaveTypeLabel(record.leaveType)}</td>
                     <td>{formatDisplayDate(record.startDate)}</td>
                     <td>{formatDisplayDate(record.endDate)}</td>
-                    <td>
-                      {formatLeaveDays(
-                        countLeaveDays(record.startDate, record.endDate, publicHolidays),
-                      )}
-                    </td>
+                    <td>{formatLeaveDays(record.days)}</td>
                     {!readOnly ? (
                       <td>
                         <button type="button" onClick={() => onRemoveLeaveRecord(record.id)}>
