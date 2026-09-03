@@ -8,7 +8,9 @@
   },
   "scripts": {
     "dev": "node --watch index.js",
-    "start": "node index.js"
+    "start": "node index.js",
+    "db:analyze": "node scripts/dbStorageCleanup.mjs --analyze",
+    "db:purge-history": "node scripts/dbStorageCleanup.mjs --purge-history"
   },
   "dependencies": {
     "cors": "^2.8.5",

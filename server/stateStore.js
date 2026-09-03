@@ -109,27 +109,33 @@ export async function saveAppStateWithGuard(
         )
     const nextUpdatedAt = nextResult.rows[0].updated_at
 
-    await client.query(
-      `INSERT INTO app_state_history (
-        state_id,
-        change_source,
-        expected_updated_at,
-        previous_updated_at,
-        next_updated_at,
-        previous_data,
-        next_data
+    // Only keep one rollback snapshot for business-data saves. Attendance side-effect
+    // writes (bumpVersion:false) skip history — they were filling the DB with a full
+    // state copy on every clock event.
+    if (bumpVersion) {
+      await client.query('DELETE FROM app_state_history WHERE state_id = $1', [STATE_ID])
+      await client.query(
+        `INSERT INTO app_state_history (
+          state_id,
+          change_source,
+          expected_updated_at,
+          previous_updated_at,
+          next_updated_at,
+          previous_data,
+          next_data
+        )
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)`,
+        [
+          STATE_ID,
+          String(changeSource || 'api'),
+          expectedTimestamp,
+          previousUpdatedAt,
+          nextUpdatedAt,
+          JSON.stringify(previousData),
+          JSON.stringify(data),
+        ],
       )
-      VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)`,
-      [
-        STATE_ID,
-        String(changeSource || 'api'),
-        expectedTimestamp,
-        previousUpdatedAt,
-        nextUpdatedAt,
-        JSON.stringify(previousData),
-        JSON.stringify(data),
-      ],
-    )
+    }
 
     await client.query('COMMIT')
     return {
