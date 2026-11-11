@@ -8555,6 +8555,178 @@ function BalingPage({
   )
 }
 
+function parseSilageIsoDate(isoDate) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate ?? '')) return null
+  const [year, month, day] = isoDate.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day))
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null
+  }
+  return date
+}
+
+function silageWeekStartKey(isoDate) {
+  const date = parseSilageIsoDate(isoDate)
+  if (!date) return null
+  const weekday = date.getUTCDay() || 7
+  date.setUTCDate(date.getUTCDate() - (weekday - 1))
+  return date.toISOString().slice(0, 10)
+}
+
+function silageBucketKey(isoDate, resolution) {
+  if (!parseSilageIsoDate(isoDate)) return null
+  if (resolution === 'month') return isoDate.slice(0, 7)
+  if (resolution === 'week') return silageWeekStartKey(isoDate)
+  return isoDate
+}
+
+function formatSilageBucketLabel(key, resolution) {
+  if (resolution === 'month') {
+    const [year, month] = key.split('-').map(Number)
+    return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString('en-GB', {
+      month: 'short',
+      year: 'numeric',
+      timeZone: 'UTC',
+    })
+  }
+  const [year, month, day] = key.split('-').map(Number)
+  const formatted = new Date(Date.UTC(year, month - 1, day)).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'UTC',
+  })
+  return formatted
+}
+
+function niceSilageAxisMax(value) {
+  if (!Number.isFinite(value) || value <= 0) return 1
+  const magnitude = 10 ** Math.floor(Math.log10(value))
+  const scaled = value / magnitude
+  const nice = scaled <= 1 ? 1 : scaled <= 2 ? 2 : scaled <= 5 ? 5 : 10
+  return nice * magnitude
+}
+
+function formatSilageKg(value) {
+  const fractionDigits = Number.isInteger(value) ? 0 : Math.abs(value) < 1 ? 2 : 1
+  return value.toLocaleString('en-GB', { maximumFractionDigits: fractionDigits })
+}
+
+function buildSilageProductionBuckets(records, resolution) {
+  const totals = new Map()
+  records.forEach((record) => {
+    const key = silageBucketKey(record.date, resolution)
+    if (!key) return
+    const current = totals.get(key) ?? { key, kg: 0, bags: 0 }
+    current.kg += Number(record.massKg) || 0
+    current.bags += 1
+    totals.set(key, current)
+  })
+  return [...totals.values()]
+    .sort((a, b) => a.key.localeCompare(b.key))
+    .map((bucket) => ({
+      ...bucket,
+      kg: Number(bucket.kg.toFixed(1)),
+      label: formatSilageBucketLabel(bucket.key, resolution),
+    }))
+}
+
+function SilageProductionChart({ buckets }) {
+  if (buckets.length === 0) {
+    return <div className="placeholder">No silage production for the current filter.</div>
+  }
+
+  const yMax = niceSilageAxisMax(Math.max(...buckets.map((bucket) => bucket.kg)))
+  const tickCount = 4
+  const pad = { top: 28, right: 16, bottom: 84, left: 78 }
+  const slotWidth = buckets.length <= 10 ? Math.max(56, 680 / buckets.length) : 52
+  const plotWidth = pad.left + pad.right + buckets.length * slotWidth
+  const height = 320
+  const innerHeight = height - pad.top - pad.bottom
+  const barWidth = Math.min(40, slotWidth * 0.55)
+  const ticks = Array.from({ length: tickCount + 1 }, (_, index) => (yMax / tickCount) * index)
+
+  function yPosition(value) {
+    return pad.top + innerHeight - (value / yMax) * innerHeight
+  }
+
+  const summary = buckets
+    .map((bucket) => `${bucket.label}: ${formatSilageKg(bucket.kg)} kg`)
+    .join('; ')
+
+  return (
+    <div className="production-chart-scroll">
+      <svg
+        className="production-chart-svg"
+        width={plotWidth}
+        height={height}
+        viewBox={`0 0 ${plotWidth} ${height}`}
+        role="img"
+        aria-label={`Silage production in kilograms. ${summary}`}
+      >
+        {ticks.map((tick) => (
+          <g key={tick}>
+            <line
+              x1={pad.left}
+              x2={plotWidth - pad.right}
+              y1={yPosition(tick)}
+              y2={yPosition(tick)}
+              stroke="#e2e8f0"
+            />
+            <text x={pad.left - 8} y={yPosition(tick) + 4} textAnchor="end" fill="#64748b" fontSize="12">
+              {formatSilageKg(tick)}
+            </text>
+          </g>
+        ))}
+        <text
+          x="16"
+          y={pad.top + innerHeight / 2}
+          fill="#64748b"
+          fontSize="12"
+          textAnchor="middle"
+          transform={`rotate(-90 16 ${pad.top + innerHeight / 2})`}
+        >
+          kg
+        </text>
+        {buckets.map((bucket, index) => {
+          const slotX = pad.left + index * slotWidth
+          const barX = slotX + (slotWidth - barWidth) / 2
+          const barY = yPosition(bucket.kg)
+          const barHeight = Math.max(yPosition(0) - barY, bucket.kg > 0 ? 2 : 0)
+          const labelX = slotX + slotWidth / 2
+          const labelY = pad.top + innerHeight + 14
+          return (
+            <g key={bucket.key}>
+              <title>
+                {`${bucket.label}: ${formatSilageKg(bucket.kg)} kg, ${bucket.bags} bag${bucket.bags === 1 ? '' : 's'}`}
+              </title>
+              <rect x={barX} y={barY} width={barWidth} height={barHeight} rx="3" fill="#0b5cad" />
+              {slotWidth >= 64 && (
+                <text
+                  x={barX + barWidth / 2}
+                  y={Math.max(barY - 6, 14)}
+                  textAnchor="middle"
+                  fill="#0f172a"
+                  fontSize="11"
+                >
+                  {formatSilageKg(bucket.kg)}
+                </text>
+              )}
+              <text x={labelX} y={labelY} textAnchor="end" fill="#334155" fontSize="12" transform={`rotate(-40 ${labelX} ${labelY})`}>
+                {bucket.label}
+              </text>
+            </g>
+          )
+        })}
+      </svg>
+    </div>
+  )
+}
+
 function SilageProductionPage({
   currentUser,
   currentUserDataEntryPermissions,
@@ -8573,6 +8745,7 @@ function SilageProductionPage({
 }) {
   const [showCreateStock, setShowCreateStock] = useState(false)
   const [showAttendanceRecords, setShowAttendanceRecords] = useState(false)
+  const [productionResolution, setProductionResolution] = useState('day')
   const [entryStatus, setEntryStatus] = useState('')
   const [silageDate, setSilageDate] = useState(dateTo)
   const [batchNumber, setBatchNumber] = useState(availableBatches[0] ?? '')
@@ -8665,6 +8838,9 @@ function SilageProductionPage({
   const totalBags = sortedRecords.length
   const totalSilageKg = sortedRecords.reduce((sum, record) => sum + record.massKg, 0)
   const averageBagMassKg = totalBags > 0 ? Number((totalSilageKg / totalBags).toFixed(1)) : 0
+  const productionBuckets = buildSilageProductionBuckets(filteredSilageRecords, productionResolution)
+  const productionPeriodLabel =
+    productionResolution === 'week' ? 'week' : productionResolution === 'month' ? 'month' : 'day'
 
   const silageAttendanceRows = Object.values(
     sortedRecords.reduce((map, record) => {
@@ -8829,6 +9005,38 @@ function SilageProductionPage({
           <p>{averageBagMassKg.toLocaleString()} kg</p>
         </article>
       </div>
+
+      <section className="production-chart">
+        <div className="production-chart-header">
+          <div>
+            <h3>Silage production</h3>
+            <p>
+              Bagged mass from the records in the current batch and date filters. In week view each bar
+              is labelled with its Monday and runs through Sunday. Week and month bars include only bags
+              inside the current date filter.
+            </p>
+          </div>
+          <label>
+            Resolution
+            <select
+              value={productionResolution}
+              onChange={(event) => setProductionResolution(event.target.value)}
+            >
+              <option value="day">Day</option>
+              <option value="week">Week</option>
+              <option value="month">Month</option>
+            </select>
+          </label>
+        </div>
+        <SilageProductionChart buckets={productionBuckets} />
+        {productionBuckets.length > 0 && (
+          <p className="production-chart-note">
+            {formatSilageKg(productionBuckets.reduce((sum, bucket) => sum + bucket.kg, 0))} kg across{' '}
+            {productionBuckets.length} {productionPeriodLabel}
+            {productionBuckets.length === 1 ? '' : 's'}. Hover a bar for the bag count.
+          </p>
+        )}
+      </section>
 
       <CollapsibleSection
         title="Create Silage Stock"
