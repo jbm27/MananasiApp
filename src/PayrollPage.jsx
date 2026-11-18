@@ -5,7 +5,13 @@ import {
   buildAttendanceExceptionReport,
   getAttendanceExceptionLabel,
 } from './attendanceProcessing.js'
-import { getContractTypeLabel, getDailyWageRatesFromCompensation } from './employeePay.js'
+import {
+  DAILY_WAGE_RATE_APPLIES_TO,
+  DAILY_WAGE_RATE_KEYS,
+  DAILY_WAGE_RATE_LABELS,
+  getContractTypeLabel,
+  getDailyWageRatesFromCompensation,
+} from './employeePay.js'
 import { fetchAttendanceEventsForPeriod } from './api/client.js'
 import {
   buildAdvanceLines,
@@ -151,6 +157,8 @@ export default function PayrollPage({
   onUpdateSalaryPayrollAdjustment,
   onApprovePayrollSection,
   onReleasePayrollSection,
+  canEditDailyWageRates = false,
+  onUpdateDailyWageRate,
 }) {
   const currentFiscalYear = getFiscalYearForDate(new Date().toISOString().slice(0, 10))
   const [selectedYear, setSelectedYear] = useState(currentFiscalYear)
@@ -160,6 +168,11 @@ export default function PayrollPage({
   const [showWages, setShowWages] = useState(false)
   const [showSalaries, setShowSalaries] = useState(false)
   const [showAttendanceExceptions, setShowAttendanceExceptions] = useState(false)
+  const [showDailyWageRates, setShowDailyWageRates] = useState(false)
+  const [wageRateStatus, setWageRateStatus] = useState('')
+  const [wageRateDrafts, setWageRateDrafts] = useState(() =>
+    Object.fromEntries(DAILY_WAGE_RATE_KEYS.map((key) => [key, ''])),
+  )
   const [attendanceEvents, setAttendanceEvents] = useState([])
   const [attendanceLoading, setAttendanceLoading] = useState(false)
   const [attendanceError, setAttendanceError] = useState('')
@@ -222,6 +235,35 @@ export default function PayrollPage({
     () => getDailyWageRatesFromCompensation(compensationRules),
     [compensationRules],
   )
+  const savedWageRateSignature = DAILY_WAGE_RATE_KEYS.map((key) => dailyWageRates[key]).join('|')
+  useEffect(() => {
+    const amounts = savedWageRateSignature.split('|')
+    setWageRateDrafts(
+      Object.fromEntries(DAILY_WAGE_RATE_KEYS.map((key, index) => [key, amounts[index] ?? ''])),
+    )
+  }, [savedWageRateSignature])
+
+  function handleSaveDailyWageRates(event) {
+    event.preventDefault()
+    if (!canEditDailyWageRates || !onUpdateDailyWageRate) {
+      return
+    }
+    const nextRates = {}
+    for (const key of DAILY_WAGE_RATE_KEYS) {
+      const amount = Number(wageRateDrafts[key])
+      if (!Number.isFinite(amount) || amount <= 0) {
+        setWageRateStatus(`Enter a valid daily rate for ${DAILY_WAGE_RATE_LABELS[key]}.`)
+        return
+      }
+      nextRates[key] = Math.round(amount)
+    }
+    DAILY_WAGE_RATE_KEYS.forEach((key) => {
+      if (nextRates[key] !== dailyWageRates[key]) {
+        onUpdateDailyWageRate(key, nextRates[key])
+      }
+    })
+    setWageRateStatus('Daily rates saved.')
+  }
 
   const advanceLines = useMemo(() => {
     if (!selectedPeriod) {
@@ -480,6 +522,60 @@ export default function PayrollPage({
           <span>{selectedPeriod.weekCount}-week month</span>
         </div>
       )}
+
+      {canEditDailyWageRates ? (
+        <PayrollSection
+          title="Daily wage rates"
+          isOpen={showDailyWageRates}
+          onToggle={() => setShowDailyWageRates((prev) => !prev)}
+        >
+          <p className="inline-hint">
+            Seasonal and supplementary staff share these rates. A day is paid at the rate for the
+            role held that day, so changing role applies the new rate from that day and leaves
+            earlier days unchanged.
+          </p>
+          <form onSubmit={handleSaveDailyWageRates}>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Category</th>
+                    <th>Roles</th>
+                    <th>Daily rate (KES)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {DAILY_WAGE_RATE_KEYS.map((key) => (
+                    <tr key={key}>
+                      <td>{DAILY_WAGE_RATE_LABELS[key]}</td>
+                      <td>{DAILY_WAGE_RATE_APPLIES_TO[key]}</td>
+                      <td>
+                        <input
+                          className="table-inline-input"
+                          type="number"
+                          min="1"
+                          step="1"
+                          aria-label={`${DAILY_WAGE_RATE_LABELS[key]} daily rate`}
+                          value={wageRateDrafts[key] ?? ''}
+                          onChange={(event) => {
+                            const value = event.target.value
+                            setWageRateDrafts((prev) => ({ ...prev, [key]: value }))
+                            setWageRateStatus('')
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p>
+              <button type="submit">Save daily rates</button>
+            </p>
+          </form>
+          {wageRateStatus ? <p className="inline-hint">{wageRateStatus}</p> : null}
+        </PayrollSection>
+      ) : null}
 
       {attendanceLoading && <div className="placeholder">Loading attendance for this period…</div>}
       {attendanceError && <div className="placeholder">{attendanceError}</div>}

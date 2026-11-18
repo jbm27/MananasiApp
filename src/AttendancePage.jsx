@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { fetchAttendanceEventsForPeriod } from './api/client.js'
 import {
   COMPASSIONATE_LEAVE_DAYS_PER_YEAR,
@@ -23,6 +24,7 @@ import {
   summarizeOverUnderTimeForEmployee,
 } from './overUnderTime.js'
 import { compareEmployeesByName, compareEmployeeWorkNumbers } from './employeeFields.js'
+import { getContractTypeLabel, getSeasonalGradeLabel } from './employeePay.js'
 import { countDaysWorkedFromAttendance } from './payroll.js'
 import { formatKenyaTime, toKenyaDateString } from './kenyaTime.js'
 import { getEmployeeClockTimesForDay, calculateDayWorkedHours } from './attendanceProcessing.js'
@@ -67,6 +69,8 @@ export default function AttendancePage({
   onAddPublicHoliday,
   onRemovePublicHoliday,
   readOnly = false,
+  canAddEmployee = false,
+  canOpenEmployeeRecord = false,
 }) {
   const today = toKenyaDateString(new Date())
   const [showRegister, setShowRegister] = useState(false)
@@ -99,12 +103,34 @@ export default function AttendancePage({
   const [holidayName, setHolidayName] = useState('')
   const [holidayStatus, setHolidayStatus] = useState('')
   const [holidayYear, setHolidayYear] = useState(today.slice(0, 4))
+  const [employeeSearch, setEmployeeSearch] = useState('')
+  const [showSearchResults, setShowSearchResults] = useState(false)
 
   const clockedInCount = clockedInIds.length
   const sortedEmployees = useMemo(
     () => [...employees].sort(compareEmployeesByName),
     [employees],
   )
+  const employeeSearchQuery = employeeSearch.trim().toLowerCase()
+  const isSearchingEmployees = employeeSearchQuery.length > 0
+  const employeeSearchResults = useMemo(() => {
+    if (!employeeSearchQuery) {
+      return []
+    }
+    return sortedEmployees.filter((employee) => {
+      const searchableText = [
+        employee.name,
+        employee.id,
+        employee.phone,
+        employee.email,
+        employee.position,
+        getRoleLabel(employee.role),
+      ]
+        .map((value) => String(value ?? '').toLowerCase())
+        .join(' ')
+      return searchableText.includes(employeeSearchQuery)
+    })
+  }, [sortedEmployees, employeeSearchQuery, getRoleLabel])
   const calculatedLeaveDays = useMemo(
     () => countLeaveDays(leaveStartDate, leaveEndDate, publicHolidays),
     [leaveStartDate, leaveEndDate, publicHolidays],
@@ -532,6 +558,97 @@ export default function AttendancePage({
         holidays. Leave days exclude Sundays and public holidays; Saturdays count as working days.
         Under/overtime entries feed wages and salaries payroll automatically.
       </p>
+
+      <div className="employee-search-toolbar">
+        <label className="employee-search-field">
+          Search employees
+          <input
+            type="search"
+            value={employeeSearch}
+            onChange={(event) => {
+              setEmployeeSearch(event.target.value)
+              if (event.target.value.trim()) {
+                setShowSearchResults(true)
+              }
+            }}
+            placeholder="Name, work no, phone, email, position, or role"
+          />
+        </label>
+        {isSearchingEmployees ? (
+          <button type="button" className="secondary-button" onClick={() => setEmployeeSearch('')}>
+            Clear search
+          </button>
+        ) : null}
+        {canAddEmployee ? (
+          <Link to="/employees/new" className="action-link">
+            Add employee
+          </Link>
+        ) : null}
+      </div>
+
+      {isSearchingEmployees ? (
+        <CollapsibleSection
+          title={`Search results (${employeeSearchResults.length})`}
+          isOpen={showSearchResults}
+          onToggle={() => setShowSearchResults((open) => !open)}
+        >
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Work No</th>
+                  <th>Name</th>
+                  <th>Role</th>
+                  <th>Contract</th>
+                  <th>Clock-in</th>
+                  {canOpenEmployeeRecord ? <th>View details</th> : null}
+                </tr>
+              </thead>
+              <tbody>
+                {employeeSearchResults.map((employee) => (
+                  <tr key={employee.id}>
+                    <td>
+                      <code>{employee.id}</code>
+                    </td>
+                    <td>{employee.name}</td>
+                    <td>{getRoleLabel(employee.role)}</td>
+                    <td>
+                      {getContractTypeLabel(employee.contractType)}
+                      {employee.contractType === 'seasonal' && employee.seasonalGrade
+                        ? ` (${getSeasonalGradeLabel(employee.seasonalGrade)})`
+                        : ''}
+                    </td>
+                    <td>
+                      <span
+                        className={
+                          clockedInIds.includes(employee.id) ? 'badge badge-on' : 'badge badge-off'
+                        }
+                      >
+                        {clockedInIds.includes(employee.id) ? 'Clocked In' : 'Not Clocked In'}
+                      </span>
+                    </td>
+                    {canOpenEmployeeRecord ? (
+                      <td>
+                        <Link
+                          to={`/employees/${employee.id}?from=${periodFrom}&to=${periodTo}`}
+                          className="action-link"
+                        >
+                          View details
+                        </Link>
+                      </td>
+                    ) : null}
+                  </tr>
+                ))}
+                {employeeSearchResults.length === 0 ? (
+                  <tr>
+                    <td colSpan={canOpenEmployeeRecord ? 6 : 5}>No employees match your search.</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </CollapsibleSection>
+      ) : null}
 
       <CollapsibleSection
         title="Register"

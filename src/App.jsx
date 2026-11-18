@@ -73,8 +73,6 @@ import {
   formatEmployeeRoleOptionLabel,
   isWageContractEmployee,
   DAILY_WAGE_RATE_KEYS,
-  DAILY_WAGE_RATE_LABELS,
-  DAILY_WAGE_RATE_APPLIES_TO,
   normalizeDailyWageRates,
   createDefaultDailyWageRates,
   getDailyWageRatesFromCompensation,
@@ -127,12 +125,10 @@ import {
   normalizeSilageDryMatterPercent,
 } from './silageCodes.js'
 
-const RECENT_CLOCK_EVENTS_LIMIT = 10
 import { useBackendSync } from './hooks/useBackendSync.js'
 import {
   changeLeadershipPassword,
   fetchAppState,
-  fetchAttendanceEvents,
   fetchLeadershipAccounts,
   leadershipLogin,
   setLeadershipPassword,
@@ -210,7 +206,7 @@ const PAGE_ACCESS_IDS = [
 
 const PAGE_ACCESS_LABELS = {
   dashboard: 'Dashboard',
-  employees: 'Employees',
+  employees: 'Employee records',
   attendance: 'Attendance',
   customers: 'Customers',
   stock: 'Stock',
@@ -3094,7 +3090,7 @@ function LeadershipAccountsPage({ currentUser }) {
     <section className="panel">
       <h2>Leadership sign-in accounts</h2>
       <p>
-        <Link to="/employees">Back to employees</Link>
+        <Link to="/attendance">Back to attendance</Link>
       </p>
       <p>
         Only the administrator can view or change leadership passwords. Hashes are stored privately on
@@ -3353,14 +3349,14 @@ function AddEmployeePage({
       role,
       position: profile.position || getEmployeeRoleLabel(role),
     })
-    navigate('/employees')
+    navigate(profile.id ? `/employees/${profile.id}` : '/attendance')
   }
 
   return (
     <section className="panel">
       <h2>Add employee</h2>
       <p>
-        <Link to="/employees">Back to employee list</Link>
+        <Link to="/attendance">Back to attendance</Link>
       </p>
       {!canAddEmployees && (
         <div className="placeholder">
@@ -3416,383 +3412,6 @@ function AddEmployeePage({
   )
 }
 
-function EmployeesPage({
-  employees,
-  currentUser,
-  currentUserDataEntryPermissions,
-  compensationRules,
-  onUpdateDailyWageRate,
-  harvestingDateFrom,
-  harvestingDateTo,
-  clockedInIds,
-  attendanceEvents,
-  onUpdateEmployeeRole,
-}) {
-  const navigate = useNavigate()
-  const canManageEmployees =
-    currentUser?.role === 'admin' || currentUser?.role === 'harvesting-manager'
-  const canAddEmployees = currentUserDataEntryPermissions.has('employee-add')
-  const canEditAnyEmployeeRole =
-    currentUserDataEntryPermissions.has('employee-role-all') ||
-    currentUserDataEntryPermissions.has('employee-role-seasonal')
-  const canEditDailyWageRates = currentUserDataEntryPermissions.has('employee-wage-rates')
-  const dailyWageRates = getDailyWageRatesFromCompensation(compensationRules)
-  const [showSearchResults, setShowSearchResults] = useState(false)
-  const [showRecentEvents, setShowRecentEvents] = useState(false)
-  const [employeeSearch, setEmployeeSearch] = useState('')
-  const [wageRateDrafts, setWageRateDrafts] = useState(() =>
-    Object.fromEntries(
-      DAILY_WAGE_RATE_KEYS.map((key) => [key, String(dailyWageRates[key] ?? '')]),
-    ),
-  )
-  const [wageRateStatus, setWageRateStatus] = useState('')
-  const [showDailyWageRates, setShowDailyWageRates] = useState(false)
-  const recentClockEvents = attendanceEvents.slice(0, RECENT_CLOCK_EVENTS_LIMIT)
-  const roleDefinitions = useMemo(
-    () => employeeRoleOptions.map((option) => ({ id: option.value, name: option.label })),
-    [],
-  )
-  const [openRoles, setOpenRoles] = useState(() => ({}))
-  const employeesByRole = useMemo(
-    () =>
-      employees.reduce((grouped, employee) => {
-        if (!grouped[employee.role]) {
-          grouped[employee.role] = []
-        }
-        grouped[employee.role].push(employee)
-        return grouped
-      }, {}),
-    [employees],
-  )
-  const unknownRoles = Object.keys(employeesByRole).filter(
-    (role) => !roleDefinitions.some((item) => item.id === role),
-  )
-  const orderedRoles = [
-    ...roleDefinitions,
-    ...unknownRoles.map((role) => ({ id: role, name: getEmployeeRoleLabel(role) })),
-  ]
-  const employeeSearchQuery = employeeSearch.trim().toLowerCase()
-  const isSearchingEmployees = employeeSearchQuery.length > 0
-  const employeeSearchResults = useMemo(() => {
-    if (!employeeSearchQuery) {
-      return []
-    }
-    return employees
-      .filter((employee) => {
-        const searchableText = [
-          employee.name,
-          employee.id,
-          employee.phone,
-          employee.email,
-          employee.position,
-          getEmployeeRoleLabel(employee.role),
-        ]
-          .map((value) => String(value ?? '').toLowerCase())
-          .join(' ')
-        return searchableText.includes(employeeSearchQuery)
-      })
-      .sort(compareEmployeesByName)
-  }, [employees, employeeSearchQuery])
-
-  const savedWageRateSignature = DAILY_WAGE_RATE_KEYS.map((key) => dailyWageRates[key]).join('|')
-  useEffect(() => {
-    const amounts = savedWageRateSignature.split('|')
-    setWageRateDrafts(
-      Object.fromEntries(DAILY_WAGE_RATE_KEYS.map((key, index) => [key, amounts[index] ?? ''])),
-    )
-  }, [savedWageRateSignature])
-
-  function handleSaveDailyWageRate(event) {
-    event.preventDefault()
-    const nextRates = {}
-    for (const key of DAILY_WAGE_RATE_KEYS) {
-      const amount = Number(wageRateDrafts[key])
-      if (!Number.isFinite(amount) || amount <= 0) {
-        setWageRateStatus(`Enter a valid daily rate for ${DAILY_WAGE_RATE_LABELS[key]}.`)
-        return
-      }
-      nextRates[key] = Math.round(amount)
-    }
-    DAILY_WAGE_RATE_KEYS.forEach((key) => {
-      if (nextRates[key] !== dailyWageRates[key]) {
-        onUpdateDailyWageRate(key, nextRates[key])
-      }
-    })
-    setWageRateStatus('Daily rates saved.')
-  }
-
-  function renderEmployeeRow(employee, { alwaysShowRole = false } = {}) {
-    const canEditRole = canEditEmployeeRoleForEmployee(currentUserDataEntryPermissions, employee)
-    const showRoleColumn = alwaysShowRole || canManageEmployees || canEditAnyEmployeeRole
-    return (
-      <tr key={employee.id}>
-        <td>
-          <code>{employee.id}</code>
-        </td>
-        <td>{employee.name}</td>
-        {showRoleColumn ? (
-          <td>
-            {canEditRole ? (
-              <select
-                value={employee.role}
-                onChange={(event) => onUpdateEmployeeRole(employee.id, event.target.value)}
-                aria-label={`Role for ${employee.name}`}
-              >
-                {employeeRoleOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {formatEmployeeRoleOptionLabel(option.label, employee, option.value, dailyWageRates)}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              getEmployeeRoleLabel(employee.role)
-            )}
-          </td>
-        ) : null}
-        <td>
-          {getContractTypeLabel(employee.contractType)}
-          {employee.contractType === 'seasonal' && employee.seasonalGrade
-            ? ` (${getSeasonalGradeLabel(employee.seasonalGrade)})`
-            : ''}
-        </td>
-        <td>
-          <span
-            className={clockedInIds.includes(employee.id) ? 'badge badge-on' : 'badge badge-off'}
-          >
-            {clockedInIds.includes(employee.id) ? 'Clocked In' : 'Not Clocked In'}
-          </span>
-        </td>
-        <td>
-          <Link
-            to={`/employees/${employee.id}?from=${harvestingDateFrom}&to=${harvestingDateTo}`}
-            className="action-link"
-          >
-            View details
-          </Link>
-        </td>
-      </tr>
-    )
-  }
-
-  function toggleRole(roleId) {
-    setOpenRoles((prev) => ({
-      ...prev,
-      [roleId]: !prev[roleId],
-    }))
-  }
-
-  return (
-    <section className="panel">
-      <h2>Employees</h2>
-      <p>Browse employees by job type, or search by name, work no, phone, email, position, or role.</p>
-      {!canAddEmployees && (
-        <div className="placeholder">
-          You need the &ldquo;Add new employees&rdquo; permission to add new employees.
-        </div>
-      )}
-      <p>
-        <button type="button" disabled={!canAddEmployees} onClick={() => navigate('/employees/new')}>
-          Add Employee
-        </button>
-        {isAppAdmin(currentUser) ? (
-          <>
-            {' '}
-            <Link to="/admin/sign-in-accounts" className="action-link">
-              Manage leadership sign-in accounts
-            </Link>
-          </>
-        ) : null}
-      </p>
-
-      {canEditDailyWageRates ? (
-        <CollapsibleSection
-          title="Daily wage rates"
-          isOpen={showDailyWageRates}
-          onToggle={() => setShowDailyWageRates((prev) => !prev)}
-        >
-          <p className="inline-hint">
-            Seasonal and supplementary staff share these rates. A day is paid at the rate for the
-            role held that day, so changing role applies the new rate from that day and leaves
-            earlier days unchanged. Role dropdowns show the rate for each assignment.
-          </p>
-          <form onSubmit={handleSaveDailyWageRate}>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Category</th>
-                    <th>Roles</th>
-                    <th>Daily rate (KES)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {DAILY_WAGE_RATE_KEYS.map((key) => (
-                    <tr key={key}>
-                      <td>{DAILY_WAGE_RATE_LABELS[key]}</td>
-                      <td>{DAILY_WAGE_RATE_APPLIES_TO[key]}</td>
-                      <td>
-                        <input
-                          className="table-inline-input"
-                          type="number"
-                          min="1"
-                          step="1"
-                          aria-label={`${DAILY_WAGE_RATE_LABELS[key]} daily rate`}
-                          value={wageRateDrafts[key] ?? ''}
-                          onChange={(event) => {
-                            const value = event.target.value
-                            setWageRateDrafts((prev) => ({ ...prev, [key]: value }))
-                            setWageRateStatus('')
-                          }}
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p>
-              <button type="submit">Save daily rates</button>
-            </p>
-          </form>
-          {wageRateStatus ? <p className="inline-hint">{wageRateStatus}</p> : null}
-        </CollapsibleSection>
-      ) : null}
-
-      <CollapsibleSection
-        title={`Recent clock events (last ${RECENT_CLOCK_EVENTS_LIMIT})`}
-        isOpen={showRecentEvents}
-        onToggle={() => setShowRecentEvents((prev) => !prev)}
-      >
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Employee</th>
-                <th>Work No</th>
-                <th>Event</th>
-                <th>Device</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentClockEvents.map((event) => {
-                const employee = employees.find((item) => item.id === event.employeeId)
-                return (
-                  <tr key={event.id}>
-                    <td>{formatKenyaDateTime(event.occurredAt)}</td>
-                    <td>{employee?.name ?? 'Unknown'}</td>
-                    <td>
-                      <code>{event.employeeId}</code>
-                    </td>
-                    <td>{event.eventType === 'clock_in' ? 'Clock In' : 'Clock Out'}</td>
-                    <td>{event.deviceId ?? '—'}</td>
-                  </tr>
-                )
-              })}
-              {recentClockEvents.length === 0 && (
-                <tr>
-                  <td colSpan="5">No clock events recorded on the server yet.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </CollapsibleSection>
-
-      <div className="employee-search-toolbar">
-        <label className="employee-search-field">
-          Search employees
-          <input
-            type="search"
-            value={employeeSearch}
-            onChange={(event) => {
-              setEmployeeSearch(event.target.value)
-              if (event.target.value.trim()) {
-                setShowSearchResults(true)
-              }
-            }}
-            placeholder="Name, work no, phone, email, position, or role"
-          />
-        </label>
-        {isSearchingEmployees ? (
-          <button type="button" className="secondary-button" onClick={() => setEmployeeSearch('')}>
-            Clear search
-          </button>
-        ) : null}
-      </div>
-
-      {isSearchingEmployees ? (
-        <CollapsibleSection
-          title={`Search results (${employeeSearchResults.length})`}
-          isOpen={showSearchResults}
-          onToggle={() => setShowSearchResults((open) => !open)}
-        >
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Work No</th>
-                  <th>Name</th>
-                  <th>Role</th>
-                  <th>Contract</th>
-                  <th>Clock-in</th>
-                  <th>View details</th>
-                </tr>
-              </thead>
-              <tbody>
-                {employeeSearchResults.map((employee) =>
-                  renderEmployeeRow(employee, { alwaysShowRole: true }),
-                )}
-                {employeeSearchResults.length === 0 && (
-                  <tr>
-                    <td colSpan="6">No employees match your search.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </CollapsibleSection>
-      ) : (
-        orderedRoles.map((roleItem) => {
-        const roleEmployees = (employeesByRole[roleItem.id] ?? [])
-          .slice()
-          .sort(compareEmployeesByName)
-        return (
-          <CollapsibleSection
-            key={roleItem.id}
-            title={`${roleItem.name} (${roleEmployees.length})`}
-            isOpen={openRoles[roleItem.id] ?? false}
-            onToggle={() => toggleRole(roleItem.id)}
-          >
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Work No</th>
-                    <th>Name</th>
-                    {canManageEmployees ? <th>Role</th> : null}
-                    <th>Contract</th>
-                    <th>Clock-in</th>
-                    <th>View details</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {roleEmployees.map((employee) => renderEmployeeRow(employee))}
-                  {roleEmployees.length === 0 && (
-                    <tr>
-                      <td colSpan={canManageEmployees ? 6 : 5}>No employees with this role yet.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </CollapsibleSection>
-        )
-      })
-      )}
-    </section>
-  )
-}
 
 function EmployeeRecordPage({
   employees,
@@ -3820,7 +3439,7 @@ function EmployeeRecordPage({
       <section className="panel">
         <h2>Employee record</h2>
         <div className="placeholder">
-          Employee not found. <Link to="/employees">Back to employees list</Link>.
+          Employee not found. <Link to="/attendance">Back to attendance</Link>.
         </div>
       </section>
     )
@@ -4246,7 +3865,7 @@ function EmployeeRecordPage({
     <section className="panel">
       <h2>Employee record</h2>
       <p>
-        <Link to="/employees">Back to employees</Link>
+        <Link to="/attendance">Back to attendance</Link>
       </p>
       <p>
         This is a cross-role profile. It includes all assigned work in the selected period,
@@ -4717,7 +4336,7 @@ function EmployeeEditPage({
       <section className="panel">
         <h2>Edit employee</h2>
         <div className="placeholder">
-          Employee not found. <Link to="/employees">Back to employees list</Link>.
+          Employee not found. <Link to="/attendance">Back to attendance</Link>.
         </div>
       </section>
     )
@@ -10943,7 +10562,6 @@ function App() {
   const [balingRecords, setBalingRecords] = useState([])
   const [balingAssignments, setBalingAssignments] = useState([])
   const [silageRecords, setSilageRecords] = useState([])
-  const [attendanceEvents, setAttendanceEvents] = useState([])
   const [invoiceDocuments, setInvoiceDocuments] = useState([])
   const [invoiceStockIssues, setInvoiceStockIssues] = useState([])
   const [suppliers, setSuppliers] = useState([])
@@ -11096,14 +10714,13 @@ function App() {
     if (!ready) {
       return
     }
-    Promise.all([fetchAttendanceEvents(RECENT_CLOCK_EVENTS_LIMIT), fetchAppState()])
-      .then(([events, state]) => {
-        setAttendanceEvents(events)
+    fetchAppState()
+      .then((state) => {
         if (Array.isArray(state?.clockedInIds)) {
           setClockedInIds(state.clockedInIds)
         }
       })
-      .catch(() => setAttendanceEvents([]))
+      .catch(() => {})
   }, [ready])
 
   const permissionEmployeeIds = useMemo(() => {
@@ -11806,11 +11423,7 @@ function App() {
   async function handleRefreshAttendance() {
     setAttendanceRefreshing(true)
     try {
-      const [events, state] = await Promise.all([
-        fetchAttendanceEvents(RECENT_CLOCK_EVENTS_LIMIT),
-        fetchAppState(),
-      ])
-      setAttendanceEvents(events)
+      const state = await fetchAppState()
       if (Array.isArray(state?.clockedInIds)) {
         setClockedInIds(state.clockedInIds)
       }
@@ -12804,7 +12417,6 @@ function App() {
         </div>
         <nav>
           {allowedPages.has('dashboard') ? <NavLink to="/">Dashboard</NavLink> : null}
-          {allowedPages.has('employees') ? <NavLink to="/employees">Employees</NavLink> : null}
           {allowedPages.has('attendance') ? <NavLink to="/attendance">Attendance</NavLink> : null}
           {allowedPages.has('payroll') ? <NavLink to="/payroll">Payroll</NavLink> : null}
           {isAppAdmin(currentUser) ? (
@@ -12844,23 +12456,7 @@ function App() {
               <HomePage employees={employees} records={records} clockedInIds={clockedInIds} />
             }
           />
-          <Route
-            path="/employees"
-            element={
-              <EmployeesPage
-                employees={employees}
-                currentUser={currentUser}
-                currentUserDataEntryPermissions={currentUserDataEntryPermissions}
-                compensationRules={compensationRules}
-                onUpdateDailyWageRate={handleUpdateDailyWageRate}
-                harvestingDateFrom={harvestingDateFrom}
-                harvestingDateTo={harvestingDateTo}
-                clockedInIds={clockedInIds}
-                attendanceEvents={attendanceEvents}
-                onUpdateEmployeeRole={handleUpdateEmployeeRole}
-              />
-            }
-          />
+          <Route path="/employees" element={<Navigate to="/attendance" replace />} />
           <Route
             path="/attendance"
             element={
@@ -12884,6 +12480,8 @@ function App() {
                 onAddPublicHoliday={handleAddPublicHoliday}
                 onRemovePublicHoliday={handleRemovePublicHoliday}
                 readOnly={readOnlyMode}
+                canAddEmployee={currentUserDataEntryPermissions.has('employee-add')}
+                canOpenEmployeeRecord={allowedPages.has('employees')}
               />
             }
           />
@@ -13001,6 +12599,8 @@ function App() {
                 onUpdateSalaryPayrollAdjustment={handleUpdateSalaryPayrollAdjustment}
                 onApprovePayrollSection={handleApprovePayrollSection}
                 onReleasePayrollSection={handleReleasePayrollSection}
+                canEditDailyWageRates={currentUserDataEntryPermissions.has('employee-wage-rates')}
+                onUpdateDailyWageRate={handleUpdateDailyWageRate}
               />
             }
           />
