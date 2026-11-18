@@ -55,6 +55,7 @@ import {
   buildLeaveRecord,
   formatLeaveDays,
   getAnnualLeaveEntitlement,
+  isPermanentContractEnd,
   nextLeaveRecordId,
   nextPublicHolidayId,
 } from './leave.js'
@@ -665,6 +666,18 @@ const defaultCompensationRules = {
 function formatDisplayDate(isoDate) {
   const [year, month, day] = isoDate.split('-')
   return `${day}/${month}/${year}`
+}
+
+function formatContractPeriod(employee) {
+  const start = employee?.contractStartDate
+  const permanent = isPermanentContractEnd(employee?.contractEndDate)
+  if (permanent) {
+    return start ? `${formatDisplayDate(start)} – Permanent` : 'Permanent'
+  }
+  if (start && employee?.contractEndDate) {
+    return `${formatDisplayDate(start)} – ${formatDisplayDate(employee.contractEndDate)}`
+  }
+  return 'Not set'
 }
 
 const employeeRoleOptions = [
@@ -3946,17 +3959,15 @@ function EmployeeRecordPage({
           <p><strong>Department:</strong> {formatEmployeeFieldValue(employee.department)}</p>
           <p><strong>Reporting manager:</strong> {formatEmployeeFieldValue(employee.reportingManager)}</p>
           <p>
-            <strong>Contract period:</strong>{' '}
-            {employee.contractStartDate && employee.contractEndDate
-              ? `${formatDisplayDate(employee.contractStartDate)} – ${formatDisplayDate(employee.contractEndDate)}`
-              : 'Not set'}
+            <strong>Contract period:</strong> {formatContractPeriod(employee)}
           </p>
           <p>
             <strong>Annual leave (contract):</strong>{' '}
             {employee.annualLeaveDaysPerYear != null
               ? `${formatLeaveDays(employee.annualLeaveDaysPerYear)} days per year`
               : 'Not set'}
-            {getAnnualLeaveEntitlement(employee) != null
+            {getAnnualLeaveEntitlement(employee) != null &&
+            !isPermanentContractEnd(employee.contractEndDate)
               ? ` (${formatLeaveDays(getAnnualLeaveEntitlement(employee))} days pro-rata for this contract)`
               : ''}
           </p>
@@ -4044,6 +4055,13 @@ function EmployeeProfileEditor({
   canEditRole = false,
   dailyWageRates,
 }) {
+  const [permanentContract, setPermanentContract] = useState(() =>
+    isPermanentContractEnd(employee.contractEndDate),
+  )
+  const [contractEndDate, setContractEndDate] = useState(() =>
+    isPermanentContractEnd(employee.contractEndDate) ? '' : (employee.contractEndDate ?? ''),
+  )
+
   function handleSubmit(event) {
     event.preventDefault()
     if (!canEdit) {
@@ -4182,9 +4200,20 @@ function EmployeeProfileEditor({
         <input
           name="profileContractEndDate"
           type="date"
-          defaultValue={employee.contractEndDate ?? ''}
-          disabled={!canEdit}
+          value={permanentContract ? '' : contractEndDate}
+          onChange={(event) => setContractEndDate(event.target.value)}
+          disabled={!canEdit || permanentContract}
         />
+      </label>
+      <label className="check-item">
+        <input
+          type="checkbox"
+          name="profileContractPermanent"
+          checked={permanentContract}
+          disabled={!canEdit}
+          onChange={(event) => setPermanentContract(event.target.checked)}
+        />
+        <span>Permanent (no end date)</span>
       </label>
       <label>
         Annual leave days per year

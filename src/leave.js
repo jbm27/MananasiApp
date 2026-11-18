@@ -59,9 +59,17 @@ export function countWorkingDaysInRange(fromDate, toDate, publicHolidays = []) {
   return countLeaveDays(fromDate, toDate, publicHolidays)
 }
 
+export function isPermanentContractEnd(endDate) {
+  const raw = String(endDate ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+  return raw === 'n/a' || raw === 'na' || raw === 'permanent' || raw === 'open-ended' || raw === 'open ended'
+}
+
 export function parseContractEndDate(endDate) {
   const raw = String(endDate ?? '').trim()
-  if (!raw || raw === 'N/A') {
+  if (!raw || isPermanentContractEnd(raw)) {
     return null
   }
   return raw
@@ -81,6 +89,9 @@ export function proRataAnnualEntitlement(annualDays, contractStart, contractEnd)
   const parsedAnnual = Number(annualDays)
   if (!Number.isFinite(parsedAnnual) || parsedAnnual < 0) {
     return null
+  }
+  if (isPermanentContractEnd(contractEnd)) {
+    return Math.round(parsedAnnual * 10) / 10
   }
   const contractDays = contractDurationDays(contractStart, contractEnd)
   if (!contractStart || contractDays <= 0) {

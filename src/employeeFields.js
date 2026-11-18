@@ -137,7 +137,10 @@ export function parseEmployeeProfileFromForm(formData) {
     monthlySalaryKes:
       contractType === 'regular' ? parseOptionalNumber(formData.get('monthlySalaryKes')) : null,
     contractStartDate: String(formData.get('profileContractStartDate') ?? '').trim(),
-    contractEndDate: String(formData.get('profileContractEndDate') ?? '').trim(),
+    contractEndDate:
+      formData.get('profileContractPermanent') != null
+        ? 'permanent'
+        : String(formData.get('profileContractEndDate') ?? '').trim(),
     annualLeaveDaysPerYear: parseOptionalNumber(formData.get('annualLeaveDaysPerYear')),
     reportingManager: String(formData.get('profileReportingManager') ?? '').trim(),
     idNumber: String(formData.get('profileIdNumber') ?? '').trim(),

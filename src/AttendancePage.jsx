@@ -10,6 +10,7 @@ import {
   getCompassionateLeaveEntitlement,
   getLeaveSummaryPeriod,
   getLeaveTypeLabel,
+  isPermanentContractEnd,
   getSickLeaveEntitlement,
   LEAVE_TYPES,
   countWorkingDaysRemainingOnContract,
@@ -284,6 +285,7 @@ export default function AttendancePage({
         leaveSummary,
         timeSummary,
         contractDaysRemaining,
+        permanentContract: isPermanentContractEnd(employee.contractEndDate),
         annualEntitlement: getAnnualLeaveEntitlement(employee),
         sickEntitlement: getSickLeaveEntitlement(
           employee.contractStartDate,
@@ -847,7 +849,9 @@ export default function AttendancePage({
                       {registerFilterMode === 'contract-term' ? (
                         <td>
                           {row.contractDaysRemaining == null
-                            ? 'Open-ended'
+                            ? row.permanentContract
+                              ? 'Permanent'
+                              : 'Open-ended'
                             : formatLeaveDays(row.contractDaysRemaining)}
                         </td>
                       ) : null}
