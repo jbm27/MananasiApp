@@ -106,6 +106,8 @@ import {
   findStockOption,
   normalizeItemStockAllocations,
   productRequiresStock,
+  STOCK_DASHBOARD_CATEGORIES,
+  summarizeStockDashboard,
   sumStockAllocationKg,
   validateInvoiceStockLines,
 } from './invoiceStock.js'
@@ -9365,6 +9367,7 @@ function StockPage({
     return a.stockCode.localeCompare(b.stockCode)
   })
   const totalAvailableKg = Number(stockRows.reduce((sum, row) => sum + row.totalKg, 0).toFixed(1))
+  const stockSummary = summarizeStockDashboard(stockRows)
 
   const stockMovements = useMemo(() => {
     const allMovements = buildStockMovements({
@@ -9568,6 +9571,18 @@ function StockPage({
   return (
     <section className="panel">
       <h2>Stock</h2>
+      <h3>Stock summary</h3>
+      <div className="kpi-grid" aria-label="Stock summary">
+        {STOCK_DASHBOARD_CATEGORIES.map((category) => (
+          <article className="card" key={category.key}>
+            <h3>{category.label}</h3>
+            <p>{stockSummary[category.key].toLocaleString()} kg</p>
+          </article>
+        ))}
+      </div>
+      <p className="inline-hint">
+        Totals follow the batch filter. Absolute stock is the all-time quantity still on hand.
+      </p>
       <p>
         Loose stock codes (for example 2026-000-01-BRS) show fibre not yet baled. Baled series codes
         (for example 2026-000-01-BRS-100) show completed bales. Silage series codes (for example

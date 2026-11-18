@@ -19,6 +19,57 @@ export function productRequiresStock(product) {
   return String(product ?? '').trim().toUpperCase() !== 'CUS'
 }
 
+export const STOCK_DASHBOARD_CATEGORIES = [
+  { key: 'ubrLoose', label: 'Unbrushed loose fibre' },
+  { key: 'brsLoose', label: 'Brushed loose fibre' },
+  { key: 'towLoose', label: 'TOW fibre' },
+  { key: 'brsBaled', label: 'Brushed baled fibre' },
+  { key: 'ubrBaled', label: 'Unbrushed baled fibre' },
+  { key: 'towBaled', label: 'TOW baled' },
+  { key: 'silage', label: 'Silage' },
+]
+
+/** UBR/BRS/TOW with a number after the grade is baled; SLG (including SLG25 and SLG35) is silage. */
+export function getStockDashboardCategory(row) {
+  const parts = String(row?.stockCode ?? '')
+    .split('-')
+    .filter(Boolean)
+  if (
+    row?.stockForm === 'Silage' ||
+    parts.some((part) => part === 'SLG' || part.startsWith('SLG'))
+  ) {
+    return 'silage'
+  }
+  const gradeIndex = parts.findIndex((part) => part === 'UBR' || part === 'BRS' || part === 'TOW')
+  if (gradeIndex < 0) {
+    return null
+  }
+  const grade = parts[gradeIndex]
+  const baled = /^\d+$/.test(parts[gradeIndex + 1] ?? '')
+  if (grade === 'UBR') {
+    return baled ? 'ubrBaled' : 'ubrLoose'
+  }
+  if (grade === 'BRS') {
+    return baled ? 'brsBaled' : 'brsLoose'
+  }
+  return baled ? 'towBaled' : 'towLoose'
+}
+
+export function summarizeStockDashboard(rows) {
+  const totals = Object.fromEntries(STOCK_DASHBOARD_CATEGORIES.map((item) => [item.key, 0]))
+  for (const row of rows ?? []) {
+    const key = getStockDashboardCategory(row)
+    if (!key) {
+      continue
+    }
+    totals[key] += Number(row.totalKg) || 0
+  }
+  for (const key of Object.keys(totals)) {
+    totals[key] = Number(totals[key].toFixed(1))
+  }
+  return totals
+}
+
 export function getProductSuffixFromStockCode(stockCode, stockForm) {
   const code = String(stockCode ?? '')
   if (stockForm === 'Silage') {
