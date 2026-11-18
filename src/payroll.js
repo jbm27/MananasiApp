@@ -2,9 +2,7 @@ import { compareEmployeesByName } from './employeeFields.js'
 import { getEmployeeDailyWageKes, isPayrollParticipant, sumAttendanceDailyPay } from './employeePay.js'
 import { toKenyaDateString } from './kenyaTime.js'
 import {
-  HOURS_PER_DAY,
-  calculateOvertimePay,
-  calculateUndertimeDeduction,
+  calculateOverUnderTimePay,
   summarizeOverUnderTimeForEmployee,
 } from './overUnderTime.js'
 import { calculateMaxAdvanceClaimable } from './payrollAdvances.js'
@@ -141,7 +139,6 @@ export function calculatePayrollLine({
 }) {
   const wageRates = dailyWageRates ?? {}
   const dailyRate = getEmployeeDailyWageKes(employee, { dailyWageRates: wageRates })
-  const hourlyRate = dailyRate / HOURS_PER_DAY
   const daysWorked = countDaysWorkedFromAttendance(
     attendanceEvents,
     employee.id,
@@ -169,9 +166,16 @@ export function calculatePayrollLine({
   )
   const overtimeHours = timeSummary.overtime
   const undertimeHours = timeSummary.undertime
-  const undertimeDeduction = calculateUndertimeDeduction(undertimeHours, hourlyRate)
+  const timePay = calculateOverUnderTimePay(
+    overUnderTimeRecords,
+    employee,
+    period.startDate,
+    period.endDate,
+    wageRates,
+  )
+  const undertimeDeduction = timePay.undertimeDeduction
   const regularPay = attendancePay + leavePay - undertimeDeduction
-  const overtimePay = calculateOvertimePay(overtimeHours, hourlyRate)
+  const overtimePay = timePay.overtimePay
   const { totalIncentiveKes, kgsOver250 } = sumHarvestMetrics(
     harvestRecords,
     employee.id,

@@ -1,4 +1,8 @@
-import { isPayrollParticipant } from './employeePay.js'
+import {
+  getEmployeeDailyWageKes,
+  getEmployeeRoleOnDate,
+  isPayrollParticipant,
+} from './employeePay.js'
 import { getPayPeriodForDate } from './payPeriods.js'
 
 export const OVER_UNDER_TIME_TYPES = [
@@ -134,6 +138,38 @@ export function getOverUnderTimeLockMessage(record, employee, payrollApprovals) 
   const period = getPayPeriodForDate(record.date)
   const sectionLabel = section === 'wages' ? 'wages' : 'salaries'
   return `This entry is locked because ${sectionLabel} payroll for ${period?.label ?? 'this period'} has been approved.`
+}
+
+/**
+ * Price each overtime and undertime entry at the hourly rate for the role held that day.
+ */
+export function calculateOverUnderTimePay(records, employee, fromDate, toDate, dailyWageRates) {
+  let overtime = 0
+  let undertime = 0
+  if (!employee || !fromDate || !toDate || fromDate > toDate) {
+    return { overtimePay: 0, undertimeDeduction: 0 }
+  }
+  for (const record of records ?? []) {
+    if (record.employeeId !== employee.id || !record.date) {
+      continue
+    }
+    if (record.date < fromDate || record.date > toDate) {
+      continue
+    }
+    const role = getEmployeeRoleOnDate(employee, record.date)
+    const hourlyRate =
+      getEmployeeDailyWageKes(employee, { role, dailyWageRates }) / HOURS_PER_DAY
+    const hours = Number(record.hours) || 0
+    if (record.adjustmentType === 'overtime') {
+      overtime += hours * hourlyRate * OVERTIME_MULTIPLIER
+    } else if (record.adjustmentType === 'undertime') {
+      undertime += hours * hourlyRate
+    }
+  }
+  return {
+    overtimePay: Math.round(overtime),
+    undertimeDeduction: Math.round(undertime),
+  }
 }
 
 export function calculateOvertimePay(hours, hourlyRate) {

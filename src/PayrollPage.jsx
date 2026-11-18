@@ -562,8 +562,9 @@ export default function PayrollPage({
 
         <div className="rules-box">
           <strong>Advances:</strong> Max claimable = 50% of base earnings to advance Friday.
-          Harvesters: daily base wage only (no kg incentive). Other wage staff: daily rate × days
-          worked. Salaried staff: monthly salary prorated by calendar days in the period.
+          Harvesters: daily base wage only (no kg incentive). Other wage staff: the rate for the
+          role on each day worked. Salaried staff: monthly salary prorated by calendar days in the
+          period.
         </div>
       </PayrollSection>
 
@@ -757,10 +758,11 @@ export default function PayrollPage({
         )}
 
         <div className="rules-box">
-          <strong>Wages:</strong> Regular pay = attendance pay + paid leave − undertime (hours ×
-          hourly rate). Overtime = hours × hourly rate × 1.5. OT/UT hours come from Attendance
-          entries for this pay period. SHA = max(KES 300, 2.75% of total earnings). NSSF = 6%. AHL =
-          1.5%.
+          <strong>Wages:</strong> Each clock-in day is paid at the rate for the role held that day.
+          Regular pay = that attendance pay + paid leave (current daily rate × sick, compassionate,
+          and maternity days) − undertime. Overtime and undertime use the hourly rate for the role
+          on the date of each entry (daily rate ÷ 8; overtime × 1.5). The daily rate column shows
+          the current role. SHA = max(KES 300, 2.75% of total earnings). NSSF = 6%. AHL = 1.5%.
         </div>
       </PayrollSection>
 

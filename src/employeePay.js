@@ -3,21 +3,32 @@ import { toKenyaDateString } from './kenyaTime.js'
 const WORKING_DAYS_PER_MONTH = 22
 
 export const DAILY_WAGE_RATE_KEYS = [
-  'seasonalHarvester',
-  'supplementaryHarvester',
-  'seasonalFactory',
-  'supplementaryFactory',
+  'harvesting',
+  'generalFactory',
+  'machineAttendant',
   'supervisor',
-  'supplementaryDriver',
 ]
 
 export const DAILY_WAGE_RATE_LABELS = {
-  seasonalHarvester: 'Seasonal harvester',
-  supplementaryHarvester: 'Supplementary harvester',
-  seasonalFactory: 'Seasonal factory worker',
-  supplementaryFactory: 'Supplementary factory worker',
-  supervisor: 'Supervisor (harvesting or factory)',
-  supplementaryDriver: 'Supplementary driver',
+  harvesting: 'Harvesting',
+  generalFactory: 'General factory labour',
+  machineAttendant: 'Machine attendant',
+  supervisor: 'Supervisor (factory or harvesting)',
+}
+
+export const DAILY_WAGE_RATE_APPLIES_TO = {
+  harvesting: 'Harvester',
+  generalFactory: 'Loader, dryer, driver, and any other wage role',
+  machineAttendant: 'Decorticator, silage, brushing, and baling',
+  supervisor: 'Harvesting and factory supervisors',
+}
+
+/** Older saved rates, used only when a current category has not been set yet. */
+const LEGACY_DAILY_WAGE_RATE_KEYS = {
+  harvesting: ['seasonalHarvester', 'supplementaryHarvester'],
+  generalFactory: ['seasonalFactory', 'supplementaryFactory'],
+  machineAttendant: ['seasonalFactory', 'supplementaryFactory'],
+  supervisor: [],
 }
 
 /** Board directors use read-only app access and are excluded from all payroll runs. */
@@ -27,13 +38,19 @@ export function isPayrollParticipant(employee) {
 
 export function createDefaultDailyWageRates() {
   return {
-    seasonalHarvester: 550,
-    supplementaryHarvester: 530,
-    seasonalFactory: 732,
-    supplementaryFactory: 712,
+    harvesting: 550,
+    generalFactory: 732,
+    machineAttendant: 732,
     supervisor: 807,
-    supplementaryDriver: 1000,
   }
+}
+
+function readPositiveRate(rates, key) {
+  const value = Number(rates?.[key])
+  if (Number.isFinite(value) && value > 0) {
+    return Math.round(value)
+  }
+  return null
 }
 
 export function normalizeDailyWageRates(rates) {
@@ -41,9 +58,17 @@ export function normalizeDailyWageRates(rates) {
   const next = { ...defaults }
   if (rates && typeof rates === 'object') {
     DAILY_WAGE_RATE_KEYS.forEach((key) => {
-      const value = Number(rates[key])
-      if (Number.isFinite(value) && value > 0) {
-        next[key] = Math.round(value)
+      const current = readPositiveRate(rates, key)
+      if (current !== null) {
+        next[key] = current
+        return
+      }
+      for (const legacyKey of LEGACY_DAILY_WAGE_RATE_KEYS[key]) {
+        const legacy = readPositiveRate(rates, legacyKey)
+        if (legacy !== null) {
+          next[key] = legacy
+          break
+        }
       }
     })
   }
@@ -61,6 +86,15 @@ export const SUPERVISOR_ROLES = new Set([
   'baling-supervisor',
   'silage-supervisor',
 ])
+
+export const MACHINE_ATTENDANT_ROLES = new Set([
+  'decorticator-operator',
+  'silage-operator',
+  'brusher',
+  'baler',
+])
+
+export const GENERAL_FACTORY_ROLES = new Set(['loader', 'dryer', 'truck-driver'])
 
 export function normalizeContractType(value) {
   const key = String(value ?? '')
@@ -126,8 +160,25 @@ export function isHarvesterRole(role) {
   return role === 'harvester'
 }
 
-export function isDriverRole(role) {
-  return role === 'truck-driver'
+export function isMachineAttendantRole(role) {
+  return MACHINE_ATTENDANT_ROLES.has(role)
+}
+
+/** Wage category for a role. Null means the role has no dedicated rate. */
+export function getWageRateKeyForRole(role) {
+  if (isSupervisorRole(role)) {
+    return 'supervisor'
+  }
+  if (isHarvesterRole(role)) {
+    return 'harvesting'
+  }
+  if (isMachineAttendantRole(role)) {
+    return 'machineAttendant'
+  }
+  if (GENERAL_FACTORY_ROLES.has(role)) {
+    return 'generalFactory'
+  }
+  return null
 }
 
 export function isWageContractEmployee(employee) {
@@ -145,16 +196,7 @@ export function getRuleBasedDailyWageKes(
   if (contractType === 'regular') {
     return null
   }
-  if (isSupervisorRole(role)) {
-    return rates.supervisor
-  }
-  if (isHarvesterRole(role)) {
-    return contractType === 'seasonal' ? rates.seasonalHarvester : rates.supplementaryHarvester
-  }
-  if (isDriverRole(role) && contractType === 'supplementary') {
-    return rates.supplementaryDriver
-  }
-  return contractType === 'seasonal' ? rates.seasonalFactory : rates.supplementaryFactory
+  return rates[getWageRateKeyForRole(role) ?? 'generalFactory']
 }
 
 export function getEmployeeRoleHistory(employee) {
@@ -195,10 +237,14 @@ export function formatEmployeeRoleOptionLabel(
   role,
   dailyWageRates = createDefaultDailyWageRates(),
 ) {
-  const rate = getRuleBasedDailyWageKes(employee, role, dailyWageRates)
-  if (rate === null) {
+  if (!isWageContractEmployee(employee)) {
     return optionLabel
   }
+  const rateKey = getWageRateKeyForRole(role)
+  if (!rateKey) {
+    return optionLabel
+  }
+  const rate = normalizeDailyWageRates(dailyWageRates)[rateKey]
   return `${optionLabel} — KES ${rate.toLocaleString()}/day`
 }
 

@@ -74,6 +74,7 @@ import {
   isWageContractEmployee,
   DAILY_WAGE_RATE_KEYS,
   DAILY_WAGE_RATE_LABELS,
+  DAILY_WAGE_RATE_APPLIES_TO,
   normalizeDailyWageRates,
   createDefaultDailyWageRates,
   getDailyWageRatesFromCompensation,
@@ -3595,8 +3596,9 @@ function EmployeesPage({
           onToggle={() => setShowDailyWageRates((prev) => !prev)}
         >
           <p className="inline-hint">
-            Daily rates apply by role and contract type. Role dropdowns show the rate that would apply
-            for each assignment.
+            Seasonal and supplementary staff share these rates. A day is paid at the rate for the
+            role held that day, so changing role applies the new rate from that day and leaves
+            earlier days unchanged. Role dropdowns show the rate for each assignment.
           </p>
           <form className="form-grid" onSubmit={handleSaveDailyWageRate}>
             <label>
@@ -3630,6 +3632,7 @@ function EmployeesPage({
               <thead>
                 <tr>
                   <th>Category</th>
+                  <th>Roles</th>
                   <th>Daily rate (KES)</th>
                 </tr>
               </thead>
@@ -3637,6 +3640,7 @@ function EmployeesPage({
                 {DAILY_WAGE_RATE_KEYS.map((key) => (
                   <tr key={key}>
                     <td>{DAILY_WAGE_RATE_LABELS[key]}</td>
+                    <td>{DAILY_WAGE_RATE_APPLIES_TO[key]}</td>
                     <td>{dailyWageRates[key].toLocaleString()}</td>
                   </tr>
                 ))}
@@ -4280,7 +4284,7 @@ function EmployeeRecordPage({
               <strong>Daily rate:</strong> KES{' '}
               {getEmployeeDailyWageKes(employee, { dailyWageRates }).toLocaleString()}
               {' '}
-              (set by role and contract type)
+              (set by current role)
             </p>
           )}
           <p>
@@ -4523,8 +4527,8 @@ function EmployeeProfileEditor({
       {isWageContractEmployee(employee) ? (
         <p className="inline-hint">
           Daily rate: KES{' '}
-          {getEmployeeDailyWageKes(employee, { dailyWageRates }).toLocaleString()} (follows role and
-          contract type; updates when the role changes)
+          {getEmployeeDailyWageKes(employee, { dailyWageRates }).toLocaleString()} (follows the
+          current role; a role change applies from that day)
         </p>
       ) : null}
       <label>
@@ -5341,10 +5345,10 @@ function HarvestingPage({
       </div>
 
       <div className="rules-box">
-        <strong>Pay Rule:</strong> Each harvester&apos;s daily base rate from their employee record +
-        KES {compensationRules.incentiveRateKesPerKg} per kg above{' '}
-        {compensationRules.incentiveThresholdKg} kg. Supervisors are paid their own daily rate for
-        each day worked.
+        <strong>Pay Rule:</strong> Harvesters are paid the harvesting daily rate, plus KES{' '}
+        {compensationRules.incentiveRateKesPerKg} per kg above{' '}
+        {compensationRules.incentiveThresholdKg} kg. Supervisors are paid the supervisor daily rate
+        for each day worked. A role change applies from that day.
       </div>
       <div className="rules-box">
         <strong>Active Batch Number:</strong>{' '}
