@@ -3438,8 +3438,11 @@ function EmployeesPage({
   const [showSearchResults, setShowSearchResults] = useState(false)
   const [showRecentEvents, setShowRecentEvents] = useState(false)
   const [employeeSearch, setEmployeeSearch] = useState('')
-  const [selectedWageRateKey, setSelectedWageRateKey] = useState(DAILY_WAGE_RATE_KEYS[0])
-  const [wageRateInput, setWageRateInput] = useState(String(dailyWageRates[DAILY_WAGE_RATE_KEYS[0]]))
+  const [wageRateDrafts, setWageRateDrafts] = useState(() =>
+    Object.fromEntries(
+      DAILY_WAGE_RATE_KEYS.map((key) => [key, String(dailyWageRates[key] ?? '')]),
+    ),
+  )
   const [wageRateStatus, setWageRateStatus] = useState('')
   const [showDailyWageRates, setShowDailyWageRates] = useState(false)
   const recentClockEvents = attendanceEvents.slice(0, RECENT_CLOCK_EVENTS_LIMIT)
@@ -3489,21 +3492,31 @@ function EmployeesPage({
       .sort(compareEmployeesByName)
   }, [employees, employeeSearchQuery])
 
+  const savedWageRateSignature = DAILY_WAGE_RATE_KEYS.map((key) => dailyWageRates[key]).join('|')
   useEffect(() => {
-    setWageRateInput(String(dailyWageRates[selectedWageRateKey] ?? ''))
-  }, [selectedWageRateKey, dailyWageRates])
+    const amounts = savedWageRateSignature.split('|')
+    setWageRateDrafts(
+      Object.fromEntries(DAILY_WAGE_RATE_KEYS.map((key, index) => [key, amounts[index] ?? ''])),
+    )
+  }, [savedWageRateSignature])
 
   function handleSaveDailyWageRate(event) {
     event.preventDefault()
-    const amount = Number(wageRateInput)
-    if (Number.isNaN(amount) || amount <= 0) {
-      setWageRateStatus('Enter a valid daily rate greater than zero.')
-      return
+    const nextRates = {}
+    for (const key of DAILY_WAGE_RATE_KEYS) {
+      const amount = Number(wageRateDrafts[key])
+      if (!Number.isFinite(amount) || amount <= 0) {
+        setWageRateStatus(`Enter a valid daily rate for ${DAILY_WAGE_RATE_LABELS[key]}.`)
+        return
+      }
+      nextRates[key] = Math.round(amount)
     }
-    onUpdateDailyWageRate(selectedWageRateKey, amount)
-    setWageRateStatus(
-      `${DAILY_WAGE_RATE_LABELS[selectedWageRateKey]} updated to KES ${amount.toLocaleString()}.`,
-    )
+    DAILY_WAGE_RATE_KEYS.forEach((key) => {
+      if (nextRates[key] !== dailyWageRates[key]) {
+        onUpdateDailyWageRate(key, nextRates[key])
+      }
+    })
+    setWageRateStatus('Daily rates saved.')
   }
 
   function renderEmployeeRow(employee, { alwaysShowRole = false } = {}) {
@@ -3600,53 +3613,46 @@ function EmployeesPage({
             role held that day, so changing role applies the new rate from that day and leaves
             earlier days unchanged. Role dropdowns show the rate for each assignment.
           </p>
-          <form className="form-grid" onSubmit={handleSaveDailyWageRate}>
-            <label>
-              Rate category
-              <select
-                value={selectedWageRateKey}
-                onChange={(event) => setSelectedWageRateKey(event.target.value)}
-              >
-                {DAILY_WAGE_RATE_KEYS.map((key) => (
-                  <option key={key} value={key}>
-                    {DAILY_WAGE_RATE_LABELS[key]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Daily rate (KES)
-              <input
-                type="number"
-                min="1"
-                step="1"
-                value={wageRateInput}
-                onChange={(event) => setWageRateInput(event.target.value)}
-              />
-            </label>
-            <button type="submit">Save daily rate</button>
+          <form onSubmit={handleSaveDailyWageRate}>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Category</th>
+                    <th>Roles</th>
+                    <th>Daily rate (KES)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {DAILY_WAGE_RATE_KEYS.map((key) => (
+                    <tr key={key}>
+                      <td>{DAILY_WAGE_RATE_LABELS[key]}</td>
+                      <td>{DAILY_WAGE_RATE_APPLIES_TO[key]}</td>
+                      <td>
+                        <input
+                          className="table-inline-input"
+                          type="number"
+                          min="1"
+                          step="1"
+                          aria-label={`${DAILY_WAGE_RATE_LABELS[key]} daily rate`}
+                          value={wageRateDrafts[key] ?? ''}
+                          onChange={(event) => {
+                            const value = event.target.value
+                            setWageRateDrafts((prev) => ({ ...prev, [key]: value }))
+                            setWageRateStatus('')
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p>
+              <button type="submit">Save daily rates</button>
+            </p>
           </form>
           {wageRateStatus ? <p className="inline-hint">{wageRateStatus}</p> : null}
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Category</th>
-                  <th>Roles</th>
-                  <th>Daily rate (KES)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {DAILY_WAGE_RATE_KEYS.map((key) => (
-                  <tr key={key}>
-                    <td>{DAILY_WAGE_RATE_LABELS[key]}</td>
-                    <td>{DAILY_WAGE_RATE_APPLIES_TO[key]}</td>
-                    <td>{dailyWageRates[key].toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
         </CollapsibleSection>
       ) : null}
 

@@ -139,7 +139,8 @@
 .form-grid input,
 .form-grid select,
 .form-grid textarea,
-table select {
+table select,
+table input {
   border: 1px solid #cbd5e1;
   border-radius: 0.45rem;
   padding: 0.5rem 0.55rem;
