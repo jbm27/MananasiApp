@@ -324,11 +324,7 @@ export default function PurificationPage({
           <p>{filteredRuns.length}</p>
         </article>
         <article className="card">
-          <h3>Unbrushed Fibre In</h3>
-          <p>{Number(totalInputKg.toFixed(1)).toLocaleString()} kg</p>
-        </article>
-        <article className="card">
-          <h3>Purified Fibre Out</h3>
+          <h3>Fibre Purified</h3>
           <p>{Number(totalOutputKg.toFixed(1)).toLocaleString()} kg</p>
         </article>
         <article className="card">
@@ -336,7 +332,7 @@ export default function PurificationPage({
           <p>{formatEfficiencyRatio(overallEfficiency)}</p>
         </article>
         <article className="card">
-          <h3>Water Used</h3>
+          <h3>Water Consumed</h3>
           <p>{Number(totalWater.toFixed(1)).toLocaleString()} L</p>
         </article>
       </div>
