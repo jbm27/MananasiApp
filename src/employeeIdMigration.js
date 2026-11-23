@@ -38,6 +38,7 @@ const EMPLOYEE_ARRAY_KEYS = new Set([
   'balerIds',
   'dryerIds',
   'brusherIds',
+  'attendantIds',
 ])
 
 const EMPLOYEE_OBJECT_KEY_OBJECTS = new Set([

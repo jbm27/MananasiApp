@@ -1,3 +1,4 @@
+import { applyFinishingStock, appendFinishingMovements } from './fibreFinishing.js'
 import { getSilageBagSeriesCode, getSilageRecordSerial } from './silageCodes.js'
 
 function normalizeBatchNumber(batchNumber) {
@@ -23,6 +24,8 @@ export const STOCK_DASHBOARD_CATEGORIES = [
   { key: 'ubrLoose', label: 'Unbrushed loose fibre' },
   { key: 'brsLoose', label: 'Brushed loose fibre' },
   { key: 'towLoose', label: 'TOW fibre' },
+  { key: 'purLoose', label: 'Purified loose fibre' },
+  { key: 'carLoose', label: 'Carded loose fibre' },
   { key: 'brsBaled', label: 'Brushed baled fibre' },
   { key: 'ubrBaled', label: 'Unbrushed baled fibre' },
   { key: 'towBaled', label: 'TOW baled' },
@@ -39,6 +42,13 @@ export function getStockDashboardCategory(row) {
     parts.some((part) => part === 'SLG' || part.startsWith('SLG'))
   ) {
     return 'silage'
+  }
+  const last = parts[parts.length - 1] ?? ''
+  if (last === 'PUR') {
+    return 'purLoose'
+  }
+  if (/^CAR\d+$/.test(last)) {
+    return 'carLoose'
   }
   const gradeIndex = parts.findIndex((part) => part === 'UBR' || part === 'BRS' || part === 'TOW')
   if (gradeIndex < 0) {
@@ -87,8 +97,12 @@ export function getProductSuffixFromStockCode(stockCode, stockForm) {
       return gradeMatch[1]
     }
   }
-  const looseMatch = code.match(/-(UBR|BRS|TOW)$/)
-  return looseMatch ? looseMatch[1] : ''
+  const looseMatch = code.match(/-(UBR|BRS|TOW|PUR)$/)
+  if (looseMatch) {
+    return looseMatch[1]
+  }
+  const cardedMatch = code.match(/-(CAR\d+)$/)
+  return cardedMatch ? cardedMatch[1] : ''
 }
 
 export function stockOptionMatchesProduct(option, product) {
@@ -110,6 +124,8 @@ export function computeAbsoluteStockCatalog({
   balingRecords,
   silageRecords,
   invoiceStockIssues = [],
+  purificationRuns = [],
+  cardingShifts = [],
 }) {
   const stockMap = {}
 
@@ -165,6 +181,8 @@ export function computeAbsoluteStockCatalog({
     }
     stockMap[sourceCode].totalKg -= item.baleWeightKg
   })
+
+  applyFinishingStock(stockMap, purificationRuns, cardingShifts)
 
   invoiceStockIssues.forEach((issue) => {
     const code = issue.stockCode
@@ -540,6 +558,8 @@ export function buildStockMovements({
   silageRecords = [],
   invoiceStockIssues = [],
   invoiceDocuments = [],
+  purificationRuns = [],
+  cardingShifts = [],
 } = {}) {
   const movements = []
   const groupedMovements = new Map()
@@ -650,6 +670,8 @@ export function buildStockMovements({
       })
     }
   })
+
+  appendFinishingMovements(movements, purificationRuns, cardingShifts)
 
   const balingSeriesByGroup = balingRecords.reduce((map, item) => {
     const key = `${item.date}|${item.sourceStockCode}|${item.baleSeriesCode}`

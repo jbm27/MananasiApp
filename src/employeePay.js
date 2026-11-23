@@ -19,7 +19,7 @@ export const DAILY_WAGE_RATE_LABELS = {
 export const DAILY_WAGE_RATE_APPLIES_TO = {
   harvesting: 'Harvester',
   generalFactory: 'Loader, dryer, driver, and any other wage role',
-  machineAttendant: 'Decorticator, silage, brushing, and baling',
+  machineAttendant: 'Decorticator, silage, brushing, baling, reactor, and carding',
   supervisor: 'Harvesting and factory supervisors',
 }
 
@@ -85,6 +85,8 @@ export const SUPERVISOR_ROLES = new Set([
   'brushing-supervisor',
   'baling-supervisor',
   'silage-supervisor',
+  'reactor-supervisor',
+  'carding-supervisor',
 ])
 
 export const MACHINE_ATTENDANT_ROLES = new Set([
@@ -92,6 +94,8 @@ export const MACHINE_ATTENDANT_ROLES = new Set([
   'silage-operator',
   'brusher',
   'baler',
+  'reactor-operator',
+  'carding-attendant',
 ])
 
 export const GENERAL_FACTORY_ROLES = new Set(['loader', 'dryer', 'truck-driver'])

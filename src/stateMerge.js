@@ -17,6 +17,8 @@ export const MERGE_BY_ID_KEYS = [
   'balingAssignments',
   'brushingStockMovements',
   'brushingDailyRecords',
+  'purificationRuns',
+  'cardingShifts',
   'balingRecords',
   'silageRecords',
   'invoiceStockIssues',

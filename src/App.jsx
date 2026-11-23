@@ -114,6 +114,24 @@ import {
   findDuplicateDecorticationShift,
   formatDecorticationShiftConflictMessage,
 } from './decortication.js'
+import PurificationPage from './PurificationPage.jsx'
+import CardingPage from './CardingPage.jsx'
+import {
+  applyFinishingStock,
+  balancesByStockCode,
+  cardingLineStockDeltas,
+  describeStockShortfall,
+  findCardingShiftConflict,
+  findPurificationRunConflict,
+  finishingRecordsForStockView,
+  isTraditionalBaleSource,
+  nextPurificationRunNumber,
+  normalizeCardingLine,
+  normalizeCardingShiftIdentity,
+  normalizePurificationProduction,
+  parseShiftNumber,
+  purificationStockDeltas,
+} from './fibreFinishing.js'
 import { mergeOpeningStockRecords } from './openingStockSeed.js'
 import {
   SILAGE_DRY_MATTER_OPTIONS,
@@ -162,6 +180,16 @@ const activityModules = [
     summary: 'Log brushing runs, quality notes, and impurity removal.',
   },
   {
+    id: 'purification',
+    name: 'Purification',
+    summary: 'Degum unbrushed fibre in reactor runs and stock purified fibre.',
+  },
+  {
+    id: 'carding',
+    name: 'Cutting and carding',
+    summary: 'Cut and card purified fibre by shift and fibre length.',
+  },
+  {
     id: 'baling',
     name: 'Baling',
     summary: 'Create bale records, weights, lot IDs, and export readiness.',
@@ -198,6 +226,8 @@ const PAGE_ACCESS_IDS = [
   'decortication',
   'drying',
   'brushing',
+  'purification',
+  'carding',
   'baling',
   'silage-production',
   'invoicing',
@@ -217,6 +247,8 @@ const PAGE_ACCESS_LABELS = {
   decortication: 'Decortication',
   drying: 'Drying',
   brushing: 'Brushing',
+  purification: 'Purification',
+  carding: 'Cutting and carding',
   baling: 'Baling',
   'silage-production': 'Silage production',
   invoicing: 'Invoicing',
@@ -233,6 +265,8 @@ const DATA_ENTRY_PERMISSION_IDS = [
   'decortication-entry',
   'drying-entry',
   'brushing-entry',
+  'purification-entry',
+  'carding-entry',
   'baling-entry',
   'silage-entry',
   'stock-delete',
@@ -255,6 +289,8 @@ const DATA_ENTRY_PERMISSION_LABELS = {
   'decortication-entry': 'Decortication shift and production entry',
   'drying-entry': 'Drying entries',
   'brushing-entry': 'Brushing stock and outputs entry',
+  'purification-entry': 'Purification run entry',
+  'carding-entry': 'Carding shift and output entry',
   'baling-entry': 'Baling creation',
   'silage-entry': 'Silage bag creation',
   'stock-delete': 'Delete stock records',
@@ -285,6 +321,8 @@ const DEFAULT_PAGE_ACCESS_BY_EMPLOYEE_ID = {
     'decortication',
     'silage-production',
     'brushing',
+    'purification',
+    'carding',
     'baling',
     'drying',
   ],
@@ -294,6 +332,8 @@ const DEFAULT_PAGE_ACCESS_BY_EMPLOYEE_ID = {
     'decortication',
     'silage-production',
     'brushing',
+    'purification',
+    'carding',
     'baling',
     'drying',
   ],
@@ -421,6 +461,12 @@ function pathnameToRequiredPageId(pathname) {
   if (path.startsWith('/activities/brushing')) {
     return 'brushing'
   }
+  if (path.startsWith('/activities/purification')) {
+    return 'purification'
+  }
+  if (path.startsWith('/activities/carding')) {
+    return 'carding'
+  }
   if (path.startsWith('/activities/baling')) {
     return 'baling'
   }
@@ -495,6 +541,8 @@ function getDefaultDataEntryPermissionsForRole(role) {
       'decortication-entry',
       'drying-entry',
       'brushing-entry',
+      'purification-entry',
+      'carding-entry',
       'baling-entry',
       'silage-entry',
     ]
@@ -507,6 +555,12 @@ function getDefaultDataEntryPermissionsForRole(role) {
   }
   if (role === 'brushing-supervisor') {
     return ['brushing-entry']
+  }
+  if (role === 'reactor-supervisor') {
+    return ['purification-entry']
+  }
+  if (role === 'carding-supervisor') {
+    return ['carding-entry']
   }
   if (role === 'baling-supervisor') {
     return ['baling-entry']
@@ -694,6 +748,10 @@ const employeeRoleOptions = [
   { value: 'dryer', label: 'Dryer' },
   { value: 'brushing-supervisor', label: 'Brushing Supervisor' },
   { value: 'brusher', label: 'Brusher' },
+  { value: 'reactor-supervisor', label: 'Reactor Supervisor' },
+  { value: 'reactor-operator', label: 'Reactor Operator' },
+  { value: 'carding-supervisor', label: 'Carding Supervisor' },
+  { value: 'carding-attendant', label: 'Carding Attendant' },
   { value: 'baling-supervisor', label: 'Baling Supervisor' },
   { value: 'baler', label: 'Baler' },
   { value: 'silage-supervisor', label: 'Silage Supervisor' },
@@ -714,7 +772,7 @@ function getEmployeePermissionSummary(role) {
   if (role === 'harvesting-manager') {
     return 'Can manage employees, active batch number, payroll profile fields, and harvest data entry'
   }
-  if (role === 'production-manager') return 'Can assign decortication staff and capture machine metrics'
+  if (role === 'production-manager') return 'Can assign production staff and capture decortication, purification, and carding metrics'
   if (role === 'decortication-supervisor') return 'Decortication machine supervision'
   if (role === 'decorticator-operator') return 'Decortication machine operations'
   if (role === 'truck-driver') return 'Can create haulage trips (must be clocked in)'
@@ -722,6 +780,10 @@ function getEmployeePermissionSummary(role) {
   if (role === 'dryer') return 'Can record drying bundle weights (must be clocked in)'
   if (role === 'brushing-supervisor') return 'Can issue/return UBR and capture brushing outputs'
   if (role === 'brusher') return 'Brushing line operations and attendance tracking'
+  if (role === 'reactor-supervisor') return 'Can record reactor runs, fibre masses, and water use'
+  if (role === 'reactor-operator') return 'Reactor operations and attendance tracking'
+  if (role === 'carding-supervisor') return 'Can start carding shifts and record purified fibre in and carded fibre out'
+  if (role === 'carding-attendant') return 'Carding line operations and attendance tracking'
   if (role === 'baling-supervisor') return 'Can convert BRS stock into coded bales'
   if (role === 'baler') return 'Bale compression and barcode label operations'
   if (role === 'silage-supervisor') return 'Can create coded silage bag stock records and labels'
@@ -813,6 +875,12 @@ function getInvoiceDescriptionFromProductCode(productCode) {
   }
   if (code === 'TOW') {
     return 'Residue pineapple leaf fibre'
+  }
+  if (code === 'PUR') {
+    return 'Purified pineapple leaf fibre'
+  }
+  if (/^CAR\d+$/.test(code)) {
+    return `Carded pineapple leaf fibre, length ${code.slice(3)}`
   }
   if (code === 'SLG25') {
     return 'Pineapple leaf silage DM25%'
@@ -1364,7 +1432,24 @@ function InvoicingPage({
   const [currency, setCurrency] = useState('USD')
   const [selectedCustomerId, setSelectedCustomerId] = useState(customers[0]?.id ?? '')
   const [lineItems, setLineItems] = useState([])
-  const productCodeOptions = ['UBR', 'BRS', 'TOW', 'SLG25', 'SLG35', 'CUS']
+  const cardedProductCodes = Array.from(
+    new Set(
+      [
+        ...(invoiceStockCatalog ?? []).map((option) => option.productSuffix),
+        ...lineItems.map((item) => item.product),
+      ].filter((code) => /^CAR\d+$/.test(String(code ?? ''))),
+    ),
+  ).sort()
+  const productCodeOptions = [
+    'UBR',
+    'BRS',
+    'TOW',
+    'PUR',
+    ...cardedProductCodes,
+    'SLG25',
+    'SLG35',
+    'CUS',
+  ]
   const CUSTOM_INVOICE_DESCRIPTION_LIMIT = 30
   const [hsCode, setHsCode] = useState('53050090')
   const [paymentTerms, setPaymentTerms] = useState('30% deposit, balance upon arrival at port')
@@ -3439,6 +3524,8 @@ function EmployeeRecordPage({
   dryingRecords,
   brushingStockMovements,
   brushingDailyRecords,
+  purificationRuns = [],
+  cardingShifts = [],
   balingAssignments,
   balingRecords,
   silageRecords,
@@ -3468,6 +3555,8 @@ function EmployeeRecordPage({
     ...dryingRecords.map((item) => item.weighedDate),
     ...brushingStockMovements.map((item) => item.date),
     ...brushingDailyRecords.map((item) => item.date),
+    ...purificationRuns.map((item) => item.date),
+    ...cardingShifts.map((item) => item.date),
     ...balingAssignments.map((item) => item.date),
     ...balingRecords.map((item) => item.date),
     ...silageRecords.map((item) => item.date),
@@ -3526,6 +3615,24 @@ function EmployeeRecordPage({
   const brushingAsBrusher = brushingDailyRecords.filter((item) =>
     item.brusherIds?.includes(employee.id) && isWithinRange(item.date),
   )
+  const purificationAsSupervisor = purificationRuns.filter(
+    (item) => item.supervisorId === employee.id && isWithinRange(item.date),
+  )
+  const purificationAsOperator = purificationRuns.filter(
+    (item) => item.operatorIds?.includes(employee.id) && isWithinRange(item.date),
+  )
+  const cardingAsSupervisor = cardingShifts
+    .filter((item) => item.supervisorId === employee.id && isWithinRange(item.date))
+    .map((item) => ({
+      ...item,
+      sourceStockCode: `CAR${item.fibreLength} · shift ${item.shiftNumber}`,
+    }))
+  const cardingAsAttendant = cardingShifts
+    .filter((item) => item.attendantIds?.includes(employee.id) && isWithinRange(item.date))
+    .map((item) => ({
+      ...item,
+      sourceStockCode: `CAR${item.fibreLength} · shift ${item.shiftNumber}`,
+    }))
   const balingAsSupervisor = balingRecords.filter(
     (item) => item.supervisorIds?.includes(employee.id) && isWithinRange(item.date),
   )
@@ -3574,6 +3681,10 @@ function EmployeeRecordPage({
     { key: 'brushing-stock-recorder', area: 'Brushing', role: 'Stock recorder', records: brushingStockAsRecorder.length },
     { key: 'brushing-supervisor', area: 'Brushing', role: 'Supervisor', records: brushingAsSupervisor.length },
     { key: 'brushing-brusher', area: 'Brushing', role: 'Brusher', records: brushingAsBrusher.length },
+    { key: 'purification-supervisor', area: 'Purification', role: 'Supervisor', records: purificationAsSupervisor.length },
+    { key: 'purification-operator', area: 'Purification', role: 'Operator', records: purificationAsOperator.length },
+    { key: 'carding-supervisor', area: 'Carding', role: 'Supervisor', records: cardingAsSupervisor.length },
+    { key: 'carding-attendant', area: 'Carding', role: 'Attendant', records: cardingAsAttendant.length },
     { key: 'baling-supervisor', area: 'Baling', role: 'Supervisor', records: balingAsSupervisor.length },
     { key: 'baling-baler', area: 'Baling', role: 'Baler', records: balingAttendanceDays },
     { key: 'silage-supervisor', area: 'Silage', role: 'Supervisor', records: silageAsSupervisor.length },
@@ -3684,6 +3795,26 @@ function EmployeeRecordPage({
     }, 0)
   }
 
+  function recordsForRoleView(view = selectedRoleView) {
+    if (view === 'haulage-driver') return haulageAsDriver
+    if (view === 'haulage-loader') return haulageAsLoader
+    if (view === 'decortication-supervisor') return decorticationAsSupervisor
+    if (view === 'decortication-operator') return decorticationAsOperator
+    if (view === 'drying-dryer') return dryingAsDryer
+    if (view === 'brushing-stock-recorder') return brushingStockAsRecorder
+    if (view === 'brushing-supervisor') return brushingAsSupervisor
+    if (view === 'brushing-brusher') return brushingAsBrusher
+    if (view === 'purification-supervisor') return purificationAsSupervisor
+    if (view === 'purification-operator') return purificationAsOperator
+    if (view === 'carding-supervisor') return cardingAsSupervisor
+    if (view === 'carding-attendant') return cardingAsAttendant
+    if (view === 'baling-supervisor') return balingAsSupervisor
+    if (view === 'baling-baler') return balingAsBalerWithTeam
+    if (view === 'silage-supervisor') return silageAsSupervisor
+    if (view === 'silage-operator') return silageAsOperator
+    return []
+  }
+
   function renderRoleDetail() {
     if (selectedRoleView === 'harvest-harvester') {
       return (
@@ -3790,48 +3921,20 @@ function EmployeeRecordPage({
                 <td><strong>Average</strong></td>
                 <td>
                   <strong>
-                    {
-                      (() => {
-                        const selectedRecords =
-                          selectedRoleView === 'haulage-driver' ? haulageAsDriver
-                          : selectedRoleView === 'haulage-loader' ? haulageAsLoader
-                          : selectedRoleView === 'decortication-supervisor' ? decorticationAsSupervisor
-                          : selectedRoleView === 'decortication-operator' ? decorticationAsOperator
-                          : selectedRoleView === 'drying-dryer' ? dryingAsDryer
-                          : selectedRoleView === 'brushing-stock-recorder' ? brushingStockAsRecorder
-                          : selectedRoleView === 'brushing-supervisor' ? brushingAsSupervisor
-                          : selectedRoleView === 'brushing-brusher' ? brushingAsBrusher
-                          : selectedRoleView === 'baling-supervisor' ? balingAsSupervisor
-                          : selectedRoleView === 'baling-baler' ? balingAsBalerWithTeam
-                          : selectedRoleView === 'silage-supervisor' ? silageAsSupervisor
-                          : selectedRoleView === 'silage-operator' ? silageAsOperator
-                          : []
-                        const uniqueDays = new Set(
-                          selectedRecords.map((item) => item.date ?? item.weighedDate).filter(Boolean),
-                        ).size
-                        if (selectedRecords.length === 0 || uniqueDays === 0) {
-                          return '0 records per day'
-                        }
-                        return `${Number((selectedRecords.length / uniqueDays).toFixed(1))} records per day`
-                      })()
-                    }
+                    {(() => {
+                      const selectedRecords = recordsForRoleView()
+                      const uniqueDays = new Set(
+                        selectedRecords.map((item) => item.date ?? item.weighedDate).filter(Boolean),
+                      ).size
+                      if (selectedRecords.length === 0 || uniqueDays === 0) {
+                        return '0 records per day'
+                      }
+                      return `${Number((selectedRecords.length / uniqueDays).toFixed(1))} records per day`
+                    })()}
                   </strong>
                 </td>
               </tr>
-              {(selectedRoleView === 'haulage-driver' ? haulageAsDriver
-                : selectedRoleView === 'haulage-loader' ? haulageAsLoader
-                : selectedRoleView === 'decortication-supervisor' ? decorticationAsSupervisor
-                : selectedRoleView === 'decortication-operator' ? decorticationAsOperator
-                : selectedRoleView === 'drying-dryer' ? dryingAsDryer
-                : selectedRoleView === 'brushing-stock-recorder' ? brushingStockAsRecorder
-                : selectedRoleView === 'brushing-supervisor' ? brushingAsSupervisor
-                : selectedRoleView === 'brushing-brusher' ? brushingAsBrusher
-                : selectedRoleView === 'baling-supervisor' ? balingAsSupervisor
-                : selectedRoleView === 'baling-baler' ? balingAsBalerWithTeam
-                : selectedRoleView === 'silage-supervisor' ? silageAsSupervisor
-                : selectedRoleView === 'silage-operator' ? silageAsOperator
-                : []
-              ).map((item, index) => (
+              {recordsForRoleView().map((item, index) => (
                 <tr key={item.id ?? `${selectedRoleView}-${index + 1}`}>
                   <td>{formatDisplayDate(item.date ?? item.weighedDate)}</td>
                   <td>
@@ -3851,18 +3954,25 @@ function EmployeeRecordPage({
               ))}
               {(selectedRoleView !== 'harvest-harvester' &&
                 selectedRoleView !== 'harvest-recorder' &&
-                ((selectedRoleView === 'haulage-driver' && haulageAsDriver.length === 0) ||
-                  (selectedRoleView === 'haulage-loader' && haulageAsLoader.length === 0) ||
-                  (selectedRoleView === 'decortication-supervisor' && decorticationAsSupervisor.length === 0) ||
-                  (selectedRoleView === 'decortication-operator' && decorticationAsOperator.length === 0) ||
-                  (selectedRoleView === 'drying-dryer' && dryingAsDryer.length === 0) ||
-                  (selectedRoleView === 'brushing-stock-recorder' && brushingStockAsRecorder.length === 0) ||
-                  (selectedRoleView === 'brushing-supervisor' && brushingAsSupervisor.length === 0) ||
-                  (selectedRoleView === 'brushing-brusher' && brushingAsBrusher.length === 0) ||
-                  (selectedRoleView === 'baling-supervisor' && balingAsSupervisor.length === 0) ||
-                  (selectedRoleView === 'baling-baler' && balingAsBalerWithTeam.length === 0) ||
-                  (selectedRoleView === 'silage-supervisor' && silageAsSupervisor.length === 0) ||
-                  (selectedRoleView === 'silage-operator' && silageAsOperator.length === 0))) && (
+                recordsForRoleView().length === 0 &&
+                [
+                  'haulage-driver',
+                  'haulage-loader',
+                  'decortication-supervisor',
+                  'decortication-operator',
+                  'drying-dryer',
+                  'brushing-stock-recorder',
+                  'brushing-supervisor',
+                  'brushing-brusher',
+                  'purification-supervisor',
+                  'purification-operator',
+                  'carding-supervisor',
+                  'carding-attendant',
+                  'baling-supervisor',
+                  'baling-baler',
+                  'silage-supervisor',
+                  'silage-operator',
+                ].includes(selectedRoleView)) && (
                 <tr>
                   <td colSpan="2">No records for this role in the selected period.</td>
                 </tr>
@@ -7766,12 +7876,13 @@ function BalingPage({
     setSelectedTeamBalerIds(existing?.balerIds ?? [])
   }, [teamAssignmentDate, balingAssignments])
 
-  const visibleLooseStockOptions =
+  const visibleLooseStockOptions = (
     selectedBatchFilter === 'all'
       ? availableLooseStockOptions
       : availableLooseStockOptions.filter(
           (item) => normalizeBatchNumber(item.batchNumber) === selectedBatchFilter,
         )
+  ).filter((item) => isTraditionalBaleSource(item.stockCode))
   const filteredRecords =
     selectedBatchFilter === 'all'
       ? balingRecords.filter((record) => record.date >= dateFrom && record.date <= dateTo)
@@ -8839,6 +8950,8 @@ function StockPage({
   dryingRecords,
   brushingStockMovements,
   brushingDailyRecords,
+  purificationRuns = [],
+  cardingShifts = [],
   balingRecords,
   silageRecords,
   invoiceStockIssues,
@@ -8884,6 +8997,14 @@ function StockPage({
       : brushingDailyRecords.filter(
           (item) => normalizeBatchNumber(item.batchNumber) === selectedBatchFilter,
         )
+  const filteredFinishing = finishingRecordsForStockView({
+    purificationRuns,
+    cardingShifts,
+    showAbsoluteStock,
+    selectedBatchFilter,
+    dateFrom,
+    dateTo,
+  })
   const filteredBalingRecords =
     showAbsoluteStock
       ? balingRecords
@@ -8942,6 +9063,12 @@ function StockPage({
     stockMap[sourceCode].totalKg -= item.baleWeightKg
     stockMap[sourceCode].movements += 1
   })
+  applyFinishingStock(
+    stockMap,
+    filteredFinishing.purificationRuns,
+    filteredFinishing.cardingShifts,
+    { countMovements: true },
+  )
   invoiceStockIssues.forEach((issue) => {
     const code = issue.stockCode
     if (!stockMap[code]) {
@@ -9026,6 +9153,8 @@ function StockPage({
       silageRecords,
       invoiceStockIssues,
       invoiceDocuments,
+      purificationRuns,
+      cardingShifts,
     })
     return allMovements.filter((movement) => {
       if (showAbsoluteStock) {
@@ -9047,6 +9176,8 @@ function StockPage({
     silageRecords,
     invoiceStockIssues,
     invoiceDocuments,
+    purificationRuns,
+    cardingShifts,
     showAbsoluteStock,
     selectedBatchFilter,
     dateFrom,
@@ -9235,7 +9366,9 @@ function StockPage({
         Loose stock codes (for example 2026-000-01-BRS) show fibre not yet baled. Baled series codes
         (for example 2026-000-01-BRS-100) show completed bales. Silage series codes (for example
         (for example 2026-000-SLG35-050) show bagged silage stock. Individual bag labels append a
-        four-digit serial (for example 2026-000-SLG35-050-0001).
+        four-digit serial (for example 2026-000-SLG35-050-0001). Purified fibre keeps the same
+        traceability code with grade PUR (for example 2026-000-01-PUR). Carded fibre uses CAR plus
+        the fibre length (for example 2026-000-01-CAR80).
       </p>
 
       <div className="form-grid">
@@ -10494,6 +10627,12 @@ function hydrateAppState(data, setters) {
   if (Array.isArray(hydratedData.brushingDailyRecords)) {
     setters.setBrushingDailyRecords(hydratedData.brushingDailyRecords)
   }
+  if (Array.isArray(hydratedData.purificationRuns)) {
+    setters.setPurificationRuns(hydratedData.purificationRuns)
+  }
+  if (Array.isArray(hydratedData.cardingShifts)) {
+    setters.setCardingShifts(hydratedData.cardingShifts)
+  }
   if (Array.isArray(hydratedData.balingRecords)) setters.setBalingRecords(hydratedData.balingRecords)
   if (Array.isArray(hydratedData.balingAssignments)) {
     setters.setBalingAssignments(hydratedData.balingAssignments)
@@ -10559,6 +10698,12 @@ function App() {
   const [brushingDateFrom, setBrushingDateFrom] = useState(today)
   const [brushingDateTo, setBrushingDateTo] = useState(today)
   const [brushingBatchFilter, setBrushingBatchFilter] = useState('all')
+  const [purificationDateFrom, setPurificationDateFrom] = useState(today)
+  const [purificationDateTo, setPurificationDateTo] = useState(today)
+  const [purificationBatchFilter, setPurificationBatchFilter] = useState('all')
+  const [cardingDateFrom, setCardingDateFrom] = useState(today)
+  const [cardingDateTo, setCardingDateTo] = useState(today)
+  const [cardingBatchFilter, setCardingBatchFilter] = useState('all')
   const [balingDateFrom, setBalingDateFrom] = useState(today)
   const [balingDateTo, setBalingDateTo] = useState(today)
   const [balingBatchFilter, setBalingBatchFilter] = useState('all')
@@ -10588,6 +10733,8 @@ function App() {
   const [dryingRecords, setDryingRecords] = useState([])
   const [brushingStockMovements, setBrushingStockMovements] = useState([])
   const [brushingDailyRecords, setBrushingDailyRecords] = useState([])
+  const [purificationRuns, setPurificationRuns] = useState([])
+  const [cardingShifts, setCardingShifts] = useState([])
   const [balingRecords, setBalingRecords] = useState([])
   const [balingAssignments, setBalingAssignments] = useState([])
   const [silageRecords, setSilageRecords] = useState([])
@@ -10627,6 +10774,8 @@ function App() {
       setDryingRecords,
       setBrushingStockMovements,
       setBrushingDailyRecords,
+      setPurificationRuns,
+      setCardingShifts,
       setBalingRecords,
       setBalingAssignments,
       setSilageRecords,
@@ -10676,6 +10825,8 @@ function App() {
         dryingRecords,
         brushingStockMovements,
         brushingDailyRecords,
+        purificationRuns,
+        cardingShifts,
         balingRecords,
         balingAssignments,
         silageRecords,
@@ -10713,6 +10864,8 @@ function App() {
       dryingRecords,
       brushingStockMovements,
       brushingDailyRecords,
+      purificationRuns,
+      cardingShifts,
       balingRecords,
       balingAssignments,
       silageRecords,
@@ -10862,6 +11015,7 @@ function App() {
       }
       stockMap[code].totalKg -= item.baleWeightKg
     })
+    applyFinishingStock(stockMap, purificationRuns, cardingShifts)
     invoiceStockIssues.forEach((issue) => {
       const code = issue.stockCode
       if (!stockMap[code]) {
@@ -10877,7 +11031,7 @@ function App() {
       .map((item) => ({ ...item, totalKg: Number(item.totalKg.toFixed(1)) }))
       .filter((item) => item.totalKg > 0)
       .sort((a, b) => b.totalKg - a.totalKg)
-  }, [dryingRecords, brushingStockMovements, brushingDailyRecords, balingRecords, invoiceStockIssues])
+  }, [dryingRecords, brushingStockMovements, brushingDailyRecords, balingRecords, invoiceStockIssues, purificationRuns, cardingShifts])
   const invoiceStockCatalog = useMemo(
     () =>
       computeAbsoluteStockCatalog({
@@ -10888,6 +11042,8 @@ function App() {
         balingAssignments,
         silageRecords,
         invoiceStockIssues,
+        purificationRuns,
+        cardingShifts,
       }),
     [
       dryingRecords,
@@ -10896,6 +11052,8 @@ function App() {
       balingRecords,
       silageRecords,
       invoiceStockIssues,
+      purificationRuns,
+      cardingShifts,
     ],
   )
   function handleAddEmployee(input) {
@@ -11846,6 +12004,281 @@ function App() {
     setBrushingDailyRecords((prev) => [{ id: `BRD-${Date.now()}`, ...input }, ...prev])
   }
 
+  function namedFinishingTeam(supervisorId, memberIds) {
+    const supervisor = supervisorId
+      ? employees.find((employee) => employee.id === supervisorId)
+      : null
+    if (supervisorId && !supervisor) {
+      return { error: 'Selected supervisor could not be found.' }
+    }
+    const members = []
+    for (const id of memberIds ?? []) {
+      const employee = employees.find((item) => item.id === id)
+      if (employee && !members.some((item) => item.id === employee.id)) {
+        members.push(employee)
+      }
+    }
+    return {
+      error: '',
+      supervisorId: supervisor?.id ?? '',
+      supervisorName: supervisor?.name ?? '',
+      memberIds: members.map((employee) => employee.id),
+      memberNames: members.map((employee) => employee.name),
+    }
+  }
+
+  function handleSavePurificationRun(input) {
+    if (!canMutateAppData(currentUser) || !currentUserDataEntryPermissions.has('purification-entry')) {
+      return { ok: false, message: 'You do not have permission to record purification runs.' }
+    }
+    const shiftNumber = parseShiftNumber(input.shiftNumber)
+    if (!input.date || shiftNumber == null) {
+      return { ok: false, message: 'Choose a date and shift 1, 2, or 3.' }
+    }
+    const production = normalizePurificationProduction(input)
+    if (production.error) {
+      return { ok: false, message: production.error }
+    }
+    const team = namedFinishingTeam(input.supervisorId, input.operatorIds)
+    if (team.error) {
+      return { ok: false, message: team.error }
+    }
+    const existing = input.id ? purificationRuns.find((run) => run.id === input.id) : null
+    if (input.id && !existing) {
+      return { ok: false, message: 'Purification run could not be found.' }
+    }
+    const runNumber = existing
+      ? Number(existing.runNumber)
+      : nextPurificationRunNumber(purificationRuns, input.date, shiftNumber)
+    const conflict = findPurificationRunConflict(
+      purificationRuns,
+      { date: input.date, shiftNumber, runNumber },
+      existing?.id ?? '',
+    )
+    if (conflict) {
+      return {
+        ok: false,
+        message: `Shift ${shiftNumber} run ${runNumber} on ${input.date} already exists.`,
+      }
+    }
+    const nextRun = {
+      ...(existing ?? {}),
+      id: existing?.id ?? `PRUN-${Date.now()}`,
+      date: input.date,
+      shiftNumber,
+      runNumber,
+      supervisorId: team.supervisorId,
+      supervisorName: team.supervisorName,
+      operatorIds: team.memberIds,
+      operatorNames: team.memberNames,
+      ...production.value,
+    }
+    const shortfall = describeStockShortfall(balancesByStockCode(availableLooseStockOptions), [
+      ...purificationStockDeltas(existing, -1),
+      ...purificationStockDeltas(nextRun, 1),
+    ])
+    if (shortfall) {
+      return { ok: false, message: shortfall }
+    }
+    setPurificationRuns((prev) =>
+      existing
+        ? prev.map((run) => (run.id === existing.id ? nextRun : run))
+        : [nextRun, ...prev],
+    )
+    return {
+      ok: true,
+      message: existing
+        ? `Shift ${shiftNumber} run ${runNumber} updated.`
+        : `Shift ${shiftNumber} run ${runNumber} saved.`,
+    }
+  }
+
+  function handleDeletePurificationRun(runId) {
+    if (!canMutateAppData(currentUser) || !currentUserDataEntryPermissions.has('purification-entry')) {
+      return { ok: false, message: 'You do not have permission to delete purification runs.' }
+    }
+    const existing = purificationRuns.find((run) => run.id === runId)
+    if (!existing) {
+      return { ok: false, message: 'Purification run could not be found.' }
+    }
+    const shortfall = describeStockShortfall(balancesByStockCode(availableLooseStockOptions), [
+      ...purificationStockDeltas(existing, -1),
+    ])
+    if (shortfall) {
+      return {
+        ok: false,
+        message: 'This run cannot be deleted because its purified fibre has already been used.',
+      }
+    }
+    setPurificationRuns((prev) => prev.filter((run) => run.id !== runId))
+    markEntitiesDeleted('purificationRuns', runId)
+    return {
+      ok: true,
+      message: `Shift ${existing.shiftNumber} run ${existing.runNumber} deleted.`,
+    }
+  }
+
+  function handleSaveCardingShift(input) {
+    if (!canMutateAppData(currentUser) || !currentUserDataEntryPermissions.has('carding-entry')) {
+      return { ok: false, message: 'You do not have permission to record carding shifts.', shiftId: '' }
+    }
+    const identity = normalizeCardingShiftIdentity(input)
+    if (identity.error) {
+      return { ok: false, message: identity.error, shiftId: '' }
+    }
+    const team = namedFinishingTeam(input.supervisorId, input.attendantIds)
+    if (team.error) {
+      return { ok: false, message: team.error, shiftId: '' }
+    }
+    const existing = input.id ? cardingShifts.find((shift) => shift.id === input.id) : null
+    if (input.id && !existing) {
+      return { ok: false, message: 'Carding shift could not be found.', shiftId: '' }
+    }
+    const conflict = findCardingShiftConflict(cardingShifts, identity.value, existing?.id ?? '')
+    if (conflict) {
+      return {
+        ok: false,
+        message: `A carding shift ${identity.value.shiftNumber} on ${identity.value.date} already exists.`,
+        shiftId: '',
+      }
+    }
+    const hasOutput = (existing?.lines ?? []).some((line) => Number(line.outputKg) > 0)
+    if (existing && hasOutput && Number(existing.fibreLength) !== identity.value.fibreLength) {
+      return {
+        ok: false,
+        message: 'Fibre length is fixed once carded output has been recorded for this shift.',
+        shiftId: existing.id,
+      }
+    }
+    const nextShift = {
+      ...(existing ?? { lines: [] }),
+      id: existing?.id ?? `CSH-${Date.now()}`,
+      date: identity.value.date,
+      shiftNumber: identity.value.shiftNumber,
+      fibreLength: identity.value.fibreLength,
+      supervisorId: team.supervisorId,
+      supervisorName: team.supervisorName,
+      attendantIds: team.memberIds,
+      attendantNames: team.memberNames,
+      lines: existing?.lines ?? [],
+    }
+    setCardingShifts((prev) =>
+      existing
+        ? prev.map((shift) => (shift.id === existing.id ? nextShift : shift))
+        : [nextShift, ...prev],
+    )
+    return {
+      ok: true,
+      shiftId: nextShift.id,
+      message: existing
+        ? `Shift ${nextShift.shiftNumber} on ${nextShift.date} updated.`
+        : `Shift ${nextShift.shiftNumber} started. Record the fibre for this shift next.`,
+    }
+  }
+
+  function handleDeleteCardingShift(shiftId) {
+    if (!canMutateAppData(currentUser) || !currentUserDataEntryPermissions.has('carding-entry')) {
+      return { ok: false, message: 'You do not have permission to delete carding shifts.' }
+    }
+    const existing = cardingShifts.find((shift) => shift.id === shiftId)
+    if (!existing) {
+      return { ok: false, message: 'Carding shift could not be found.' }
+    }
+    const deltas = (existing.lines ?? []).flatMap((line) =>
+      cardingLineStockDeltas(line, existing.fibreLength, -1),
+    )
+    const shortfall = describeStockShortfall(balancesByStockCode(availableLooseStockOptions), deltas)
+    if (shortfall) {
+      return {
+        ok: false,
+        message: 'This shift cannot be deleted because its carded fibre has already been used.',
+      }
+    }
+    setCardingShifts((prev) => prev.filter((shift) => shift.id !== shiftId))
+    markEntitiesDeleted('cardingShifts', shiftId)
+    return {
+      ok: true,
+      message: `Shift ${existing.shiftNumber} on ${existing.date} deleted.`,
+    }
+  }
+
+  function handleSaveCardingLine(input) {
+    if (!canMutateAppData(currentUser) || !currentUserDataEntryPermissions.has('carding-entry')) {
+      return { ok: false, message: 'You do not have permission to record carding output.' }
+    }
+    const shift = cardingShifts.find((item) => item.id === input.shiftId)
+    if (!shift) {
+      return { ok: false, message: 'Start a carding shift before recording output.' }
+    }
+    const production = normalizeCardingLine(input, shift.fibreLength)
+    if (production.error) {
+      return { ok: false, message: production.error }
+    }
+    const existingLine = input.lineId
+      ? (shift.lines ?? []).find((line) => line.id === input.lineId)
+      : null
+    if (input.lineId && !existingLine) {
+      return { ok: false, message: 'Carding output record could not be found.' }
+    }
+    const nextLine = {
+      ...(existingLine ?? {}),
+      id: existingLine?.id ?? `CLN-${Date.now()}`,
+      ...production.value,
+    }
+    const shortfall = describeStockShortfall(balancesByStockCode(availableLooseStockOptions), [
+      ...cardingLineStockDeltas(existingLine, shift.fibreLength, -1),
+      ...cardingLineStockDeltas(nextLine, shift.fibreLength, 1),
+    ])
+    if (shortfall) {
+      return { ok: false, message: shortfall }
+    }
+    setCardingShifts((prev) =>
+      prev.map((item) => {
+        if (item.id !== shift.id) {
+          return item
+        }
+        const lines = existingLine
+          ? (item.lines ?? []).map((line) => (line.id === existingLine.id ? nextLine : line))
+          : [nextLine, ...(item.lines ?? [])]
+        return { ...item, lines }
+      }),
+    )
+    return {
+      ok: true,
+      message: existingLine
+        ? `Carding output updated. Stock code ${nextLine.outputStockCode}.`
+        : `Carding output saved. Stock code ${nextLine.outputStockCode}.`,
+    }
+  }
+
+  function handleDeleteCardingLine(shiftId, lineId) {
+    if (!canMutateAppData(currentUser) || !currentUserDataEntryPermissions.has('carding-entry')) {
+      return { ok: false, message: 'You do not have permission to delete carding output.' }
+    }
+    const shift = cardingShifts.find((item) => item.id === shiftId)
+    const existingLine = shift?.lines?.find((line) => line.id === lineId)
+    if (!shift || !existingLine) {
+      return { ok: false, message: 'Carding output record could not be found.' }
+    }
+    const shortfall = describeStockShortfall(balancesByStockCode(availableLooseStockOptions), [
+      ...cardingLineStockDeltas(existingLine, shift.fibreLength, -1),
+    ])
+    if (shortfall) {
+      return {
+        ok: false,
+        message: 'This output cannot be deleted because the carded fibre has already been used.',
+      }
+    }
+    setCardingShifts((prev) =>
+      prev.map((item) =>
+        item.id === shift.id
+          ? { ...item, lines: (item.lines ?? []).filter((line) => line.id !== lineId) }
+          : item,
+      ),
+    )
+    return { ok: true, message: 'Carding output removed and stock reversed.' }
+  }
+
   function handleCreateBales(inputRecords) {
     setBalingRecords((prev) => [
       ...inputRecords.map((item, index) => ({ id: `BAL-${Date.now()}-${index + 1}`, ...item })),
@@ -12555,6 +12988,8 @@ function App() {
                 dryingRecords={dryingRecords}
                 brushingStockMovements={brushingStockMovements}
                 brushingDailyRecords={brushingDailyRecords}
+                purificationRuns={purificationRuns}
+                cardingShifts={cardingShifts}
                 balingAssignments={balingAssignments}
                 balingRecords={balingRecords}
                 silageRecords={silageRecords}
@@ -12767,6 +13202,50 @@ function App() {
             }
           />
           <Route
+            path="/activities/purification"
+            element={
+              <PurificationPage
+                currentUserDataEntryPermissions={currentUserDataEntryPermissions}
+                employees={employees}
+                clockedInIds={clockedInIds}
+                purificationRuns={purificationRuns}
+                looseStockOptions={availableLooseStockOptions}
+                onSavePurificationRun={handleSavePurificationRun}
+                onDeletePurificationRun={handleDeletePurificationRun}
+                dateFrom={purificationDateFrom}
+                dateTo={purificationDateTo}
+                onDateFromChange={setPurificationDateFrom}
+                onDateToChange={setPurificationDateTo}
+                selectedBatchFilter={purificationBatchFilter}
+                onSelectedBatchFilterChange={setPurificationBatchFilter}
+                availableBatches={availableBatchNumbers}
+              />
+            }
+          />
+          <Route
+            path="/activities/carding"
+            element={
+              <CardingPage
+                currentUserDataEntryPermissions={currentUserDataEntryPermissions}
+                employees={employees}
+                clockedInIds={clockedInIds}
+                cardingShifts={cardingShifts}
+                looseStockOptions={availableLooseStockOptions}
+                onSaveCardingShift={handleSaveCardingShift}
+                onDeleteCardingShift={handleDeleteCardingShift}
+                onSaveCardingLine={handleSaveCardingLine}
+                onDeleteCardingLine={handleDeleteCardingLine}
+                dateFrom={cardingDateFrom}
+                dateTo={cardingDateTo}
+                onDateFromChange={setCardingDateFrom}
+                onDateToChange={setCardingDateTo}
+                selectedBatchFilter={cardingBatchFilter}
+                onSelectedBatchFilterChange={setCardingBatchFilter}
+                availableBatches={availableBatchNumbers}
+              />
+            }
+          />
+          <Route
             path="/activities/baling"
             element={
               <BalingPage
@@ -12845,6 +13324,8 @@ function App() {
                 activity.id !== 'decortication' &&
                 activity.id !== 'drying' &&
                 activity.id !== 'brushing' &&
+                activity.id !== 'purification' &&
+                activity.id !== 'carding' &&
                 activity.id !== 'baling' &&
                 activity.id !== 'silage-production' &&
                 activity.id !== 'invoicing',
@@ -12866,6 +13347,8 @@ function App() {
                 dryingRecords={dryingRecords}
                 brushingStockMovements={brushingStockMovements}
                 brushingDailyRecords={brushingDailyRecords}
+                purificationRuns={purificationRuns}
+                cardingShifts={cardingShifts}
                 balingRecords={balingRecords}
                 silageRecords={silageRecords}
                 invoiceStockIssues={invoiceStockIssues}
