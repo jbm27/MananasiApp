@@ -392,11 +392,7 @@ export default function CardingPage({
           <p>{filteredShifts.length}</p>
         </article>
         <article className="card">
-          <h3>Purified Fibre In</h3>
-          <p>{Number(totalInputKg.toFixed(1)).toLocaleString()} kg</p>
-        </article>
-        <article className="card">
-          <h3>Carded Fibre Out</h3>
+          <h3>Carded Fibre</h3>
           <p>{Number(totalOutputKg.toFixed(1)).toLocaleString()} kg</p>
         </article>
         <article className="card">
