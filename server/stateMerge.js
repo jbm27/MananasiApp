@@ -18,6 +18,7 @@ export const MERGE_BY_ID_KEYS = [
   'brushingStockMovements',
   'brushingDailyRecords',
   'purificationRuns',
+  'purificationReceipts',
   'cardingShifts',
   'balingRecords',
   'silageRecords',

@@ -1,4 +1,10 @@
-import { applyFinishingStock, appendFinishingMovements } from './fibreFinishing.js'
+import {
+  applyFinishingStock,
+  appendFinishingMovements,
+  appendPurificationReceiptMovements,
+  applyPurificationReceipts,
+  isBaleHeldInStock,
+} from './fibreFinishing.js'
 import { getSilageBagSeriesCode, getSilageRecordSerial } from './silageCodes.js'
 import { brushingOutputCodes, buildStockCode, canonicalizeFibreStockCode } from './stockCodes.js'
 
@@ -25,6 +31,7 @@ export const STOCK_DASHBOARD_CATEGORIES = [
   { key: 'ubrLoose', label: 'Unbrushed loose fibre' },
   { key: 'brsLoose', label: 'Brushed loose fibre' },
   { key: 'towLoose', label: 'TOW fibre' },
+  { key: 'ppurLoose', label: 'Pre-purification fibre' },
   { key: 'purLoose', label: 'Purified loose fibre' },
   { key: 'carLoose', label: 'Carded loose fibre' },
   { key: 'brsBaled', label: 'Brushed baled fibre' },
@@ -45,6 +52,9 @@ export function getStockDashboardCategory(row) {
     return 'silage'
   }
   const last = parts[parts.length - 1] ?? ''
+  if (last === 'PPUR') {
+    return 'ppurLoose'
+  }
   if (last === 'PUR') {
     return 'purLoose'
   }
@@ -98,7 +108,7 @@ export function getProductSuffixFromStockCode(stockCode, stockForm) {
       return gradeMatch[1]
     }
   }
-  const looseMatch = code.match(/-(UBR|BRS|TOW|PUR)$/)
+  const looseMatch = code.match(/-(UBR|BRS|TOW|PPUR|PUR)$/)
   if (looseMatch) {
     return looseMatch[1]
   }
@@ -127,6 +137,7 @@ export function computeAbsoluteStockCatalog({
   invoiceStockIssues = [],
   purificationRuns = [],
   cardingShifts = [],
+  purificationReceipts = [],
 }) {
   const stockMap = {}
 
@@ -180,6 +191,7 @@ export function computeAbsoluteStockCatalog({
     stockMap[sourceCode].totalKg -= item.baleWeightKg
   })
 
+  applyPurificationReceipts(stockMap, purificationReceipts)
   applyFinishingStock(stockMap, purificationRuns, cardingShifts)
 
   invoiceStockIssues.forEach((issue) => {
@@ -205,7 +217,7 @@ export function computeAbsoluteStockCatalog({
     .filter((item) => item.totalKg > 0)
 
   const baledStockRows = Object.values(
-    balingRecords.reduce((map, item) => {
+    balingRecords.filter(isBaleHeldInStock).reduce((map, item) => {
       const seriesCode = canonicalizeFibreStockCode(item.baleSeriesCode)
       if (!map[seriesCode]) {
         map[seriesCode] = {
@@ -381,8 +393,9 @@ function consumeBaledStock(balingRecords, baleSeriesCode, quantityKg) {
   const matching = balingRecords
     .filter(
       (record) =>
+        isBaleHeldInStock(record) &&
         canonicalizeFibreStockCode(record.baleSeriesCode) ===
-        canonicalizeFibreStockCode(baleSeriesCode),
+          canonicalizeFibreStockCode(baleSeriesCode),
     )
     .sort((a, b) => getBaleSerialFromCode(a.baleCode) - getBaleSerialFromCode(b.baleCode))
   let remaining = quantityKg
@@ -563,6 +576,7 @@ export function buildStockMovements({
   invoiceDocuments = [],
   purificationRuns = [],
   cardingShifts = [],
+  purificationReceipts = [],
 } = {}) {
   const movements = []
   const groupedMovements = new Map()
@@ -672,6 +686,7 @@ export function buildStockMovements({
     }
   })
 
+  appendPurificationReceiptMovements(movements, purificationReceipts)
   appendFinishingMovements(movements, purificationRuns, cardingShifts)
 
   const balingSeriesByGroup = balingRecords.reduce((map, item) => {

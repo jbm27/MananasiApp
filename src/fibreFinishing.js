@@ -1,6 +1,6 @@
 /** Purification runs and carding shifts, and the stock they move. */
 
-import { canonicalizeFibreStockCode } from './stockCodes.js'
+import { buildStockCode, canonicalizeFibreStockCode } from './stockCodes.js'
 
 export const SHIFT_NUMBERS = [1, 2, 3]
 
@@ -63,6 +63,20 @@ export function isUbrLooseStockCode(stockCode) {
   return /-UBR$/.test(String(stockCode ?? '').trim())
 }
 
+export function isPpurLooseStockCode(stockCode) {
+  return /-PPUR$/.test(String(stockCode ?? '').trim())
+}
+
+export function isPurificationSourceStockCode(stockCode) {
+  const code = canonicalizeFibreStockCode(stockCode)
+  return isPpurLooseStockCode(code) || isUbrLooseStockCode(code)
+}
+
+/** A bale still in baled stock. Received bales have been broken into PPUR. */
+export function isBaleHeldInStock(record) {
+  return Boolean(record) && !record.purificationReceiptId
+}
+
 export function isPurLooseStockCode(stockCode) {
   return /-PUR$/.test(String(stockCode ?? '').trim())
 }
@@ -93,10 +107,108 @@ export function machineFromTraceableStockCode(stockCode) {
 
 export function purificationOutputStockCode(sourceStockCode) {
   const code = canonicalizeFibreStockCode(sourceStockCode)
-  if (!isUbrLooseStockCode(code)) {
-    return ''
+  if (isPpurLooseStockCode(code)) {
+    return code.replace(/-PPUR$/, '-PUR')
   }
-  return code.replace(/-UBR$/, '-PUR')
+  if (isUbrLooseStockCode(code)) {
+    return code.replace(/-UBR$/, '-PUR')
+  }
+  return ''
+}
+
+export function ppurStockCode(batchNumber) {
+  return buildStockCode(batchNumber, 'PPUR')
+}
+
+export function isReceivablePurificationStock(option) {
+  const grade = String(option?.productSuffix ?? '')
+  return (
+    (option?.stockForm === 'Loose' || option?.stockForm === 'Baled') &&
+    (grade === 'UBR' || grade === 'BRS') &&
+    Number(option?.totalKg) > 0
+  )
+}
+
+function baleSerialNumber(baleCode) {
+  const serial = Number(String(baleCode ?? '').split('-').slice(-1)[0])
+  return Number.isFinite(serial) ? serial : 0
+}
+
+export function balesAvailableForSeries(balingRecords, seriesCode) {
+  const series = canonicalizeFibreStockCode(seriesCode)
+  return (balingRecords ?? [])
+    .filter(
+      (record) =>
+        isBaleHeldInStock(record) && canonicalizeFibreStockCode(record.baleSeriesCode) === series,
+    )
+    .sort((left, right) => baleSerialNumber(left.baleCode) - baleSerialNumber(right.baleCode))
+}
+
+/** Break whole bales only. The kilograms must match the weight of the next bales in the series. */
+export function selectBalesToBreak(balingRecords, seriesCode, quantityKg) {
+  const available = balesAvailableForSeries(balingRecords, seriesCode)
+  const target = roundKg(quantityKg)
+  if (!(target > 0)) {
+    return { error: 'Enter the kilograms received.', baleIds: [], quantityKg: 0 }
+  }
+  if (available.length === 0) {
+    return { error: 'No bales are available in that series.', baleIds: [], quantityKg: 0 }
+  }
+  let sum = 0
+  const taken = []
+  for (const record of available) {
+    if (sum + 0.05 >= target) {
+      break
+    }
+    taken.push(record)
+    sum = roundKg(sum + (Number(record.baleWeightKg) || 0))
+  }
+  if (Math.abs(sum - target) <= 0.05) {
+    return { error: '', baleIds: taken.map((record) => record.id), quantityKg: sum }
+  }
+  if (sum + 0.05 < target) {
+    return {
+      error: `Only ${sum} kg of bales is available in ${canonicalizeFibreStockCode(seriesCode)}.`,
+      baleIds: [],
+      quantityKg: 0,
+    }
+  }
+  return {
+    error: `Bales are broken whole. ${taken.length} bale${taken.length === 1 ? '' : 's'} weigh ${sum} kg. Enter ${sum} kg, or a smaller whole-bale total.`,
+    baleIds: [],
+    quantityKg: 0,
+  }
+}
+
+export function normalizePurificationReceipt(input, stockOption) {
+  if (!input?.date) {
+    return { error: 'Choose the date the stock was received.' }
+  }
+  const quantityKg = Number(input?.quantityKg)
+  if (!Number.isFinite(quantityKg) || quantityKg <= 0) {
+    return { error: 'Enter the kilograms received.' }
+  }
+  if (!stockOption?.stockCode || (stockOption.stockForm !== 'Loose' && stockOption.stockForm !== 'Baled')) {
+    return { error: 'Select unbrushed (UBR) or brushed (BRS) stock, loose or baled.' }
+  }
+  const grade = String(stockOption.productSuffix ?? '')
+  if (grade !== 'UBR' && grade !== 'BRS') {
+    return { error: 'Only unbrushed (UBR) or brushed (BRS) fibre can be received for purification.' }
+  }
+  const batchNumber =
+    normalizeBatchNumber(stockOption.batchNumber) || batchFromTraceableStockCode(stockOption.stockCode)
+  return {
+    error: '',
+    value: {
+      date: input.date,
+      sourceStockCode: canonicalizeFibreStockCode(stockOption.stockCode),
+      sourceStockForm: stockOption.stockForm,
+      sourceGrade: grade,
+      batchNumber,
+      quantityKg: roundKg(quantityKg),
+      outputStockCode: ppurStockCode(batchNumber),
+    },
+  }
 }
 
 export function cardedGrade(fibreLength) {
@@ -159,10 +271,10 @@ export function normalizePurificationProduction(input) {
     return { error: 'Fibre masses and water must be zero or positive numbers.' }
   }
   if (inputKg === 0 && outputKg > 0) {
-    return { error: 'Enter the unbrushed fibre mass that went into the reactor.' }
+    return { error: 'Enter the pre-purification fibre mass that went into the reactor.' }
   }
-  if ((inputKg > 0 || outputKg > 0) && !isUbrLooseStockCode(sourceStockCode)) {
-    return { error: 'Select the unbrushed (UBR) stock code the fibre was taken from.' }
+  if ((inputKg > 0 || outputKg > 0) && !isPurificationSourceStockCode(sourceStockCode)) {
+    return { error: 'Select the pre-purification (PPUR) stock the fibre was taken from.' }
   }
   const roundedInput = roundKg(inputKg)
   const roundedOutput = roundKg(outputKg)
@@ -333,6 +445,79 @@ export function finishingRecordsForStockView({
       }))
       .filter((shift) => shift.lines.length > 0),
   }
+}
+
+export function applyPurificationReceipts(stockMap, receipts = [], options = {}) {
+  const countMovements = Boolean(options.countMovements)
+  const touch = (code, batchNumber, deltaKg) => {
+    if (!code || !deltaKg) {
+      return
+    }
+    if (!stockMap[code]) {
+      stockMap[code] = {
+        stockCode: code,
+        batchNumber: normalizeBatchNumber(batchNumber),
+        totalKg: 0,
+        movements: 0,
+      }
+    }
+    stockMap[code].totalKg += deltaKg
+    if (countMovements) {
+      stockMap[code].movements = Number(stockMap[code].movements ?? 0) + 1
+    }
+  }
+  for (const receipt of receipts ?? []) {
+    const kg = Number(receipt.quantityKg) || 0
+    if (kg <= 0) {
+      continue
+    }
+    if (receipt.sourceStockForm !== 'Baled' && receipt.sourceStockCode) {
+      touch(canonicalizeFibreStockCode(receipt.sourceStockCode), receipt.batchNumber, -kg)
+    }
+    const outputCode =
+      canonicalizeFibreStockCode(receipt.outputStockCode) || ppurStockCode(receipt.batchNumber)
+    touch(outputCode, receipt.batchNumber, kg)
+  }
+}
+
+export function appendPurificationReceiptMovements(movements, receipts = []) {
+  for (const receipt of receipts ?? []) {
+    const kg = Number(receipt.quantityKg) || 0
+    if (kg <= 0) {
+      continue
+    }
+    const outputCode =
+      canonicalizeFibreStockCode(receipt.outputStockCode) || ppurStockCode(receipt.batchNumber)
+    const brokenCount = Array.isArray(receipt.brokenBaleIds) ? receipt.brokenBaleIds.length : 0
+    if (receipt.sourceStockCode) {
+      movements.push({
+        id: `PREC-OUT-${receipt.id}`,
+        date: receipt.date,
+        stockCode: canonicalizeFibreStockCode(receipt.sourceStockCode),
+        stockForm: receipt.sourceStockForm === 'Baled' ? 'Baled' : 'Loose',
+        direction: 'out',
+        quantityKg: kg,
+        source: 'Purification',
+        detail:
+          receipt.sourceStockForm === 'Baled'
+            ? `Bales broken for purification${brokenCount ? ` (${brokenCount})` : ''}`
+            : 'Loose fibre received for purification',
+        reference: '',
+      })
+    }
+    movements.push({
+      id: `PREC-IN-${receipt.id}`,
+      date: receipt.date,
+      stockCode: outputCode,
+      stockForm: 'Loose',
+      direction: 'in',
+      quantityKg: kg,
+      source: 'Purification',
+      detail: 'Pre-purification fibre',
+      reference: '',
+    })
+  }
+  return movements
 }
 
 export function applyFinishingStock(stockMap, purificationRuns = [], cardingShifts = [], options = {}) {

@@ -1,6 +1,6 @@
 /** Fibre stock codes are batch + grade. The decorticator is not part of the code. */
 
-const FIBRE_GRADE = /^(UBR|BRS|TOW|PUR|CAR\d+)$/
+const FIBRE_GRADE = /^(UBR|BRS|TOW|PPUR|PUR|CAR\d+)$/
 
 export function normalizeBatchNumber(batchNumber) {
   const [yearPart, fieldPart] = String(batchNumber ?? '').split('-')

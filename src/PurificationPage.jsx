@@ -6,10 +6,13 @@ import {
   batchFromTraceableStockCode,
   formatDisplayDate,
   formatEfficiencyRatio,
-  isUbrLooseStockCode,
+  isPpurLooseStockCode,
+  isReceivablePurificationStock,
   nextPurificationRunNumber,
   normalizeBatchNumber,
+  ppurStockCode,
   purificationOutputStockCode,
+  selectBalesToBreak,
 } from './fibreFinishing.js'
 
 const EMPTY_FORM = {
@@ -35,7 +38,7 @@ function staffingWarnings(supervisorId, operatorCount) {
 }
 
 function stockOptionsForEntry(looseStockOptions, selectedBatchFilter, currentCode, reserved) {
-  const ubrOptions = (looseStockOptions ?? []).filter((item) => isUbrLooseStockCode(item.stockCode))
+  const ubrOptions = (looseStockOptions ?? []).filter((item) => isPpurLooseStockCode(item.stockCode))
   const filtered =
     selectedBatchFilter === 'all'
       ? [...ubrOptions]
@@ -70,9 +73,14 @@ export default function PurificationPage({
   employees,
   clockedInIds,
   purificationRuns,
+  purificationReceipts = [],
   looseStockOptions,
+  receivableStockOptions = [],
+  balingRecords = [],
   onSavePurificationRun,
   onDeletePurificationRun,
+  onSavePurificationReceipt,
+  onDeletePurificationReceipt,
   dateFrom,
   dateTo,
   onDateFromChange,
@@ -82,12 +90,15 @@ export default function PurificationPage({
   availableBatches,
 }) {
   const canManage = currentUserDataEntryPermissions.has('purification-entry')
+  const [showReceipts, setShowReceipts] = useState(true)
   const [showEntry, setShowEntry] = useState(false)
   const [showRuns, setShowRuns] = useState(true)
   const [showAttendance, setShowAttendance] = useState(false)
   const [editingId, setEditingId] = useState('')
   const [form, setForm] = useState({ ...EMPTY_FORM, date: dateTo })
   const [status, setStatus] = useState('')
+  const [receiptStatus, setReceiptStatus] = useState('')
+  const [receiptForm, setReceiptForm] = useState({ date: dateTo, stockKey: '', quantityKg: '' })
   const [attendanceViewingEmployeeId, setAttendanceViewingEmployeeId] = useState('')
 
   const clockedInSupervisors = employees
@@ -148,6 +159,30 @@ export default function PurificationPage({
       }),
     [looseStockOptions, selectedBatchFilter, form.sourceStockCode, editingRun],
   )
+  const receivableOptions = useMemo(() => {
+    const options = (receivableStockOptions ?? []).filter(isReceivablePurificationStock)
+    const filtered =
+      selectedBatchFilter === 'all'
+        ? options
+        : options.filter((item) => normalizeBatchNumber(item.batchNumber) === selectedBatchFilter)
+    return filtered.slice().sort((a, b) => a.stockCode.localeCompare(b.stockCode))
+  }, [receivableStockOptions, selectedBatchFilter])
+  const selectedReceipt = receivableOptions.find(
+    (option) => `${option.stockForm}|${option.stockCode}` === receiptForm.stockKey,
+  )
+  const baleBreakPlan =
+    selectedReceipt?.stockForm === 'Baled' && Number(receiptForm.quantityKg) > 0
+      ? selectBalesToBreak(balingRecords, selectedReceipt.stockCode, receiptForm.quantityKg)
+      : null
+  const filteredReceipts = (
+    selectedBatchFilter === 'all'
+      ? purificationReceipts.filter((receipt) => receipt.date >= dateFrom && receipt.date <= dateTo)
+      : purificationReceipts.filter(
+          (receipt) => normalizeBatchNumber(receipt.batchNumber) === selectedBatchFilter,
+        )
+  )
+    .slice()
+    .sort((a, b) => b.date.localeCompare(a.date))
   const supervisorChoices = editingId ? allSupervisors : clockedInSupervisors
   const operatorChoices = editingId ? allOperators : clockedInOperators
 
@@ -190,6 +225,31 @@ export default function PurificationPage({
       runs: item.runs,
     }))
     .sort((a, b) => b.daysWorked - a.daysWorked || a.name.localeCompare(b.name))
+
+  function handleReceiveStock(event) {
+    event.preventDefault()
+    const result = onSavePurificationReceipt?.({
+      date: receiptForm.date,
+      quantityKg: receiptForm.quantityKg,
+      sourceStockCode: selectedReceipt?.stockCode ?? '',
+      stockForm: selectedReceipt?.stockForm ?? '',
+    })
+    setReceiptStatus(result?.message ?? 'Could not receive stock.')
+    if (result?.ok) {
+      setReceiptForm((prev) => ({ ...prev, stockKey: '', quantityKg: '' }))
+    }
+  }
+
+  function handleDeleteReceipt(receipt) {
+    const confirmed = window.confirm(
+      `Remove the receipt of ${receipt.quantityKg} kg from ${receipt.sourceStockCode}? The fibre will leave ${receipt.outputStockCode}.`,
+    )
+    if (!confirmed) {
+      return
+    }
+    const result = onDeletePurificationReceipt?.(receipt.id)
+    setReceiptStatus(result?.message ?? 'Could not remove the receipt.')
+  }
 
   function updateForm(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }))
@@ -277,10 +337,11 @@ export default function PurificationPage({
     <section className="panel">
       <h2>Purification</h2>
       <p>
-        Unbrushed fibre is loaded into the reactor in runs. Each run has a team, the unbrushed fibre
-        taken from stock, the purified fibre produced, the water used, and an efficiency factor
-        (purified kg / unbrushed kg). Two runs are expected on each shift. Choose the date and
-        shift, and the run number is assigned automatically.
+        Fibre is received into purification before it goes into the reactor. Loose or baled
+        unbrushed (UBR) and brushed (BRS) fibre can be received. Bales are broken, and the fibre
+        is held together as PPUR for that batch. Reactor runs then take PPUR fibre. Each run has a
+        team, the fibre used, the purified fibre produced, the water used, and an efficiency
+        factor (purified kg / PPUR kg). Two runs are expected on each shift.
       </p>
 
       <div className="form-grid">
@@ -336,6 +397,110 @@ export default function PurificationPage({
           <p>{Number(totalWater.toFixed(1)).toLocaleString()} L</p>
         </article>
       </div>
+
+      <CollapsibleSection
+        title="Stock received"
+        isOpen={showReceipts}
+        onToggle={() => setShowReceipts((prev) => !prev)}
+      >
+        {canManage ? (
+        <>
+        <form className="form-grid" onSubmit={handleReceiveStock}>
+          <label>
+            Date
+            <input
+              type="date"
+              value={receiptForm.date}
+              onChange={(event) => setReceiptForm((prev) => ({ ...prev, date: event.target.value }))}
+              required
+            />
+          </label>
+          <label>
+            Stock
+            <select
+              value={receiptForm.stockKey}
+              onChange={(event) => setReceiptForm((prev) => ({ ...prev, stockKey: event.target.value }))}
+              required
+            >
+              <option value="">Select UBR or BRS stock</option>
+              {receivableOptions.map((option) => (
+                <option key={`${option.stockForm}|${option.stockCode}`} value={`${option.stockForm}|${option.stockCode}`}>
+                  {option.stockForm} · {option.stockCode} ({Number(option.totalKg).toLocaleString()} kg
+                  {option.quantityLabel ? `, ${option.quantityLabel} bales` : ''})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Kilograms received
+            <input
+              type="number"
+              min="0.1"
+              step="0.1"
+              value={receiptForm.quantityKg}
+              onChange={(event) => setReceiptForm((prev) => ({ ...prev, quantityKg: event.target.value }))}
+              required
+            />
+          </label>
+          <p className="inline-hint">
+            {selectedReceipt
+              ? `This fibre will be stocked as ${ppurStockCode(selectedReceipt.batchNumber)}.`
+              : 'Received fibre is stocked as PPUR for the batch, for example 2026-024-PPUR.'}
+            {baleBreakPlan?.error
+              ? ` ${baleBreakPlan.error}`
+              : baleBreakPlan?.baleIds?.length
+                ? ` Breaks ${baleBreakPlan.baleIds.length} bale${baleBreakPlan.baleIds.length === 1 ? '' : 's'}.`
+                : ''}
+          </p>
+          <div className="record-edit-actions">
+            <button type="submit">Receive stock</button>
+          </div>
+        </form>
+        {receiptStatus ? <div className="placeholder">{receiptStatus}</div> : null}
+        </>
+        ) : (
+          <p>Only Admin, Production Manager, or Reactor Supervisor can receive stock.</p>
+        )}
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>From</th>
+                <th>Form</th>
+                <th>Kg</th>
+                <th>PPUR</th>
+                <th>Received by</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredReceipts.map((receipt) => (
+                <tr key={receipt.id}>
+                  <td>{formatDisplayDate(receipt.date)}</td>
+                  <td>{receipt.sourceStockCode}</td>
+                  <td>{receipt.sourceStockForm}</td>
+                  <td>{receipt.quantityKg}</td>
+                  <td>{receipt.outputStockCode}</td>
+                  <td>{receipt.receivedByName || '—'}</td>
+                  <td>
+                    {canManage ? (
+                      <button type="button" className="secondary-button" onClick={() => handleDeleteReceipt(receipt)}>
+                        Remove
+                      </button>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+              {filteredReceipts.length === 0 ? (
+                <tr>
+                  <td colSpan="7">No stock has been received in this view.</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </CollapsibleSection>
 
       <CollapsibleSection
         title={editingId ? 'Edit Run' : 'Create Run'}
@@ -412,12 +577,12 @@ export default function PurificationPage({
             </div>
           </label>
           <label>
-            Unbrushed Fibre Stock
+            Pre-purification stock
             <select
               value={form.sourceStockCode}
               onChange={(event) => updateForm('sourceStockCode', event.target.value)}
             >
-              <option value="">Select UBR stock code</option>
+              <option value="">Select PPUR stock code</option>
               {ubrOptions.map((option) => (
                 <option key={option.stockCode} value={option.stockCode}>
                   {option.stockCode} ({Number(option.totalKg).toLocaleString()} kg)
@@ -426,7 +591,7 @@ export default function PurificationPage({
             </select>
           </label>
           <label>
-            Unbrushed Fibre In (kg)
+            Pre-purification fibre (kg)
             <input
               type="number"
               min="0"
@@ -470,7 +635,7 @@ export default function PurificationPage({
               : ''}
             {previewOutputCode
               ? ` Purified fibre will be stocked as ${previewOutputCode}.`
-              : ' Purified fibre is stocked on the batch code with grade PUR, for example 2026-024-PUR.'}
+              : ' Purified fibre is stocked as PUR for the batch, for example 2026-024-PUR.'}
             {form.inputKg && form.outputKg
               ? ` Efficiency ${formatEfficiencyRatio(
                   efficiencyPreview(form.inputKg, form.outputKg),
@@ -509,7 +674,7 @@ export default function PurificationPage({
                 <th>Shift</th>
                 <th>Run</th>
                 <th>Team</th>
-                <th>UBR In</th>
+                <th>PPUR In</th>
                 <th>In (kg)</th>
                 <th>PUR Out</th>
                 <th>Out (kg)</th>

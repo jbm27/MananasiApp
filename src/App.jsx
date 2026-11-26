@@ -126,17 +126,21 @@ import PurificationPage from './PurificationPage.jsx'
 import CardingPage from './CardingPage.jsx'
 import {
   applyFinishingStock,
+  applyPurificationReceipts,
   balancesByStockCode,
   cardingLineStockDeltas,
   describeStockShortfall,
   findCardingShiftConflict,
   findPurificationRunConflict,
   finishingRecordsForStockView,
+  isBaleHeldInStock,
   isTraditionalBaleSource,
   nextPurificationRunNumber,
   normalizeCardingLine,
   normalizeCardingShiftIdentity,
   normalizePurificationProduction,
+  normalizePurificationReceipt,
+  selectBalesToBreak,
   parseShiftNumber,
   purificationStockDeltas,
 } from './fibreFinishing.js'
@@ -8926,6 +8930,7 @@ function StockPage({
   brushingStockMovements,
   brushingDailyRecords,
   purificationRuns = [],
+  purificationReceipts,
   cardingShifts = [],
   balingRecords,
   silageRecords,
@@ -8980,6 +8985,14 @@ function StockPage({
     dateFrom,
     dateTo,
   })
+  const receiptRecords = purificationReceipts ?? []
+  const filteredReceipts = showAbsoluteStock
+    ? receiptRecords
+    : selectedBatchFilter === 'all'
+      ? receiptRecords.filter((item) => item.date >= dateFrom && item.date <= dateTo)
+      : receiptRecords.filter(
+          (item) => normalizeBatchNumber(item.batchNumber) === selectedBatchFilter,
+        )
   const filteredBalingRecords =
     showAbsoluteStock
       ? balingRecords
@@ -9036,6 +9049,7 @@ function StockPage({
     stockMap[sourceCode].totalKg -= item.baleWeightKg
     stockMap[sourceCode].movements += 1
   })
+  applyPurificationReceipts(stockMap, filteredReceipts, { countMovements: true })
   applyFinishingStock(
     stockMap,
     filteredFinishing.purificationRuns,
@@ -9066,7 +9080,7 @@ function StockPage({
     .filter((item) => item.totalKg > 0)
 
   const baledStockRows = Object.values(
-    filteredBalingRecords.reduce((map, item) => {
+    filteredBalingRecords.filter(isBaleHeldInStock).reduce((map, item) => {
       const seriesCode = canonicalizeFibreStockCode(item.baleSeriesCode)
       if (!map[seriesCode]) {
         map[seriesCode] = {
@@ -9128,6 +9142,7 @@ function StockPage({
       invoiceStockIssues,
       invoiceDocuments,
       purificationRuns,
+      purificationReceipts,
       cardingShifts,
     })
     return allMovements.filter((movement) => {
@@ -9151,6 +9166,7 @@ function StockPage({
     invoiceStockIssues,
     invoiceDocuments,
     purificationRuns,
+    purificationReceipts,
     cardingShifts,
     showAbsoluteStock,
     selectedBatchFilter,
@@ -9180,8 +9196,9 @@ function StockPage({
     const records = filteredBalingRecords
       .filter(
         (record) =>
+          isBaleHeldInStock(record) &&
           canonicalizeFibreStockCode(record.baleSeriesCode) ===
-          canonicalizeFibreStockCode(baleSeriesCode),
+            canonicalizeFibreStockCode(baleSeriesCode),
       )
       .filter((record) => {
         const serial = getBaleSerialFromCode(record.baleCode)
@@ -9292,8 +9309,9 @@ function StockPage({
         : filteredBalingRecords
             .filter(
               (record) =>
+                isBaleHeldInStock(record) &&
                 canonicalizeFibreStockCode(record.baleSeriesCode) ===
-                canonicalizeFibreStockCode(row.stockCode),
+                  canonicalizeFibreStockCode(row.stockCode),
             )
             .filter((record) => {
               const serial = getBaleSerialFromCode(record.baleCode)
@@ -9350,7 +9368,8 @@ function StockPage({
         show completed bales of that weight. Silage series codes (for example 2026-000-SLG35-050)
         show bagged silage stock. Individual bag labels append a four-digit serial (for example
         2026-000-SLG35-050-0001). Purified fibre uses grade PUR (for example 2026-024-PUR). Carded
-        fibre uses CAR plus the fibre length (for example 2026-024-CAR80).
+        fibre uses CAR plus the fibre length (for example 2026-024-CAR80). Fibre received for
+        purification is held as PPUR for the batch (for example 2026-024-PPUR).
       </p>
 
       <div className="form-grid">
@@ -10612,6 +10631,9 @@ function hydrateAppState(data, setters) {
   if (Array.isArray(hydratedData.purificationRuns)) {
     setters.setPurificationRuns(hydratedData.purificationRuns)
   }
+  if (Array.isArray(hydratedData.purificationReceipts)) {
+    setters.setPurificationReceipts(hydratedData.purificationReceipts)
+  }
   if (Array.isArray(hydratedData.cardingShifts)) {
     setters.setCardingShifts(hydratedData.cardingShifts)
   }
@@ -10716,6 +10738,7 @@ function App() {
   const [brushingStockMovements, setBrushingStockMovements] = useState([])
   const [brushingDailyRecords, setBrushingDailyRecords] = useState([])
   const [purificationRuns, setPurificationRuns] = useState([])
+  const [purificationReceipts, setPurificationReceipts] = useState([])
   const [cardingShifts, setCardingShifts] = useState([])
   const [balingRecords, setBalingRecords] = useState([])
   const [balingAssignments, setBalingAssignments] = useState([])
@@ -10757,6 +10780,7 @@ function App() {
       setBrushingStockMovements,
       setBrushingDailyRecords,
       setPurificationRuns,
+      setPurificationReceipts,
       setCardingShifts,
       setBalingRecords,
       setBalingAssignments,
@@ -10808,6 +10832,7 @@ function App() {
         brushingStockMovements,
         brushingDailyRecords,
         purificationRuns,
+        purificationReceipts,
         cardingShifts,
         balingRecords,
         balingAssignments,
@@ -10847,6 +10872,7 @@ function App() {
       brushingStockMovements,
       brushingDailyRecords,
       purificationRuns,
+      purificationReceipts,
       cardingShifts,
       balingRecords,
       balingAssignments,
@@ -10995,6 +11021,7 @@ function App() {
       }
       stockMap[code].totalKg -= item.baleWeightKg
     })
+    applyPurificationReceipts(stockMap, purificationReceipts)
     applyFinishingStock(stockMap, purificationRuns, cardingShifts)
     invoiceStockIssues.forEach((issue) => {
       const code = canonicalizeFibreStockCode(issue.stockCode)
@@ -11011,7 +11038,7 @@ function App() {
       .map((item) => ({ ...item, totalKg: Number(item.totalKg.toFixed(1)) }))
       .filter((item) => item.totalKg > 0)
       .sort((a, b) => b.totalKg - a.totalKg)
-  }, [dryingRecords, brushingStockMovements, brushingDailyRecords, balingRecords, invoiceStockIssues, purificationRuns, cardingShifts])
+  }, [dryingRecords, brushingStockMovements, brushingDailyRecords, balingRecords, invoiceStockIssues, purificationRuns, purificationReceipts, cardingShifts])
   const invoiceStockCatalog = useMemo(
     () =>
       computeAbsoluteStockCatalog({
@@ -11023,6 +11050,7 @@ function App() {
         silageRecords,
         invoiceStockIssues,
         purificationRuns,
+        purificationReceipts,
         cardingShifts,
       }),
     [
@@ -11033,6 +11061,7 @@ function App() {
       silageRecords,
       invoiceStockIssues,
       purificationRuns,
+      purificationReceipts,
       cardingShifts,
     ],
   )
@@ -12110,6 +12139,95 @@ function App() {
     }
   }
 
+  function handleSavePurificationReceipt(input) {
+    if (!canMutateAppData(currentUser) || !currentUserDataEntryPermissions.has('purification-entry')) {
+      return { ok: false, message: 'You do not have permission to receive purification stock.' }
+    }
+    const option = (invoiceStockCatalog ?? []).find(
+      (item) => item.stockCode === input.sourceStockCode && item.stockForm === input.stockForm,
+    )
+    const normalized = normalizePurificationReceipt(input, option)
+    if (normalized.error) {
+      return { ok: false, message: normalized.error }
+    }
+    let brokenBaleIds = []
+    if (normalized.value.sourceStockForm === 'Baled') {
+      const plan = selectBalesToBreak(
+        balingRecords,
+        normalized.value.sourceStockCode,
+        normalized.value.quantityKg,
+      )
+      if (plan.error) {
+        return { ok: false, message: plan.error }
+      }
+      brokenBaleIds = plan.baleIds
+      normalized.value.quantityKg = plan.quantityKg
+    } else {
+      const shortfall = describeStockShortfall(balancesByStockCode(availableLooseStockOptions), [
+        { code: normalized.value.sourceStockCode, delta: -normalized.value.quantityKg },
+      ])
+      if (shortfall) {
+        return { ok: false, message: shortfall }
+      }
+    }
+    const receipt = {
+      id: `PREC-${Date.now()}`,
+      ...normalized.value,
+      brokenBaleIds,
+      receivedById: currentUser?.id ?? '',
+      receivedByName: currentUser?.name ?? '',
+    }
+    if (brokenBaleIds.length > 0) {
+      const broken = new Set(brokenBaleIds)
+      setBalingRecords((prev) =>
+        prev.map((record) =>
+          broken.has(record.id) ? { ...record, purificationReceiptId: receipt.id } : record,
+        ),
+      )
+    }
+    setPurificationReceipts((prev) => [receipt, ...prev])
+    const brokenNote =
+      brokenBaleIds.length > 0
+        ? ` ${brokenBaleIds.length} bale${brokenBaleIds.length === 1 ? '' : 's'} broken.`
+        : ''
+    return {
+      ok: true,
+      message: `Received ${receipt.quantityKg} kg into ${receipt.outputStockCode}.${brokenNote}`,
+    }
+  }
+
+  function handleDeletePurificationReceipt(receiptId) {
+    if (!canMutateAppData(currentUser) || !currentUserDataEntryPermissions.has('purification-entry')) {
+      return { ok: false, message: 'You do not have permission to remove received stock.' }
+    }
+    const existing = purificationReceipts.find((receipt) => receipt.id === receiptId)
+    if (!existing) {
+      return { ok: false, message: 'Received stock record could not be found.' }
+    }
+    const shortfall = describeStockShortfall(balancesByStockCode(availableLooseStockOptions), [
+      { code: existing.outputStockCode, delta: -Number(existing.quantityKg) },
+    ])
+    if (shortfall) {
+      return {
+        ok: false,
+        message: 'This receipt cannot be removed because that fibre has already gone into a reactor run.',
+      }
+    }
+    const broken = new Set(existing.brokenBaleIds ?? [])
+    if (broken.size > 0) {
+      setBalingRecords((prev) =>
+        prev.map((record) =>
+          broken.has(record.id) && record.purificationReceiptId === existing.id
+            ? { ...record, purificationReceiptId: '' }
+            : record,
+        ),
+      )
+    }
+    setPurificationReceipts((prev) => prev.filter((receipt) => receipt.id !== receiptId))
+    markEntitiesDeleted('purificationReceipts', receiptId)
+    return { ok: true, message: `Removed ${existing.quantityKg} kg from ${existing.outputStockCode}.` }
+  }
+
   function handleSaveCardingShift(input) {
     if (!canMutateAppData(currentUser) || !currentUserDataEntryPermissions.has('carding-entry')) {
       return { ok: false, message: 'You do not have permission to record carding shifts.', shiftId: '' }
@@ -12293,8 +12411,9 @@ function App() {
       balingRecords
         .filter(
         (record) =>
+          isBaleHeldInStock(record) &&
           canonicalizeFibreStockCode(record.baleSeriesCode) ===
-          canonicalizeFibreStockCode(baleSeriesCode),
+            canonicalizeFibreStockCode(baleSeriesCode),
       )
         .filter((record) => {
           const serial = getBaleSerialFromCode(record.baleCode)
@@ -12457,6 +12576,9 @@ function App() {
       balingRecords,
       silageRecords,
       invoiceStockIssues,
+      purificationRuns,
+      purificationReceipts,
+      cardingShifts,
     })
     const stockValidationErrors = validateInvoiceStockLines(document.items, stockCatalog)
     if (stockValidationErrors.length > 0) {
@@ -13209,9 +13331,14 @@ function App() {
                 employees={employees}
                 clockedInIds={clockedInIds}
                 purificationRuns={purificationRuns}
+                purificationReceipts={purificationReceipts}
                 looseStockOptions={availableLooseStockOptions}
+                receivableStockOptions={invoiceStockCatalog}
+                balingRecords={balingRecords}
                 onSavePurificationRun={handleSavePurificationRun}
                 onDeletePurificationRun={handleDeletePurificationRun}
+                onSavePurificationReceipt={handleSavePurificationReceipt}
+                onDeletePurificationReceipt={handleDeletePurificationReceipt}
                 dateFrom={purificationDateFrom}
                 dateTo={purificationDateTo}
                 onDateFromChange={setPurificationDateFrom}
@@ -13348,6 +13475,7 @@ function App() {
                 brushingStockMovements={brushingStockMovements}
                 brushingDailyRecords={brushingDailyRecords}
                 purificationRuns={purificationRuns}
+                purificationReceipts={purificationReceipts}
                 cardingShifts={cardingShifts}
                 balingRecords={balingRecords}
                 silageRecords={silageRecords}
