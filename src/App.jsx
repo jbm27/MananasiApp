@@ -129,7 +129,10 @@ import {
   applyPurificationReceipts,
   balancesByStockCode,
   cardingLineStockDeltas,
+  collectCardedStockRows,
+  describeCardedSaleShortfall,
   describeStockShortfall,
+  summarizeCardedDashboard,
   findCardingShiftConflict,
   findPurificationRunConflict,
   finishingRecordsForStockView,
@@ -987,10 +990,11 @@ function getBaleSerialFromCode(baleCode) {
   return Number.isNaN(serial) ? 0 : serial
 }
 
-function printBaleLabelsPdf(records, filename) {
+function printBaleLabelsPdf(records, filename, options = {}) {
   if (!Array.isArray(records) || records.length === 0) {
     return 0
   }
+  const showWeight = Boolean(options.showWeight)
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
   const pageWidth = pdf.internal.pageSize.getWidth()
   const pageHeight = pdf.internal.pageSize.getHeight()
@@ -1000,7 +1004,7 @@ function printBaleLabelsPdf(records, filename) {
   const gapY = 6
   const columns = 2
   const labelWidth = (pageWidth - marginX * 2 - gapX) / columns
-  const labelHeight = 52
+  const labelHeight = showWeight ? 60 : 52
   const rowsPerPage = Math.floor((pageHeight - marginY * 2 + gapY) / (labelHeight + gapY))
   const maxPerPage = rowsPerPage * columns
 
@@ -1040,8 +1044,15 @@ function printBaleLabelsPdf(records, filename) {
 
     pdf.setTextColor(0, 0, 0)
     pdf.setFont('helvetica', 'bold')
-    pdf.setFontSize(11)
-    pdf.text(record.baleCode, labelX + labelWidth / 2, labelY + 42, { align: 'center' })
+    if (showWeight) {
+      pdf.setFontSize(14)
+      pdf.text(`${record.baleWeightKg} kg`, labelX + labelWidth / 2, labelY + 42, { align: 'center' })
+      pdf.setFontSize(11)
+      pdf.text(record.baleCode, labelX + labelWidth / 2, labelY + 50, { align: 'center' })
+    } else {
+      pdf.setFontSize(11)
+      pdf.text(record.baleCode, labelX + labelWidth / 2, labelY + 42, { align: 'center' })
+    }
   })
 
   pdf.save(filename)
@@ -9057,6 +9068,9 @@ function StockPage({
     { countMovements: true },
   )
   invoiceStockIssues.forEach((issue) => {
+    if (issue.stockForm === 'Carded') {
+      return
+    }
     const code = canonicalizeFibreStockCode(issue.stockCode)
     if (!stockMap[code]) {
       stockMap[code] = {
@@ -9121,8 +9135,12 @@ function StockPage({
     totalKg: Number(item.totalKg.toFixed(1)),
   }))
 
-  const stockFormOrder = { Loose: 0, Baled: 1, Silage: 2 }
-  const stockRows = [...looseStockRows, ...baledStockRows, ...silageStockRows].sort((a, b) => {
+  const cardedStockRows = collectCardedStockRows(
+    filteredFinishing.cardingShifts,
+    invoiceStockIssues,
+  )
+  const stockFormOrder = { Loose: 0, Baled: 1, Carded: 2, Silage: 3 }
+  const stockRows = [...looseStockRows, ...baledStockRows, ...cardedStockRows, ...silageStockRows].sort((a, b) => {
     const formDiff = stockFormOrder[a.stockForm] - stockFormOrder[b.stockForm]
     if (formDiff !== 0) {
       return formDiff
@@ -9131,6 +9149,7 @@ function StockPage({
   })
   const totalAvailableKg = Number(stockRows.reduce((sum, row) => sum + row.totalKg, 0).toFixed(1))
   const stockSummary = summarizeStockDashboard(stockRows)
+  const cardedSummary = summarizeCardedDashboard(stockRows)
 
   const stockMovements = useMemo(() => {
     const allMovements = buildStockMovements({
@@ -9358,6 +9377,12 @@ function StockPage({
             <p>{stockSummary[category.key].toLocaleString()} kg</p>
           </article>
         ))}
+        {cardedSummary.map((item) => (
+          <article className="card" key={item.key}>
+            <h3>{item.label}</h3>
+            <p>{item.totalKg.toLocaleString()} kg</p>
+          </article>
+        ))}
       </div>
       <p className="inline-hint">
         Totals follow the batch filter. Absolute stock is the all-time quantity still on hand.
@@ -9368,8 +9393,10 @@ function StockPage({
         show completed bales of that weight. Silage series codes (for example 2026-000-SLG35-050)
         show bagged silage stock. Individual bag labels append a four-digit serial (for example
         2026-000-SLG35-050-0001). Purified fibre uses grade PUR (for example 2026-024-PUR). Carded
-        fibre uses CAR plus the fibre length (for example 2026-024-CAR80). Fibre received for
-        purification is held as PPUR for the batch (for example 2026-024-PPUR).
+        bales share a root code: 2026-024-CAR40-86 and 2026-024-CAR40-84 are listed together as
+        2026-024-CAR40. The summary cards add every batch of the same length, so CAR40 is one
+        total. Fibre received for purification is held as PPUR for the batch (for example
+        2026-024-PPUR).
       </p>
 
       <div className="form-grid">
@@ -9440,7 +9467,9 @@ function StockPage({
               <tr key={`${row.stockForm}-${row.stockCode}`}>
                 <td>{row.stockCode}</td>
                 <td>{row.totalKg.toLocaleString()}</td>
-                <td>{rowSupportsLabelPrinting(row) ? row.quantityLabel : '—'}</td>
+                <td>
+                  {row.stockForm === 'Carded' || rowSupportsLabelPrinting(row) ? row.quantityLabel : '—'}
+                </td>
                 <td>
                   {rowSupportsLabelPrinting(row) ? (
                     <input
@@ -11024,6 +11053,9 @@ function App() {
     applyPurificationReceipts(stockMap, purificationReceipts)
     applyFinishingStock(stockMap, purificationRuns, cardingShifts)
     invoiceStockIssues.forEach((issue) => {
+      if (issue.stockForm === 'Carded') {
+        return
+      }
       const code = canonicalizeFibreStockCode(issue.stockCode)
       if (!stockMap[code]) {
         stockMap[code] = {
@@ -12304,6 +12336,16 @@ function App() {
         message: 'This shift cannot be deleted because its carded fibre has already been used.',
       }
     }
+    const saleShortfall = describeCardedSaleShortfall(
+      cardingShifts.filter((shift) => shift.id !== shiftId),
+      invoiceStockIssues,
+    )
+    if (saleShortfall) {
+      return {
+        ok: false,
+        message: 'This shift cannot be deleted because some of its carded bales have already been sold.',
+      }
+    }
     setCardingShifts((prev) => prev.filter((shift) => shift.id !== shiftId))
     markEntitiesDeleted('cardingShifts', shiftId)
     return {
@@ -12334,6 +12376,11 @@ function App() {
       ...(existingLine ?? {}),
       id: existingLine?.id ?? `CLN-${Date.now()}`,
       ...production.value,
+      bales: production.value.bales.map((bale, index) => ({
+        id: existingLine?.bales?.[index]?.id ?? `CBL-${Date.now()}-${index + 1}`,
+        weightKg: bale.weightKg,
+        baleCode: bale.baleCode,
+      })),
     }
     const shortfall = describeStockShortfall(balancesByStockCode(availableLooseStockOptions), [
       ...cardingLineStockDeltas(existingLine, shift.fibreLength, -1),
@@ -12341,6 +12388,19 @@ function App() {
     ])
     if (shortfall) {
       return { ok: false, message: shortfall }
+    }
+    const nextShifts = cardingShifts.map((item) => {
+      if (item.id !== shift.id) {
+        return item
+      }
+      const lines = existingLine
+        ? (item.lines ?? []).map((line) => (line.id === existingLine.id ? nextLine : line))
+        : [nextLine, ...(item.lines ?? [])]
+      return { ...item, lines }
+    })
+    const saleShortfall = describeCardedSaleShortfall(nextShifts, invoiceStockIssues)
+    if (saleShortfall) {
+      return { ok: false, message: saleShortfall }
     }
     setCardingShifts((prev) =>
       prev.map((item) => {
@@ -12353,12 +12413,26 @@ function App() {
         return { ...item, lines }
       }),
     )
+    const baleList = nextLine.bales.map((bale) => bale.baleCode).join(', ')
     return {
       ok: true,
+      bales: nextLine.bales,
       message: existingLine
-        ? `Carding output updated. Stock code ${nextLine.outputStockCode}.`
-        : `Carding output saved. Stock code ${nextLine.outputStockCode}.`,
+        ? `Carding output updated. ${nextLine.bales.length} bale${nextLine.bales.length === 1 ? '' : 's'} (${baleList}), listed as ${nextLine.outputStockCode}.`
+        : `Carding output saved. ${nextLine.bales.length} bale${nextLine.bales.length === 1 ? '' : 's'} (${baleList}), listed as ${nextLine.outputStockCode}.`,
     }
+  }
+
+  function handlePrintCardingLabels(bales) {
+    const records = (bales ?? [])
+      .filter((bale) => bale?.baleCode)
+      .map((bale) => ({ baleCode: bale.baleCode, baleWeightKg: bale.weightKg }))
+    const count = printBaleLabelsPdf(records, `carding-bale-labels-${Date.now()}.pdf`, {
+      showWeight: true,
+    })
+    return count > 0
+      ? { ok: true, message: `Opened ${count} carding bale label${count === 1 ? '' : 's'}.` }
+      : { ok: false, message: 'There are no carding bale labels to print.' }
   }
 
   function handleDeleteCardingLine(shiftId, lineId) {
@@ -12377,6 +12451,18 @@ function App() {
       return {
         ok: false,
         message: 'This output cannot be deleted because the carded fibre has already been used.',
+      }
+    }
+    const nextShifts = cardingShifts.map((item) =>
+      item.id === shift.id
+        ? { ...item, lines: (item.lines ?? []).filter((line) => line.id !== lineId) }
+        : item,
+    )
+    const saleShortfall = describeCardedSaleShortfall(nextShifts, invoiceStockIssues)
+    if (saleShortfall) {
+      return {
+        ok: false,
+        message: 'This output cannot be deleted because some of these carded bales have already been sold.',
       }
     }
     setCardingShifts((prev) =>
@@ -13362,6 +13448,7 @@ function App() {
                 onDeleteCardingShift={handleDeleteCardingShift}
                 onSaveCardingLine={handleSaveCardingLine}
                 onDeleteCardingLine={handleDeleteCardingLine}
+                onPrintCardingLabels={handlePrintCardingLabels}
                 dateFrom={cardingDateFrom}
                 dateTo={cardingDateTo}
                 onDateFromChange={setCardingDateFrom}

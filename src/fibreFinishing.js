@@ -222,6 +222,149 @@ export function cardedOutputStockCode(sourceStockCode, fibreLength) {
   return code.replace(/-PUR$/, `-${grade}`)
 }
 
+export function cardedStockRoot(batchNumber, fibreLength) {
+  const grade = cardedGrade(fibreLength)
+  if (!batchNumber || !grade) {
+    return ''
+  }
+  return `${normalizeBatchNumber(batchNumber)}-${grade}`
+}
+
+export function cardedGradeFromStockCode(stockCode) {
+  const match = String(stockCode ?? '')
+    .toUpperCase()
+    .match(/-(CAR\d+)(?:-[\d.]+)?$/)
+  return match ? match[1] : ''
+}
+
+function formatCardedWeight(weightKg) {
+  const weight = roundKg(weightKg)
+  if (!Number.isFinite(weight) || weight <= 0) {
+    return ''
+  }
+  return Number.isInteger(weight) ? String(weight) : String(weight)
+}
+
+/** 86 kg of 40 mm fibre from batch 2026-024 → 2026-024-CAR40-86 */
+export function cardedBaleCode(batchNumber, fibreLength, weightKg) {
+  const root = cardedStockRoot(batchNumber, fibreLength)
+  const weight = formatCardedWeight(weightKg)
+  if (!root || !weight) {
+    return ''
+  }
+  return `${root}-${weight}`
+}
+
+export function lineHasCardedBales(line) {
+  return Array.isArray(line?.bales) && line.bales.length > 0
+}
+
+export function normalizeCardingBaleWeights(weights, batchNumber, fibreLength) {
+  const bales = []
+  for (const raw of Array.isArray(weights) ? weights : []) {
+    if (raw === '' || raw == null) {
+      continue
+    }
+    const weight = Number(raw)
+    if (!Number.isFinite(weight) || weight <= 0) {
+      return { error: 'Each bale weight must be greater than zero.', bales: [], outputKg: 0 }
+    }
+    const weightKg = roundKg(weight)
+    bales.push({
+      weightKg,
+      baleCode: cardedBaleCode(batchNumber, fibreLength, weightKg),
+    })
+  }
+  if (bales.length === 0) {
+    return { error: 'Enter the weight of each carded bale.', bales: [], outputKg: 0 }
+  }
+  return {
+    error: '',
+    bales,
+    outputKg: roundKg(bales.reduce((sum, bale) => sum + bale.weightKg, 0)),
+  }
+}
+
+export function collectCardedStockRows(shifts = [], invoiceStockIssues = []) {
+  const map = new Map()
+  for (const shift of shifts ?? []) {
+    for (const line of shift.lines ?? []) {
+      if (!lineHasCardedBales(line)) {
+        continue
+      }
+      const stockCode = cardedStockRoot(line.batchNumber, shift.fibreLength)
+      if (!stockCode) {
+        continue
+      }
+      if (!map.has(stockCode)) {
+        map.set(stockCode, {
+          stockCode,
+          batchNumber: normalizeBatchNumber(line.batchNumber),
+          totalKg: 0,
+          stockForm: 'Carded',
+          quantityLabel: 0,
+        })
+      }
+      const row = map.get(stockCode)
+      for (const bale of line.bales) {
+        row.totalKg += Number(bale.weightKg) || 0
+        row.quantityLabel += 1
+      }
+    }
+  }
+  for (const issue of invoiceStockIssues ?? []) {
+    if (issue?.stockForm !== 'Carded') {
+      continue
+    }
+    const row = map.get(canonicalizeFibreStockCode(issue.stockCode))
+    if (!row) {
+      continue
+    }
+    row.totalKg -= Number(issue.quantityKg) || 0
+  }
+  return [...map.values()]
+    .map((row) => ({ ...row, totalKg: Number(row.totalKg.toFixed(1)) }))
+    .filter((row) => row.totalKg > 0)
+}
+
+export function describeCardedSaleShortfall(shifts = [], invoiceStockIssues = []) {
+  const produced = Object.fromEntries(
+    collectCardedStockRows(shifts, []).map((row) => [row.stockCode, row.totalKg]),
+  )
+  const sold = {}
+  for (const issue of invoiceStockIssues ?? []) {
+    if (issue?.stockForm !== 'Carded') {
+      continue
+    }
+    const code = canonicalizeFibreStockCode(issue.stockCode)
+    if (!code) {
+      continue
+    }
+    sold[code] = (sold[code] ?? 0) + (Number(issue.quantityKg) || 0)
+  }
+  for (const [code, soldKg] of Object.entries(sold)) {
+    if ((produced[code] ?? 0) + 0.05 < soldKg) {
+      return `Not enough ${code} left. This change would drop the recorded bales below the ${Number(soldKg.toFixed(1))} kg already sold.`
+    }
+  }
+  return ''
+}
+
+export function summarizeCardedDashboard(rows) {
+  const totals = new Map()
+  for (const row of rows ?? []) {
+    const grade = cardedGradeFromStockCode(row.stockCode)
+    if (!grade) {
+      continue
+    }
+    totals.set(grade, (totals.get(grade) ?? 0) + (Number(row.totalKg) || 0))
+  }
+  return [...totals.entries()]
+    .map(([grade, kg]) => ({ key: grade, label: grade, totalKg: Number(kg.toFixed(1)) }))
+    .filter((item) => item.totalKg > 0)
+    .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }))
+}
+
 export function nextPurificationRunNumber(runs, date, shiftNumber) {
   const shift = Number(shiftNumber)
   let max = 0
@@ -315,13 +458,9 @@ export function normalizeCardingShiftIdentity(input) {
 
 export function normalizeCardingLine(input, fibreLength) {
   const inputKg = readOptionalKg(input?.inputKg)
-  const outputKg = readOptionalKg(input?.outputKg)
   const sourceStockCode = String(input?.sourceStockCode ?? '').trim()
   if (!Number.isFinite(inputKg) || inputKg <= 0) {
     return { error: 'Enter the purified fibre mass that entered the carding line.' }
-  }
-  if (!Number.isFinite(outputKg) || outputKg < 0) {
-    return { error: 'Carded fibre mass must be zero or a positive number.' }
   }
   if (!isPurLooseStockCode(sourceStockCode)) {
     return { error: 'Select the purified (PUR) stock code the fibre was taken from.' }
@@ -330,18 +469,23 @@ export function normalizeCardingLine(input, fibreLength) {
   if (length == null) {
     return { error: 'Set the fibre length on the shift before recording output.' }
   }
+  const batchNumber = batchFromTraceableStockCode(sourceStockCode)
+  const parsedBales = normalizeCardingBaleWeights(input?.baleWeights, batchNumber, length)
+  if (parsedBales.error) {
+    return { error: parsedBales.error }
+  }
   const roundedInput = roundKg(inputKg)
-  const roundedOutput = roundKg(outputKg)
   return {
     error: '',
     value: {
       sourceStockCode: canonicalizeFibreStockCode(sourceStockCode),
-      batchNumber: batchFromTraceableStockCode(sourceStockCode),
+      batchNumber,
       machine: machineFromTraceableStockCode(sourceStockCode),
       inputKg: roundedInput,
-      outputKg: roundedOutput,
-      outputStockCode: cardedOutputStockCode(sourceStockCode, length),
-      efficiency: efficiencyRatio(roundedInput, roundedOutput),
+      outputKg: parsedBales.outputKg,
+      outputStockCode: cardedStockRoot(batchNumber, length),
+      bales: parsedBales.bales,
+      efficiency: efficiencyRatio(roundedInput, parsedBales.outputKg),
     },
   }
 }
@@ -407,11 +551,13 @@ export function cardingLineStockDeltas(line, fibreLength, direction) {
   if (line.sourceStockCode && inputKg > 0) {
     deltas.push({ code: canonicalizeFibreStockCode(line.sourceStockCode), delta: -sign * inputKg })
   }
-  const outputCode =
-    canonicalizeFibreStockCode(line.outputStockCode) ||
-    cardedOutputStockCode(line.sourceStockCode, fibreLength)
-  if (outputCode && outputKg > 0) {
-    deltas.push({ code: outputCode, delta: sign * outputKg })
+  if (!lineHasCardedBales(line)) {
+    const outputCode =
+      canonicalizeFibreStockCode(line.outputStockCode) ||
+      cardedOutputStockCode(line.sourceStockCode, fibreLength)
+    if (outputCode && outputKg > 0) {
+      deltas.push({ code: outputCode, delta: sign * outputKg })
+    }
   }
   return deltas
 }
@@ -557,11 +703,13 @@ export function applyFinishingStock(stockMap, purificationRuns = [], cardingShif
       if (inputKg > 0 && line.sourceStockCode) {
         touch(canonicalizeFibreStockCode(line.sourceStockCode), line.batchNumber, -inputKg)
       }
-      const outputCode =
-        canonicalizeFibreStockCode(line.outputStockCode) ||
-        cardedOutputStockCode(line.sourceStockCode, shift.fibreLength)
-      if (outputKg > 0 && outputCode) {
-        touch(outputCode, line.batchNumber, outputKg)
+      if (!lineHasCardedBales(line)) {
+        const outputCode =
+          canonicalizeFibreStockCode(line.outputStockCode) ||
+          cardedOutputStockCode(line.sourceStockCode, shift.fibreLength)
+        if (outputKg > 0 && outputCode) {
+          touch(outputCode, line.batchNumber, outputKg)
+        }
       }
     }
   }
@@ -618,21 +766,38 @@ export function appendFinishingMovements(movements, purificationRuns = [], cardi
           reference: '',
         })
       }
-      const outputCode =
-        canonicalizeFibreStockCode(line.outputStockCode) ||
-        cardedOutputStockCode(line.sourceStockCode, shift.fibreLength)
-      if (outputCode && outputKg > 0) {
+      if (lineHasCardedBales(line)) {
+        const root = cardedStockRoot(line.batchNumber, shift.fibreLength) || line.outputStockCode
         movements.push({
           id: `CSH-IN-${line.id}`,
           date: shift.date,
-          stockCode: outputCode,
-          stockForm: 'Loose',
+          stockCode: root,
+          stockForm: 'Carded',
           direction: 'in',
-          quantityKg: outputKg,
+          quantityKg: roundKg(line.bales.reduce((sum, bale) => sum + (Number(bale.weightKg) || 0), 0)),
           source: 'Carding',
-          detail: `Carded fibre ${cardedGrade(shift.fibreLength) || outputCode.split('-').slice(-1)[0]} · shift ${shift.shiftNumber}`,
+          detail: `${line.bales.length} bale${line.bales.length === 1 ? '' : 's'}: ${line.bales
+            .map((bale) => bale.baleCode)
+            .join(', ')}`,
           reference: '',
         })
+      } else {
+        const outputCode =
+          canonicalizeFibreStockCode(line.outputStockCode) ||
+          cardedOutputStockCode(line.sourceStockCode, shift.fibreLength)
+        if (outputCode && outputKg > 0) {
+          movements.push({
+            id: `CSH-IN-${line.id}`,
+            date: shift.date,
+            stockCode: outputCode,
+            stockForm: 'Loose',
+            direction: 'in',
+            quantityKg: outputKg,
+            source: 'Carding',
+            detail: `Carded fibre ${cardedGrade(shift.fibreLength) || outputCode.split('-').slice(-1)[0]} · shift ${shift.shiftNumber}`,
+            reference: '',
+          })
+        }
       }
     }
   }

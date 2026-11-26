@@ -3,6 +3,7 @@ import {
   appendFinishingMovements,
   appendPurificationReceiptMovements,
   applyPurificationReceipts,
+  collectCardedStockRows,
   isBaleHeldInStock,
 } from './fibreFinishing.js'
 import { getSilageBagSeriesCode, getSilageRecordSerial } from './silageCodes.js'
@@ -33,7 +34,6 @@ export const STOCK_DASHBOARD_CATEGORIES = [
   { key: 'towLoose', label: 'TOW fibre' },
   { key: 'ppurLoose', label: 'Pre-purification fibre' },
   { key: 'purLoose', label: 'Purified loose fibre' },
-  { key: 'carLoose', label: 'Carded loose fibre' },
   { key: 'brsBaled', label: 'Brushed baled fibre' },
   { key: 'ubrBaled', label: 'Unbrushed baled fibre' },
   { key: 'towBaled', label: 'TOW baled' },
@@ -58,8 +58,8 @@ export function getStockDashboardCategory(row) {
   if (last === 'PUR') {
     return 'purLoose'
   }
-  if (/^CAR\d+$/.test(last)) {
-    return 'carLoose'
+  if (/^CAR\d+$/.test(last) || row?.stockForm === 'Carded') {
+    return null
   }
   const gradeIndex = parts.findIndex((part) => part === 'UBR' || part === 'BRS' || part === 'TOW')
   if (gradeIndex < 0) {
@@ -195,6 +195,9 @@ export function computeAbsoluteStockCatalog({
   applyFinishingStock(stockMap, purificationRuns, cardingShifts)
 
   invoiceStockIssues.forEach((issue) => {
+    if (issue.stockForm === 'Carded') {
+      return
+    }
     const code = canonicalizeFibreStockCode(issue.stockCode)
     if (!stockMap[code]) {
       stockMap[code] = {
@@ -260,8 +263,13 @@ export function computeAbsoluteStockCatalog({
     productSuffix: getProductSuffixFromStockCode(item.stockCode, 'Silage'),
   }))
 
-  return [...looseStockRows, ...baledStockRows, ...silageStockRows].sort((a, b) => {
-    const formOrder = { Loose: 0, Baled: 1, Silage: 2 }
+  const cardedStockRows = collectCardedStockRows(cardingShifts, invoiceStockIssues).map((item) => ({
+    ...item,
+    productSuffix: getProductSuffixFromStockCode(item.stockCode, 'Carded'),
+  }))
+
+  return [...looseStockRows, ...baledStockRows, ...cardedStockRows, ...silageStockRows].sort((a, b) => {
+    const formOrder = { Loose: 0, Baled: 1, Carded: 2, Silage: 3 }
     const formDiff = formOrder[a.stockForm] - formOrder[b.stockForm]
     if (formDiff !== 0) {
       return formDiff
@@ -494,13 +502,13 @@ export function applyInvoiceFinalizeStockReduction({
         }
       }
 
-      if (stockForm === 'Loose') {
+      if (stockForm === 'Loose' || stockForm === 'Carded') {
         const issue = {
           id: `INV-STK-${document.id}-${Date.now()}-${nextInvoiceStockIssues.length + 1}`,
           invoiceId: document.id,
           invoiceDocumentNumber: document.documentNumber,
           stockCode,
-          stockForm: 'Loose',
+          stockForm: stockForm === 'Carded' ? 'Carded' : 'Loose',
           quantityKg,
           batchNumber: stockCode.split('-').slice(0, 2).join('-'),
           date: document.invoiceDate,
@@ -762,15 +770,16 @@ export function buildStockMovements({
 
   invoiceStockIssues.forEach((issue) => {
     const invoiceRef = formatInvoiceReference(issue.invoiceDocumentNumber)
+    const carded = issue.stockForm === 'Carded'
     movements.push({
       id: `INV-LOOSE-${issue.id}`,
       date: issue.date,
       stockCode: canonicalizeFibreStockCode(issue.stockCode),
-      stockForm: 'Loose',
+      stockForm: carded ? 'Carded' : 'Loose',
       direction: 'out',
       quantityKg: Number(issue.quantityKg ?? 0),
       source: 'Sale',
-      detail: 'Sold on invoice (loose fibre)',
+      detail: carded ? 'Sold on invoice (carded bales)' : 'Sold on invoice (loose fibre)',
       reference: invoiceRef,
       invoiceId: issue.invoiceId ?? '',
       invoiceDocumentNumber: issue.invoiceDocumentNumber ?? '',

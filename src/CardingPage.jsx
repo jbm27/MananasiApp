@@ -1,11 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { compareEmployeesByName } from './employeeFields.js'
 import CollapsibleSection from './CollapsibleSection.jsx'
 import {
   SHIFT_NUMBERS,
   batchFromTraceableStockCode,
+  cardedBaleCode,
   cardedGrade,
-  cardedOutputStockCode,
+  cardedStockRoot,
   formatDisplayDate,
   formatEfficiencyRatio,
   isPurLooseStockCode,
@@ -64,6 +65,7 @@ export default function CardingPage({
   onDeleteCardingShift,
   onSaveCardingLine,
   onDeleteCardingLine,
+  onPrintCardingLabels,
   dateFrom,
   dateTo,
   onDateFromChange,
@@ -87,7 +89,8 @@ export default function CardingPage({
   const [editingLineId, setEditingLineId] = useState('')
   const [sourceStockCode, setSourceStockCode] = useState('')
   const [inputKg, setInputKg] = useState('')
-  const [outputKg, setOutputKg] = useState('')
+  const [baleWeights, setBaleWeights] = useState([''])
+  const [printableBales, setPrintableBales] = useState([])
   const [status, setStatus] = useState('')
   const [attendanceViewingEmployeeId, setAttendanceViewingEmployeeId] = useState('')
 
@@ -143,18 +146,23 @@ export default function CardingPage({
     cardingShifts.find((shift) => shift.id === lineShiftId) ?? filteredShifts[0] ?? cardingShifts[0]
   const activeLineShiftId = lineShiftId || selectedLineShift?.id || ''
   const activeShift = cardingShifts.find((shift) => shift.id === activeLineShiftId) ?? null
-  const previewOutputCode = activeShift
-    ? cardedOutputStockCode(sourceStockCode, activeShift.fibreLength)
-    : ''
+  const previewBatch = sourceStockCode ? batchFromTraceableStockCode(sourceStockCode) : ''
+  const previewRoot =
+    activeShift && previewBatch ? cardedStockRoot(previewBatch, activeShift.fibreLength) : ''
+  const previewBales = previewRoot
+    ? baleWeights
+        .map((weight) => cardedBaleCode(previewBatch, activeShift.fibreLength, weight))
+        .filter(Boolean)
+    : []
+  const previewOutputKg = baleWeights.reduce((sum, weight) => {
+    const value = Number(weight)
+    return Number.isFinite(value) && value > 0 ? sum + value : sum
+  }, 0)
   const editingLine = activeShift?.lines?.find((line) => line.id === editingLineId)
-  const purOptions = useMemo(
-    () =>
-      purOptionsForEntry(looseStockOptions, selectedBatchFilter, sourceStockCode, {
-        code: editingLine?.sourceStockCode ?? '',
-        kg: Number(editingLine?.inputKg) || 0,
-      }),
-    [looseStockOptions, selectedBatchFilter, sourceStockCode, editingLine],
-  )
+  const purOptions = purOptionsForEntry(looseStockOptions, selectedBatchFilter, sourceStockCode, {
+    code: editingLine?.sourceStockCode ?? '',
+    kg: Number(editingLine?.inputKg) || 0,
+  })
   const supervisorChoices = editingShiftId ? allSupervisors : clockedInSupervisors
   const attendantChoices = editingShiftId ? allAttendants : clockedInAttendants
   const lengthLocked =
@@ -222,7 +230,19 @@ export default function CardingPage({
     setEditingLineId('')
     setSourceStockCode('')
     setInputKg('')
-    setOutputKg('')
+    setBaleWeights([''])
+  }
+
+  function updateBaleWeight(index, value) {
+    setBaleWeights((prev) => prev.map((item, itemIndex) => (itemIndex === index ? value : item)))
+  }
+
+  function addBaleWeight() {
+    setBaleWeights((prev) => [...prev, ''])
+  }
+
+  function removeBaleWeight(index) {
+    setBaleWeights((prev) => (prev.length === 1 ? [''] : prev.filter((_, itemIndex) => itemIndex !== index)))
   }
 
   function startEditingShift(shift) {
@@ -241,7 +261,13 @@ export default function CardingPage({
     setEditingLineId(line.id)
     setSourceStockCode(line.sourceStockCode ?? '')
     setInputKg(line.inputKg > 0 ? String(line.inputKg) : '')
-    setOutputKg(line.outputKg > 0 ? String(line.outputKg) : '')
+    setBaleWeights(
+      line.bales?.length
+        ? line.bales.map((bale) => String(bale.weightKg))
+        : line.outputKg > 0
+          ? [String(line.outputKg)]
+          : [''],
+    )
     setStatus('')
     setShowLineEntry(true)
   }
@@ -309,15 +335,23 @@ export default function CardingPage({
       lineId: editingLineId,
       sourceStockCode,
       inputKg,
-      outputKg,
+      baleWeights,
     })
     if (!result.ok) {
       setStatus(result.message)
       return
     }
+    setPrintableBales(result.bales ?? [])
     setStatus(result.message)
     resetLineForm()
     setShowRegister(true)
+  }
+
+  function handlePrintBales(bales) {
+    const result = onPrintCardingLabels?.(bales)
+    if (result?.message) {
+      setStatus(result.message)
+    }
   }
 
   function handleDeleteLine(shift, line) {
@@ -347,8 +381,9 @@ export default function CardingPage({
       <h2>Cutting and carding</h2>
       <p>
         Purified fibre is cut and carded on a shift. Set the fibre length when the shift starts.
-        Every output on that shift uses the same length, and the stock code ends in CAR followed by
-        that length (for example 80 becomes CAR80). Efficiency is carded kg / purified kg.
+        Each bound bale is weighed and coded, for example 2026-024-CAR40-86 for an 86 kg bale of
+        40 mm fibre from batch 2026-024. Stock lists those bales together as 2026-024-CAR40.
+        Efficiency is carded kg / purified kg.
       </p>
 
       <div className="form-grid">
@@ -541,22 +576,38 @@ export default function CardingPage({
               onChange={(event) => setInputKg(event.target.value)}
             />
           </label>
-          <label>
-            Carded Fibre Out (kg)
-            <input
-              type="number"
-              min="0"
-              step="0.1"
-              value={outputKg}
-              onChange={(event) => setOutputKg(event.target.value)}
-            />
+          <label className="full-width">
+            Bale weights (kg)
+            {baleWeights.map((weight, index) => (
+              <div key={index} className="record-edit-actions">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={weight}
+                  aria-label={`Bale ${index + 1} weight kg`}
+                  placeholder={`Bale ${index + 1}`}
+                  style={{ maxWidth: '12rem' }}
+                  onChange={(event) => updateBaleWeight(index, event.target.value)}
+                />
+                <button type="button" className="secondary-button" onClick={() => removeBaleWeight(index)}>
+                  Remove
+                </button>
+              </div>
+            ))}
+            <button type="button" className="secondary-button" onClick={addBaleWeight}>
+              Add bale
+            </button>
           </label>
           <p className="inline-hint">
-            {previewOutputCode
-              ? `Carded fibre will be stocked as ${previewOutputCode}.`
-              : 'Choose a shift and a PUR stock code to see the CAR stock code.'}
-            {inputKg && outputKg
-              ? ` Efficiency ${formatEfficiencyRatio(efficiencyPreview(inputKg, outputKg))}.`
+            {previewRoot
+              ? `These bales will be listed together as ${previewRoot}${
+                  previewOutputKg > 0 ? ` (${previewOutputKg.toLocaleString()} kg)` : ''
+                }.`
+              : 'Choose a shift and a PUR stock code to see the bale codes.'}
+            {previewBales.length > 0 ? ` Labels: ${previewBales.join(', ')}.` : ''}
+            {inputKg && previewOutputKg > 0
+              ? ` Efficiency ${formatEfficiencyRatio(efficiencyPreview(inputKg, previewOutputKg))}.`
               : ''}
           </p>
           <div className="record-edit-actions">
@@ -569,6 +620,13 @@ export default function CardingPage({
           </div>
         </form>
         {status ? <div className="placeholder">{status}</div> : null}
+        {printableBales.length > 0 ? (
+          <div className="record-edit-actions">
+            <button type="button" onClick={() => handlePrintBales(printableBales)}>
+              Print labels
+            </button>
+          </div>
+        ) : null}
       </CollapsibleSection>
 
       <CollapsibleSection
@@ -625,24 +683,38 @@ export default function CardingPage({
                       <tr key={line.id}>
                         <td>{line.sourceStockCode}</td>
                         <td>{line.inputKg}</td>
-                        <td>{line.outputStockCode}</td>
+                        <td>
+                          {line.outputStockCode}
+                          {line.bales?.length ? (
+                            <div className="inline-hint">
+                              {line.bales.map((bale) => bale.baleCode).join(', ')}
+                            </div>
+                          ) : null}
+                        </td>
                         <td>{line.outputKg}</td>
                         <td>{formatEfficiencyRatio(line.efficiency)}</td>
                         <td>
-                          {canManage ? (
-                            <div className="record-edit-actions">
-                              <button type="button" onClick={() => startEditingLine(shift, line)}>
-                                Edit
+                          <div className="record-edit-actions">
+                            {line.bales?.length ? (
+                              <button type="button" onClick={() => handlePrintBales(line.bales)}>
+                                Print labels
                               </button>
-                              <button
-                                type="button"
-                                className="secondary-button"
-                                onClick={() => handleDeleteLine(shift, line)}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          ) : null}
+                            ) : null}
+                            {canManage ? (
+                              <>
+                                <button type="button" onClick={() => startEditingLine(shift, line)}>
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  className="secondary-button"
+                                  onClick={() => handleDeleteLine(shift, line)}
+                                >
+                                  Delete
+                                </button>
+                              </>
+                            ) : null}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -706,6 +778,13 @@ export default function CardingPage({
         ) : null}
       </CollapsibleSection>
       {status && !showLineEntry ? <div className="placeholder">{status}</div> : null}
+      {printableBales.length > 0 && !showLineEntry ? (
+        <div className="record-edit-actions">
+          <button type="button" onClick={() => handlePrintBales(printableBales)}>
+            Print labels
+          </button>
+        </div>
+      ) : null}
     </section>
   )
 }
