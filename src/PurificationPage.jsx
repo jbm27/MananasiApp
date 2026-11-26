@@ -98,7 +98,12 @@ export default function PurificationPage({
   const [form, setForm] = useState({ ...EMPTY_FORM, date: dateTo })
   const [status, setStatus] = useState('')
   const [receiptStatus, setReceiptStatus] = useState('')
-  const [receiptForm, setReceiptForm] = useState({ date: dateTo, stockKey: '', quantityKg: '' })
+  const [receiptForm, setReceiptForm] = useState({
+    date: dateTo,
+    stockKey: '',
+    quantityKg: '',
+    baleCount: '',
+  })
   const [attendanceViewingEmployeeId, setAttendanceViewingEmployeeId] = useState('')
 
   const clockedInSupervisors = employees
@@ -170,9 +175,10 @@ export default function PurificationPage({
   const selectedReceipt = receivableOptions.find(
     (option) => `${option.stockForm}|${option.stockCode}` === receiptForm.stockKey,
   )
+  const receivingBales = selectedReceipt?.stockForm === 'Baled'
   const baleBreakPlan =
-    selectedReceipt?.stockForm === 'Baled' && Number(receiptForm.quantityKg) > 0
-      ? selectBalesToBreak(balingRecords, selectedReceipt.stockCode, receiptForm.quantityKg)
+    receivingBales && Number(receiptForm.baleCount) > 0
+      ? selectBalesToBreak(balingRecords, selectedReceipt.stockCode, receiptForm.baleCount)
       : null
   const filteredReceipts = (
     selectedBatchFilter === 'all'
@@ -231,12 +237,13 @@ export default function PurificationPage({
     const result = onSavePurificationReceipt?.({
       date: receiptForm.date,
       quantityKg: receiptForm.quantityKg,
+      baleCount: receiptForm.baleCount,
       sourceStockCode: selectedReceipt?.stockCode ?? '',
       stockForm: selectedReceipt?.stockForm ?? '',
     })
     setReceiptStatus(result?.message ?? 'Could not receive stock.')
     if (result?.ok) {
-      setReceiptForm((prev) => ({ ...prev, stockKey: '', quantityKg: '' }))
+      setReceiptForm((prev) => ({ ...prev, stockKey: '', quantityKg: '', baleCount: '' }))
     }
   }
 
@@ -419,7 +426,14 @@ export default function PurificationPage({
             Stock
             <select
               value={receiptForm.stockKey}
-              onChange={(event) => setReceiptForm((prev) => ({ ...prev, stockKey: event.target.value }))}
+              onChange={(event) =>
+                setReceiptForm((prev) => ({
+                  ...prev,
+                  stockKey: event.target.value,
+                  quantityKg: '',
+                  baleCount: '',
+                }))
+              }
               required
             >
               <option value="">Select UBR or BRS stock</option>
@@ -432,13 +446,19 @@ export default function PurificationPage({
             </select>
           </label>
           <label>
-            Kilograms received
+            {receivingBales ? 'Number of bales' : 'Kilograms received'}
             <input
               type="number"
-              min="0.1"
-              step="0.1"
-              value={receiptForm.quantityKg}
-              onChange={(event) => setReceiptForm((prev) => ({ ...prev, quantityKg: event.target.value }))}
+              min={receivingBales ? '1' : '0.1'}
+              step={receivingBales ? '1' : '0.1'}
+              value={receivingBales ? receiptForm.baleCount : receiptForm.quantityKg}
+              onChange={(event) =>
+                setReceiptForm((prev) =>
+                  receivingBales
+                    ? { ...prev, baleCount: event.target.value }
+                    : { ...prev, quantityKg: event.target.value },
+                )
+              }
               required
             />
           </label>
@@ -446,10 +466,13 @@ export default function PurificationPage({
             {selectedReceipt
               ? `This fibre will be stocked as ${ppurStockCode(selectedReceipt.batchNumber)}.`
               : 'Received fibre is stocked as PPUR for the batch, for example 2026-024-PPUR.'}
+            {receivingBales && !receiptForm.baleCount
+              ? ' Enter how many bales to break. The kilograms are calculated from those bales.'
+              : ''}
             {baleBreakPlan?.error
               ? ` ${baleBreakPlan.error}`
-              : baleBreakPlan?.baleIds?.length
-                ? ` Breaks ${baleBreakPlan.baleIds.length} bale${baleBreakPlan.baleIds.length === 1 ? '' : 's'}.`
+              : baleBreakPlan?.quantityKg
+                ? ` ${baleBreakPlan.baleCount} bale${baleBreakPlan.baleCount === 1 ? '' : 's'} = ${baleBreakPlan.quantityKg} kg.`
                 : ''}
           </p>
           <div className="record-edit-actions">
@@ -468,6 +491,7 @@ export default function PurificationPage({
                 <th>Date</th>
                 <th>From</th>
                 <th>Form</th>
+                <th>Bales</th>
                 <th>Kg</th>
                 <th>PPUR</th>
                 <th>Received by</th>
@@ -480,6 +504,7 @@ export default function PurificationPage({
                   <td>{formatDisplayDate(receipt.date)}</td>
                   <td>{receipt.sourceStockCode}</td>
                   <td>{receipt.sourceStockForm}</td>
+                  <td>{receipt.baleCount > 0 ? receipt.baleCount : '—'}</td>
                   <td>{receipt.quantityKg}</td>
                   <td>{receipt.outputStockCode}</td>
                   <td>{receipt.receivedByName || '—'}</td>
@@ -494,7 +519,7 @@ export default function PurificationPage({
               ))}
               {filteredReceipts.length === 0 ? (
                 <tr>
-                  <td colSpan="7">No stock has been received in this view.</td>
+                  <td colSpan="8">No stock has been received in this view.</td>
                 </tr>
               ) : null}
             </tbody>

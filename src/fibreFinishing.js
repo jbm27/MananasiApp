@@ -144,49 +144,35 @@ export function balesAvailableForSeries(balingRecords, seriesCode) {
     .sort((left, right) => baleSerialNumber(left.baleCode) - baleSerialNumber(right.baleCode))
 }
 
-/** Break whole bales only. The kilograms must match the weight of the next bales in the series. */
-export function selectBalesToBreak(balingRecords, seriesCode, quantityKg) {
+/** Break the next whole bales in the series. Kilograms are the sum of those bale weights. */
+export function selectBalesToBreak(balingRecords, seriesCode, baleCount) {
   const available = balesAvailableForSeries(balingRecords, seriesCode)
-  const target = roundKg(quantityKg)
-  if (!(target > 0)) {
-    return { error: 'Enter the kilograms received.', baleIds: [], quantityKg: 0 }
+  const count = Number(baleCount)
+  const series = canonicalizeFibreStockCode(seriesCode)
+  if (!Number.isInteger(count) || count < 1) {
+    return { error: 'Enter the number of bales received.', baleIds: [], quantityKg: 0, baleCount: 0 }
   }
   if (available.length === 0) {
-    return { error: 'No bales are available in that series.', baleIds: [], quantityKg: 0 }
+    return { error: `No bales are available in ${series}.`, baleIds: [], quantityKg: 0, baleCount: 0 }
   }
-  let sum = 0
-  const taken = []
-  for (const record of available) {
-    if (sum + 0.05 >= target) {
-      break
-    }
-    taken.push(record)
-    sum = roundKg(sum + (Number(record.baleWeightKg) || 0))
-  }
-  if (Math.abs(sum - target) <= 0.05) {
-    return { error: '', baleIds: taken.map((record) => record.id), quantityKg: sum }
-  }
-  if (sum + 0.05 < target) {
+  if (count > available.length) {
     return {
-      error: `Only ${sum} kg of bales is available in ${canonicalizeFibreStockCode(seriesCode)}.`,
+      error: `Only ${available.length} bale${available.length === 1 ? '' : 's'} available in ${series}.`,
       baleIds: [],
       quantityKg: 0,
+      baleCount: 0,
     }
   }
-  return {
-    error: `Bales are broken whole. ${taken.length} bale${taken.length === 1 ? '' : 's'} weigh ${sum} kg. Enter ${sum} kg, or a smaller whole-bale total.`,
-    baleIds: [],
-    quantityKg: 0,
-  }
+  const taken = available.slice(0, count)
+  const quantityKg = roundKg(
+    taken.reduce((sum, record) => sum + (Number(record.baleWeightKg) || 0), 0),
+  )
+  return { error: '', baleIds: taken.map((record) => record.id), quantityKg, baleCount: count }
 }
 
 export function normalizePurificationReceipt(input, stockOption) {
   if (!input?.date) {
     return { error: 'Choose the date the stock was received.' }
-  }
-  const quantityKg = Number(input?.quantityKg)
-  if (!Number.isFinite(quantityKg) || quantityKg <= 0) {
-    return { error: 'Enter the kilograms received.' }
   }
   if (!stockOption?.stockCode || (stockOption.stockForm !== 'Loose' && stockOption.stockForm !== 'Baled')) {
     return { error: 'Select unbrushed (UBR) or brushed (BRS) stock, loose or baled.' }
@@ -194,6 +180,16 @@ export function normalizePurificationReceipt(input, stockOption) {
   const grade = String(stockOption.productSuffix ?? '')
   if (grade !== 'UBR' && grade !== 'BRS') {
     return { error: 'Only unbrushed (UBR) or brushed (BRS) fibre can be received for purification.' }
+  }
+  const baled = stockOption.stockForm === 'Baled'
+  const baleCount = Number(input?.baleCount)
+  const quantityKg = Number(input?.quantityKg)
+  if (baled) {
+    if (!Number.isInteger(baleCount) || baleCount < 1) {
+      return { error: 'Enter the number of bales received.' }
+    }
+  } else if (!Number.isFinite(quantityKg) || quantityKg <= 0) {
+    return { error: 'Enter the kilograms received.' }
   }
   const batchNumber =
     normalizeBatchNumber(stockOption.batchNumber) || batchFromTraceableStockCode(stockOption.stockCode)
@@ -205,7 +201,8 @@ export function normalizePurificationReceipt(input, stockOption) {
       sourceStockForm: stockOption.stockForm,
       sourceGrade: grade,
       batchNumber,
-      quantityKg: roundKg(quantityKg),
+      baleCount: baled ? baleCount : 0,
+      quantityKg: baled ? 0 : roundKg(quantityKg),
       outputStockCode: ppurStockCode(batchNumber),
     },
   }

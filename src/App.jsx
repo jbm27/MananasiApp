@@ -12155,7 +12155,7 @@ function App() {
       const plan = selectBalesToBreak(
         balingRecords,
         normalized.value.sourceStockCode,
-        normalized.value.quantityKg,
+        normalized.value.baleCount,
       )
       if (plan.error) {
         return { ok: false, message: plan.error }
