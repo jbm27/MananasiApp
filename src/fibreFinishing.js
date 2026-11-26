@@ -1,5 +1,7 @@
 /** Purification runs and carding shifts, and the stock they move. */
 
+import { canonicalizeFibreStockCode } from './stockCodes.js'
+
 export const SHIFT_NUMBERS = [1, 2, 3]
 
 export function formatDisplayDate(isoDate) {
@@ -90,7 +92,7 @@ export function machineFromTraceableStockCode(stockCode) {
 }
 
 export function purificationOutputStockCode(sourceStockCode) {
-  const code = String(sourceStockCode ?? '').trim()
+  const code = canonicalizeFibreStockCode(sourceStockCode)
   if (!isUbrLooseStockCode(code)) {
     return ''
   }
@@ -103,7 +105,7 @@ export function cardedGrade(fibreLength) {
 }
 
 export function cardedOutputStockCode(sourceStockCode, fibreLength) {
-  const code = String(sourceStockCode ?? '').trim()
+  const code = canonicalizeFibreStockCode(sourceStockCode)
   const grade = cardedGrade(fibreLength)
   if (!isPurLooseStockCode(code) || !grade) {
     return ''
@@ -168,7 +170,7 @@ export function normalizePurificationProduction(input) {
   return {
     error: '',
     value: {
-      sourceStockCode: hasFibre ? sourceStockCode : '',
+      sourceStockCode: hasFibre ? canonicalizeFibreStockCode(sourceStockCode) : '',
       batchNumber: hasFibre ? batchFromTraceableStockCode(sourceStockCode) : '',
       machine: hasFibre ? machineFromTraceableStockCode(sourceStockCode) : '',
       inputKg: roundedInput,
@@ -224,7 +226,7 @@ export function normalizeCardingLine(input, fibreLength) {
   return {
     error: '',
     value: {
-      sourceStockCode,
+      sourceStockCode: canonicalizeFibreStockCode(sourceStockCode),
       batchNumber: batchFromTraceableStockCode(sourceStockCode),
       machine: machineFromTraceableStockCode(sourceStockCode),
       inputKg: roundedInput,
@@ -275,9 +277,10 @@ export function purificationStockDeltas(run, direction) {
   const inputKg = Number(run.inputKg) || 0
   const outputKg = Number(run.outputKg) || 0
   if (run.sourceStockCode && inputKg > 0) {
-    deltas.push({ code: run.sourceStockCode, delta: -sign * inputKg })
+    deltas.push({ code: canonicalizeFibreStockCode(run.sourceStockCode), delta: -sign * inputKg })
   }
-  const outputCode = run.outputStockCode || purificationOutputStockCode(run.sourceStockCode)
+  const outputCode =
+    canonicalizeFibreStockCode(run.outputStockCode) || purificationOutputStockCode(run.sourceStockCode)
   if (outputCode && outputKg > 0) {
     deltas.push({ code: outputCode, delta: sign * outputKg })
   }
@@ -293,9 +296,11 @@ export function cardingLineStockDeltas(line, fibreLength, direction) {
   const inputKg = Number(line.inputKg) || 0
   const outputKg = Number(line.outputKg) || 0
   if (line.sourceStockCode && inputKg > 0) {
-    deltas.push({ code: line.sourceStockCode, delta: -sign * inputKg })
+    deltas.push({ code: canonicalizeFibreStockCode(line.sourceStockCode), delta: -sign * inputKg })
   }
-  const outputCode = line.outputStockCode || cardedOutputStockCode(line.sourceStockCode, fibreLength)
+  const outputCode =
+    canonicalizeFibreStockCode(line.outputStockCode) ||
+    cardedOutputStockCode(line.sourceStockCode, fibreLength)
   if (outputCode && outputKg > 0) {
     deltas.push({ code: outputCode, delta: sign * outputKg })
   }
@@ -354,9 +359,10 @@ export function applyFinishingStock(stockMap, purificationRuns = [], cardingShif
     const inputKg = Number(run.inputKg) || 0
     const outputKg = Number(run.outputKg) || 0
     if (inputKg > 0 && run.sourceStockCode) {
-      touch(run.sourceStockCode, run.batchNumber, -inputKg)
+      touch(canonicalizeFibreStockCode(run.sourceStockCode), run.batchNumber, -inputKg)
     }
-    const outputCode = run.outputStockCode || purificationOutputStockCode(run.sourceStockCode)
+    const outputCode =
+      canonicalizeFibreStockCode(run.outputStockCode) || purificationOutputStockCode(run.sourceStockCode)
     if (outputKg > 0 && outputCode) {
       touch(outputCode, run.batchNumber, outputKg)
     }
@@ -367,10 +373,11 @@ export function applyFinishingStock(stockMap, purificationRuns = [], cardingShif
       const inputKg = Number(line.inputKg) || 0
       const outputKg = Number(line.outputKg) || 0
       if (inputKg > 0 && line.sourceStockCode) {
-        touch(line.sourceStockCode, line.batchNumber, -inputKg)
+        touch(canonicalizeFibreStockCode(line.sourceStockCode), line.batchNumber, -inputKg)
       }
       const outputCode =
-        line.outputStockCode || cardedOutputStockCode(line.sourceStockCode, shift.fibreLength)
+        canonicalizeFibreStockCode(line.outputStockCode) ||
+        cardedOutputStockCode(line.sourceStockCode, shift.fibreLength)
       if (outputKg > 0 && outputCode) {
         touch(outputCode, line.batchNumber, outputKg)
       }
@@ -386,7 +393,7 @@ export function appendFinishingMovements(movements, purificationRuns = [], cardi
       movements.push({
         id: `PRUN-OUT-${run.id}`,
         date: run.date,
-        stockCode: run.sourceStockCode,
+        stockCode: canonicalizeFibreStockCode(run.sourceStockCode),
         stockForm: 'Loose',
         direction: 'out',
         quantityKg: inputKg,
@@ -395,7 +402,8 @@ export function appendFinishingMovements(movements, purificationRuns = [], cardi
         reference: '',
       })
     }
-    const outputCode = run.outputStockCode || purificationOutputStockCode(run.sourceStockCode)
+    const outputCode =
+      canonicalizeFibreStockCode(run.outputStockCode) || purificationOutputStockCode(run.sourceStockCode)
     if (outputCode && outputKg > 0) {
       movements.push({
         id: `PRUN-IN-${run.id}`,
@@ -419,7 +427,7 @@ export function appendFinishingMovements(movements, purificationRuns = [], cardi
         movements.push({
           id: `CSH-OUT-${line.id}`,
           date: shift.date,
-          stockCode: line.sourceStockCode,
+          stockCode: canonicalizeFibreStockCode(line.sourceStockCode),
           stockForm: 'Loose',
           direction: 'out',
           quantityKg: inputKg,
@@ -429,7 +437,8 @@ export function appendFinishingMovements(movements, purificationRuns = [], cardi
         })
       }
       const outputCode =
-        line.outputStockCode || cardedOutputStockCode(line.sourceStockCode, shift.fibreLength)
+        canonicalizeFibreStockCode(line.outputStockCode) ||
+        cardedOutputStockCode(line.sourceStockCode, shift.fibreLength)
       if (outputCode && outputKg > 0) {
         movements.push({
           id: `CSH-IN-${line.id}`,

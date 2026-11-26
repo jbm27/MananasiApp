@@ -470,7 +470,7 @@ export default function PurificationPage({
               : ''}
             {previewOutputCode
               ? ` Purified fibre will be stocked as ${previewOutputCode}.`
-              : ' Purified fibre is stocked on the same traceability code with grade PUR.'}
+              : ' Purified fibre is stocked on the batch code with grade PUR, for example 2026-024-PUR.'}
             {form.inputKg && form.outputKg
               ? ` Efficiency ${formatEfficiencyRatio(
                   efficiencyPreview(form.inputKg, form.outputKg),

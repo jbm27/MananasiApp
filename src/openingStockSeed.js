@@ -1,24 +1,16 @@
 import { buildSilageBagCode } from './silageCodes.js'
+import { buildBaleCode, buildBaleSeriesCode, buildStockCode } from './stockCodes.js'
 
 /** Legacy on-hand stock with unknown field origin — assigned to this batch. */
 export const OPENING_STOCK_BATCH = '2026-000'
 
 const OPENING_STOCK_DATE = '2026-06-16'
 const MACHINE = 'D1'
-const TRACE_ROOT = `${OPENING_STOCK_BATCH}-01`
 
 const SOURCE_STOCK = {
-  ubr: `${TRACE_ROOT}-UBR`,
-  brs: `${TRACE_ROOT}-BRS`,
-  tow: `${TRACE_ROOT}-TOW`,
-}
-
-function buildBaleSeriesCode(sourceStockCode, baleWeightKg) {
-  return `${sourceStockCode}-${Math.round(baleWeightKg)}`
-}
-
-function buildBaleCode(sourceStockCode, baleWeightKg, serialNumber) {
-  return `${buildBaleSeriesCode(sourceStockCode, baleWeightKg)}-${String(serialNumber).padStart(2, '0')}`
+  ubr: buildStockCode(OPENING_STOCK_BATCH, 'UBR'),
+  brs: buildStockCode(OPENING_STOCK_BATCH, 'BRS'),
+  tow: buildStockCode(OPENING_STOCK_BATCH, 'TOW'),
 }
 
 function buildBalingRecords(sourceStockCode, baleWeightKg, count, gradeCode) {

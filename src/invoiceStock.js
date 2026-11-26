@@ -1,5 +1,6 @@
 import { applyFinishingStock, appendFinishingMovements } from './fibreFinishing.js'
 import { getSilageBagSeriesCode, getSilageRecordSerial } from './silageCodes.js'
+import { brushingOutputCodes, buildStockCode, canonicalizeFibreStockCode } from './stockCodes.js'
 
 function normalizeBatchNumber(batchNumber) {
   const [yearPart, fieldPart] = String(batchNumber ?? '').split('-')
@@ -131,8 +132,7 @@ export function computeAbsoluteStockCatalog({
 
   dryingRecords.forEach((record) => {
     const batch = normalizeBatchNumber(record.batchNumber)
-    const machinePart = String(record.machine ?? '').replace(/[^\d]/g, '')
-    const code = `${batch}-${String(machinePart).padStart(2, '0')}-UBR`
+    const code = buildStockCode(record.batchNumber, 'UBR')
     if (!stockMap[code]) {
       stockMap[code] = {
         stockCode: code,
@@ -144,7 +144,7 @@ export function computeAbsoluteStockCatalog({
   })
 
   brushingStockMovements.forEach((item) => {
-    const code = item.sourceStockCode
+    const code = canonicalizeFibreStockCode(item.sourceStockCode)
     if (!stockMap[code]) {
       stockMap[code] = {
         stockCode: code,
@@ -156,9 +156,7 @@ export function computeAbsoluteStockCatalog({
   })
 
   brushingDailyRecords.forEach((item) => {
-    const traceabilityRoot = String(item.sourceStockCode ?? '').replace(/-UBR$/, '')
-    const brsCode = `${traceabilityRoot}-BRS`
-    const towCode = `${traceabilityRoot}-TOW`
+    const { brs: brsCode, tow: towCode } = brushingOutputCodes(item.sourceStockCode)
     const batch = normalizeBatchNumber(item.batchNumber)
     if (!stockMap[brsCode]) {
       stockMap[brsCode] = { stockCode: brsCode, batchNumber: batch, totalKg: 0 }
@@ -171,7 +169,7 @@ export function computeAbsoluteStockCatalog({
   })
 
   balingRecords.forEach((item) => {
-    const sourceCode = item.sourceStockCode
+    const sourceCode = canonicalizeFibreStockCode(item.sourceStockCode)
     if (!stockMap[sourceCode]) {
       stockMap[sourceCode] = {
         stockCode: sourceCode,
@@ -185,7 +183,7 @@ export function computeAbsoluteStockCatalog({
   applyFinishingStock(stockMap, purificationRuns, cardingShifts)
 
   invoiceStockIssues.forEach((issue) => {
-    const code = issue.stockCode
+    const code = canonicalizeFibreStockCode(issue.stockCode)
     if (!stockMap[code]) {
       stockMap[code] = {
         stockCode: code,
@@ -208,17 +206,18 @@ export function computeAbsoluteStockCatalog({
 
   const baledStockRows = Object.values(
     balingRecords.reduce((map, item) => {
-      if (!map[item.baleSeriesCode]) {
-        map[item.baleSeriesCode] = {
-          stockCode: item.baleSeriesCode,
+      const seriesCode = canonicalizeFibreStockCode(item.baleSeriesCode)
+      if (!map[seriesCode]) {
+        map[seriesCode] = {
+          stockCode: seriesCode,
           batchNumber: normalizeBatchNumber(item.batchNumber),
           totalKg: 0,
           stockForm: 'Baled',
           quantityLabel: 0,
         }
       }
-      map[item.baleSeriesCode].totalKg += item.baleWeightKg
-      map[item.baleSeriesCode].quantityLabel += 1
+      map[seriesCode].totalKg += item.baleWeightKg
+      map[seriesCode].quantityLabel += 1
       return map
     }, {}),
   ).map((item) => ({
@@ -380,7 +379,11 @@ export function validateInvoiceStockLines(items, catalog) {
 
 function consumeBaledStock(balingRecords, baleSeriesCode, quantityKg) {
   const matching = balingRecords
-    .filter((record) => record.baleSeriesCode === baleSeriesCode)
+    .filter(
+      (record) =>
+        canonicalizeFibreStockCode(record.baleSeriesCode) ===
+        canonicalizeFibreStockCode(baleSeriesCode),
+    )
     .sort((a, b) => getBaleSerialFromCode(a.baleCode) - getBaleSerialFromCode(b.baleCode))
   let remaining = quantityKg
   const idsToRemove = new Set()
@@ -610,9 +613,7 @@ export function buildStockMovements({
   }
 
   dryingRecords.forEach((record) => {
-    const stockCode = `${normalizeBatchNumber(record.batchNumber)}-${String(record.machine ?? '')
-      .replace(/[^\d]/g, '')
-      .padStart(2, '0')}-UBR`
+    const stockCode = buildStockCode(record.batchNumber, 'UBR')
     movements.push({
       id: `DRY-IN-${record.id}`,
       date: record.weighedDate,
@@ -631,7 +632,7 @@ export function buildStockMovements({
     movements.push({
       id: `BRM-${item.id}`,
       date: item.date,
-      stockCode: item.sourceStockCode,
+      stockCode: canonicalizeFibreStockCode(item.sourceStockCode),
       stockForm: 'Loose',
       direction: isIssue ? 'out' : 'in',
       quantityKg: Number(item.quantityKg ?? 0),
@@ -642,12 +643,12 @@ export function buildStockMovements({
   })
 
   brushingDailyRecords.forEach((item) => {
-    const traceabilityRoot = String(item.sourceStockCode ?? '').replace(/-UBR$/, '')
+    const { brs: brsStockCode, tow: towStockCode } = brushingOutputCodes(item.sourceStockCode)
     if (Number(item.brsKg) > 0) {
       movements.push({
         id: `BRD-BRS-${item.id}`,
         date: item.date,
-        stockCode: `${traceabilityRoot}-BRS`,
+        stockCode: brsStockCode,
         stockForm: 'Loose',
         direction: 'in',
         quantityKg: Number(item.brsKg ?? 0),
@@ -660,7 +661,7 @@ export function buildStockMovements({
       movements.push({
         id: `BRD-TOW-${item.id}`,
         date: item.date,
-        stockCode: `${traceabilityRoot}-TOW`,
+        stockCode: towStockCode,
         stockForm: 'Loose',
         direction: 'in',
         quantityKg: Number(item.towKg ?? 0),
@@ -674,12 +675,14 @@ export function buildStockMovements({
   appendFinishingMovements(movements, purificationRuns, cardingShifts)
 
   const balingSeriesByGroup = balingRecords.reduce((map, item) => {
-    const key = `${item.date}|${item.sourceStockCode}|${item.baleSeriesCode}`
+    const sourceStockCode = canonicalizeFibreStockCode(item.sourceStockCode)
+    const baleSeriesCode = canonicalizeFibreStockCode(item.baleSeriesCode)
+    const key = `${item.date}|${sourceStockCode}|${baleSeriesCode}`
     if (!map[key]) {
       map[key] = {
         date: item.date,
-        sourceStockCode: item.sourceStockCode,
-        baleSeriesCode: item.baleSeriesCode,
+        sourceStockCode,
+        baleSeriesCode,
         totalKg: 0,
         count: 0,
       }
@@ -747,7 +750,7 @@ export function buildStockMovements({
     movements.push({
       id: `INV-LOOSE-${issue.id}`,
       date: issue.date,
-      stockCode: issue.stockCode,
+      stockCode: canonicalizeFibreStockCode(issue.stockCode),
       stockForm: 'Loose',
       direction: 'out',
       quantityKg: Number(issue.quantityKg ?? 0),
@@ -776,7 +779,7 @@ export function buildStockMovements({
       : document.invoiceDate
 
     const baledSalesBySeries = (snapshot.balingRecords ?? []).reduce((map, record) => {
-      const key = record.baleSeriesCode
+      const key = canonicalizeFibreStockCode(record.baleSeriesCode)
       if (!map[key]) {
         map[key] = { stockCode: key, totalKg: 0, count: 0 }
       }

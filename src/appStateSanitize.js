@@ -1,4 +1,5 @@
 import { migrateSilageRecord } from './silageCodes.js'
+import { migrateFibreStockCodes } from './stockCodes.js'
 
 const DEMO_CUSTOMER_ID = 'CUST-SEED-001'
 const DEMO_INVOICE_ID = 'INV-SEED-1087'
@@ -140,7 +141,7 @@ export function sanitizePersistedAppState(data, { forPersist = false } = {}) {
         ? data.lpoApprovalLimits
         : data.poApprovalLimits
 
-  return {
+  return migrateFibreStockCodes({
     ...data,
     records,
     haulageTrips,
@@ -157,5 +158,5 @@ export function sanitizePersistedAppState(data, { forPersist = false } = {}) {
     silageRecords,
     invoiceDocuments,
     customers,
-  }
+  })
 }

@@ -96,6 +96,14 @@ import {
 import { buildEmployeeIdMap } from './employeeWorkNumberAssignments.js'
 import { sanitizePersistedAppState } from './appStateSanitize.js'
 import {
+  brushingOutputCodes,
+  buildBaleCode,
+  buildBaleSeriesCode,
+  buildStockCode,
+  canonicalizeFibreStockCode,
+  getMachineFromStockCode,
+} from './stockCodes.js'
+import {
   applyInvoiceFinalizeStockReduction,
   restoreInvoiceFinalizeStock,
   buildStockMovements,
@@ -831,39 +839,6 @@ function normalizeBatchNumber(batchNumber) {
   return buildBatchNumber(year, field)
 }
 
-function buildTraceabilityCode(batchNumber, machineCode) {
-  const normalizedBatch = normalizeBatchNumber(batchNumber)
-  const machineNumber = Number(String(machineCode ?? '').replace(/[^\d]/g, ''))
-  if (Number.isNaN(machineNumber) || machineNumber <= 0) {
-    return `${normalizedBatch}-00`
-  }
-  return `${normalizedBatch}-${String(machineNumber).padStart(2, '0')}`
-}
-
-function buildStockCode(batchNumber, machineCode, grade = 'UBR') {
-  return `${buildTraceabilityCode(batchNumber, machineCode)}-${grade}`
-}
-
-function getMachineFromStockCode(stockCode) {
-  const parts = String(stockCode ?? '').split('-')
-  if (parts.length < 4) {
-    return 'N/A'
-  }
-  const machinePart = parts[2]
-  const machineNumber = Number(machinePart)
-  if (Number.isNaN(machineNumber) || machineNumber <= 0) {
-    return 'N/A'
-  }
-  return `D${machineNumber}`
-}
-
-function buildBaleSeriesCode(sourceStockCode, baleWeightKg) {
-  return `${sourceStockCode}-${Math.round(baleWeightKg)}`
-}
-
-function buildBaleCode(sourceStockCode, baleWeightKg, serialNumber) {
-  return `${buildBaleSeriesCode(sourceStockCode, baleWeightKg)}-${String(serialNumber).padStart(2, '0')}`
-}
 
 function getInvoiceDescriptionFromProductCode(productCode) {
   const code = String(productCode ?? '').trim().toUpperCase()
@@ -6106,7 +6081,7 @@ function DecorticationPage({
                 <th>Machine</th>
                 <th>Shift</th>
                 <th>Batch</th>
-                <th>Traceability Code</th>
+                <th>Stock Code</th>
                 <th>Supervisor</th>
                 <th>Operators</th>
                 <th>Leaves (kg)</th>
@@ -6125,7 +6100,7 @@ function DecorticationPage({
                     <td>{record.machine}</td>
                     <td>{record.shiftNumber}</td>
                     <td>{normalizeBatchNumber(record.batchNumber)}</td>
-                    <td>{buildTraceabilityCode(record.batchNumber, record.machine)}</td>
+                    <td>{buildStockCode(record.batchNumber, 'UBR')}</td>
                     <td>{record.supervisorName}</td>
                     <td>{record.operatorIds.length}</td>
                     <td>{record.leafInputKg > 0 ? record.leafInputKg : 'Pending'}</td>
@@ -6859,7 +6834,7 @@ function DryingPage({
               {availableShiftOptions.map((record) => (
                 <option key={record.id} value={record.id}>
                   {formatDisplayDate(record.date)} | {record.machine} | Shift {record.shiftNumber} | Batch{' '}
-                  {normalizeBatchNumber(record.batchNumber)} | {buildTraceabilityCode(record.batchNumber, record.machine)}
+                  {normalizeBatchNumber(record.batchNumber)} | {buildStockCode(record.batchNumber, 'UBR')}
                 </option>
               ))}
             </select>
@@ -6956,7 +6931,7 @@ function DryingPage({
                 <th>Machine</th>
                 <th>Shift</th>
                 <th>Batch</th>
-                <th>Traceability Code</th>
+                <th>Stock Code</th>
                 <th>Bundles</th>
                 <th>Dried Fibre (kg)</th>
                 <th>Drying Time (days)</th>
@@ -6971,7 +6946,7 @@ function DryingPage({
                   <td>{record.machine}</td>
                   <td>{record.shiftNumber}</td>
                   <td>{normalizeBatchNumber(record.batchNumber)}</td>
-                  <td>{buildTraceabilityCode(record.batchNumber, record.machine)}</td>
+                  <td>{buildStockCode(record.batchNumber, 'UBR')}</td>
                   <td>{record.bundleWeights.length}</td>
                   <td>{record.totalDriedKg}</td>
                   <td>{record.dryingTimeDays}</td>
@@ -7123,7 +7098,7 @@ function DryingPage({
                                 <th>Machine</th>
                                 <th>Shift</th>
                                 <th>Batch</th>
-                                <th>Traceability Code</th>
+                                <th>Stock Code</th>
                                 <th>Dried Fibre (kg)</th>
                                 <th>Drying Time (days)</th>
                               </tr>
@@ -7138,7 +7113,7 @@ function DryingPage({
                                     <td>{record.machine}</td>
                                     <td>{record.shiftNumber}</td>
                                     <td>{normalizeBatchNumber(record.batchNumber)}</td>
-                                    <td>{buildTraceabilityCode(record.batchNumber, record.machine)}</td>
+                                    <td>{buildStockCode(record.batchNumber, 'UBR')}</td>
                                     <td>{record.totalDriedKg}</td>
                                     <td>{record.dryingTimeDays}</td>
                                   </tr>
@@ -8014,7 +7989,7 @@ function BalingPage({
     const sourceBatchNumber = sourceStockCode.split('-').slice(0, 2).join('-')
     const seriesCode = buildBaleSeriesCode(sourceStockCode, weight)
     const existingSerials = balingRecords
-      .filter((record) => record.baleSeriesCode === seriesCode)
+      .filter((record) => canonicalizeFibreStockCode(record.baleSeriesCode) === seriesCode)
       .map((record) => Number(record.baleCode.split('-').slice(-1)[0]))
       .filter((value) => !Number.isNaN(value))
     let nextSerial = existingSerials.length > 0 ? Math.max(...existingSerials) + 1 : 1
@@ -9028,7 +9003,7 @@ function StockPage({
     stockMap[code].movements += 1
   })
   filteredBrushingMovements.forEach((item) => {
-    const code = item.sourceStockCode
+    const code = canonicalizeFibreStockCode(item.sourceStockCode)
     if (!stockMap[code]) {
       stockMap[code] = { stockCode: code, batchNumber: normalizeBatchNumber(item.batchNumber), totalKg: 0, movements: 0 }
     }
@@ -9036,9 +9011,7 @@ function StockPage({
     stockMap[code].movements += 1
   })
   filteredBrushingDailyRecords.forEach((item) => {
-    const traceabilityRoot = String(item.sourceStockCode ?? '').replace(/-UBR$/, '')
-    const brsCode = `${traceabilityRoot}-BRS`
-    const towCode = `${traceabilityRoot}-TOW`
+    const { brs: brsCode, tow: towCode } = brushingOutputCodes(item.sourceStockCode)
     if (!stockMap[brsCode]) {
       stockMap[brsCode] = { stockCode: brsCode, batchNumber: normalizeBatchNumber(item.batchNumber), totalKg: 0, movements: 0 }
     }
@@ -9051,7 +9024,7 @@ function StockPage({
     stockMap[towCode].movements += 1
   })
   filteredBalingRecords.forEach((item) => {
-    const sourceCode = item.sourceStockCode
+    const sourceCode = canonicalizeFibreStockCode(item.sourceStockCode)
     if (!stockMap[sourceCode]) {
       stockMap[sourceCode] = {
         stockCode: sourceCode,
@@ -9070,7 +9043,7 @@ function StockPage({
     { countMovements: true },
   )
   invoiceStockIssues.forEach((issue) => {
-    const code = issue.stockCode
+    const code = canonicalizeFibreStockCode(issue.stockCode)
     if (!stockMap[code]) {
       stockMap[code] = {
         stockCode: code,
@@ -9094,17 +9067,18 @@ function StockPage({
 
   const baledStockRows = Object.values(
     filteredBalingRecords.reduce((map, item) => {
-      if (!map[item.baleSeriesCode]) {
-        map[item.baleSeriesCode] = {
-          stockCode: item.baleSeriesCode,
+      const seriesCode = canonicalizeFibreStockCode(item.baleSeriesCode)
+      if (!map[seriesCode]) {
+        map[seriesCode] = {
+          stockCode: seriesCode,
           batchNumber: normalizeBatchNumber(item.batchNumber),
           totalKg: 0,
           stockForm: 'Baled',
           quantityLabel: 0,
         }
       }
-      map[item.baleSeriesCode].totalKg += item.baleWeightKg
-      map[item.baleSeriesCode].quantityLabel += 1
+      map[seriesCode].totalKg += item.baleWeightKg
+      map[seriesCode].quantityLabel += 1
       return map
     }, {}),
   ).map((item) => ({
@@ -9204,7 +9178,11 @@ function StockPage({
     }
 
     const records = filteredBalingRecords
-      .filter((record) => record.baleSeriesCode === baleSeriesCode)
+      .filter(
+        (record) =>
+          canonicalizeFibreStockCode(record.baleSeriesCode) ===
+          canonicalizeFibreStockCode(baleSeriesCode),
+      )
       .filter((record) => {
         const serial = getBaleSerialFromCode(record.baleCode)
         return serial >= start && serial <= end
@@ -9312,7 +9290,11 @@ function StockPage({
               return serial >= start && serial <= end
             })
         : filteredBalingRecords
-            .filter((record) => record.baleSeriesCode === row.stockCode)
+            .filter(
+              (record) =>
+                canonicalizeFibreStockCode(record.baleSeriesCode) ===
+                canonicalizeFibreStockCode(row.stockCode),
+            )
             .filter((record) => {
               const serial = getBaleSerialFromCode(record.baleCode)
               return serial >= start && serial <= end
@@ -9363,12 +9345,12 @@ function StockPage({
         Totals follow the batch filter. Absolute stock is the all-time quantity still on hand.
       </p>
       <p>
-        Loose stock codes (for example 2026-000-01-BRS) show fibre not yet baled. Baled series codes
-        (for example 2026-000-01-BRS-100) show completed bales. Silage series codes (for example
-        (for example 2026-000-SLG35-050) show bagged silage stock. Individual bag labels append a
-        four-digit serial (for example 2026-000-SLG35-050-0001). Purified fibre keeps the same
-        traceability code with grade PUR (for example 2026-000-01-PUR). Carded fibre uses CAR plus
-        the fibre length (for example 2026-000-01-CAR80).
+        Loose stock codes (for example 2026-024-BRS) show fibre not yet baled. Fibre from every
+        decorticator in a batch is kept together. Baled series codes (for example 2026-024-BRS-100)
+        show completed bales of that weight. Silage series codes (for example 2026-000-SLG35-050)
+        show bagged silage stock. Individual bag labels append a four-digit serial (for example
+        2026-000-SLG35-050-0001). Purified fibre uses grade PUR (for example 2026-024-PUR). Carded
+        fibre uses CAR plus the fibre length (for example 2026-024-CAR80).
       </p>
 
       <div className="form-grid">
@@ -10973,7 +10955,7 @@ function App() {
       stockMap[code].totalKg += record.totalDriedKg
     })
     brushingStockMovements.forEach((item) => {
-      const code = item.sourceStockCode
+      const code = canonicalizeFibreStockCode(item.sourceStockCode)
       if (!stockMap[code]) {
         stockMap[code] = {
           stockCode: code,
@@ -10984,9 +10966,7 @@ function App() {
       stockMap[code].totalKg += item.type === 'issue' ? -item.quantityKg : item.quantityKg
     })
     brushingDailyRecords.forEach((item) => {
-      const traceabilityRoot = String(item.sourceStockCode ?? '').replace(/-UBR$/, '')
-      const brsCode = `${traceabilityRoot}-BRS`
-      const towCode = `${traceabilityRoot}-TOW`
+      const { brs: brsCode, tow: towCode } = brushingOutputCodes(item.sourceStockCode)
       if (!stockMap[brsCode]) {
         stockMap[brsCode] = {
           stockCode: brsCode,
@@ -11005,7 +10985,7 @@ function App() {
       stockMap[towCode].totalKg += item.towKg
     })
     balingRecords.forEach((item) => {
-      const code = item.sourceStockCode
+      const code = canonicalizeFibreStockCode(item.sourceStockCode)
       if (!stockMap[code]) {
         stockMap[code] = {
           stockCode: code,
@@ -11017,7 +10997,7 @@ function App() {
     })
     applyFinishingStock(stockMap, purificationRuns, cardingShifts)
     invoiceStockIssues.forEach((issue) => {
-      const code = issue.stockCode
+      const code = canonicalizeFibreStockCode(issue.stockCode)
       if (!stockMap[code]) {
         stockMap[code] = {
           stockCode: code,
@@ -11852,8 +11832,12 @@ function App() {
     if (linkedDryingRecord && identityChanged) {
       const sourceStockCode = buildStockCode(record.batchNumber, record.machine, 'UBR')
       const hasBrushingActivity =
-        brushingStockMovements.some((item) => item.sourceStockCode === sourceStockCode) ||
-        brushingDailyRecords.some((item) => item.sourceStockCode === sourceStockCode)
+        brushingStockMovements.some(
+          (item) => canonicalizeFibreStockCode(item.sourceStockCode) === sourceStockCode,
+        ) ||
+        brushingDailyRecords.some(
+          (item) => canonicalizeFibreStockCode(item.sourceStockCode) === sourceStockCode,
+        )
       if (hasBrushingActivity) {
         return {
           ok: false,
@@ -11938,13 +11922,17 @@ function App() {
     }
     const sourceStockCode = buildStockCode(record.batchNumber, record.machine, 'UBR')
     const hasBrushingActivity =
-      brushingStockMovements.some((item) => item.sourceStockCode === sourceStockCode) ||
-      brushingDailyRecords.some((item) => item.sourceStockCode === sourceStockCode)
+      brushingStockMovements.some(
+        (item) => canonicalizeFibreStockCode(item.sourceStockCode) === sourceStockCode,
+      ) ||
+      brushingDailyRecords.some(
+        (item) => canonicalizeFibreStockCode(item.sourceStockCode) === sourceStockCode,
+      )
     if (hasBrushingActivity) {
       return {
         ok: false,
         message:
-          'This drying record cannot be edited because brushing stock has already been recorded for this batch and machine.',
+            'This drying record cannot be edited because unbrushed fibre from this batch has already been used in brushing.',
       }
     }
     const decorticationDate = input.decorticationDate ?? record.decorticationDate
@@ -11979,13 +11967,17 @@ function App() {
     }
     const sourceStockCode = buildStockCode(record.batchNumber, record.machine, 'UBR')
     const hasBrushingActivity =
-      brushingStockMovements.some((item) => item.sourceStockCode === sourceStockCode) ||
-      brushingDailyRecords.some((item) => item.sourceStockCode === sourceStockCode)
+      brushingStockMovements.some(
+        (item) => canonicalizeFibreStockCode(item.sourceStockCode) === sourceStockCode,
+      ) ||
+      brushingDailyRecords.some(
+        (item) => canonicalizeFibreStockCode(item.sourceStockCode) === sourceStockCode,
+      )
     if (hasBrushingActivity) {
       return {
         ok: false,
         message:
-          'This drying record cannot be cancelled because brushing stock has already been recorded for this batch and machine.',
+          'This drying record cannot be cancelled because unbrushed fibre from this batch has already been used in brushing.',
       }
     }
     setDryingRecords((prev) => prev.filter((item) => item.id !== recordId))
@@ -12299,7 +12291,11 @@ function App() {
     }
     const idsToDelete = new Set(
       balingRecords
-        .filter((record) => record.baleSeriesCode === baleSeriesCode)
+        .filter(
+        (record) =>
+          canonicalizeFibreStockCode(record.baleSeriesCode) ===
+          canonicalizeFibreStockCode(baleSeriesCode),
+      )
         .filter((record) => {
           const serial = getBaleSerialFromCode(record.baleCode)
           return serial >= startSerial && serial <= endSerial
@@ -12745,8 +12741,12 @@ function App() {
     }
     const sourceStockCode = buildStockCode(record.batchNumber, record.machine, 'UBR')
     const hasBrushingActivity =
-      brushingStockMovements.some((item) => item.sourceStockCode === sourceStockCode) ||
-      brushingDailyRecords.some((item) => item.sourceStockCode === sourceStockCode)
+      brushingStockMovements.some(
+        (item) => canonicalizeFibreStockCode(item.sourceStockCode) === sourceStockCode,
+      ) ||
+      brushingDailyRecords.some(
+        (item) => canonicalizeFibreStockCode(item.sourceStockCode) === sourceStockCode,
+      )
     if (hasBrushingActivity) {
       return {
         ok: false,
